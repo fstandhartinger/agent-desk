@@ -1,0 +1,590 @@
+[
+ {
+  "setupComplete": {}
+ },
+ {
+  "sessionResumptionUpdate": {
+   "newHandle": "5643b7ec-0188-4326-9671-f739c6079285",
+   "resumable": true
+  }
+ },
+ {
+  "voiceActivity": {
+   "type": "ACTIVITY_START",
+   "audioOffset": "0.200s"
+  }
+ },
+ {
+  "serverContent": {
+   "inputTranscription": {
+    "text": "Hallo, kannst du mir kurz erklären, was ein Explainer-Video ist?"
+   }
+  }
+ },
+ {
+  "voiceActivity": {
+   "type": "ACTIVITY_END",
+   "audioOffset": "5.080s"
+  }
+ },
+ {},
+ {},
+ {},
+ {
+  "serverContent": {}
+ },
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "AAA="
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": "Ein ExplainerVideo ist "
+   }
+  }
+ },
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 8320>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 17920>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 28160>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": "ein kurzes Video,"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 15360>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 35840>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " das ein komplexes"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 7680>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Produkt oder eine"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Dienstleistung einfach"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 17920>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 33280>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " und verständlich erklärt."
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 25600>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 5120>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Meistens"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 43520>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " wird dabei mit anschaulichen"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Animationen gearbeitet."
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 25600>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 28160>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 17920>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {
+  "serverContent": {
+   "generationComplete": true
+  }
+ },
+ {
+  "serverContent": {
+   "turnComplete": true,
+   "interactionStatus": "IDLE"
+  },
+  "usageMetadata": {
+   "promptTokenCount": 3439,
+   "responseTokenCount": 261,
+   "totalTokenCount": 3700,
+   "promptTokensDetails": [
+    {
+     "modality": "TEXT",
+     "tokenCount": 3000
+    },
+    {
+     "modality": "AUDIO",
+     "tokenCount": 326
+    }
+   ],
+   "responseTokensDetails": [
+    {
+     "modality": "AUDIO",
+     "tokenCount": 261
+    }
+   ],
+   "thoughtsTokenCount": 94
+  }
+ }
+]

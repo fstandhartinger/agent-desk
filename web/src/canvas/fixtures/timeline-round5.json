@@ -1,0 +1,13 @@
+{
+  "v": 2, "id": "round5-timeline", "kind": "timeline",
+  "title": "Heute am Agent Desk",
+  "highlight": "Guard aktiv",
+  "events": [
+    { "date": "2026-10-24 09:20", "label": "Guard aktiv", "detail": "notify blockt Videos ohne Seitenlink", "tone": "moss" },
+    { "date": "2026-10-24 10:05", "label": "Beispielvideo abgenommen", "detail": "67 s, Schnitt-QA bestanden", "tone": "violet" },
+    { "date": "2026-10-24 12:05", "label": "Video zugestellt", "detail": "mit Seiten- und Login-Link", "tone": "moss" },
+    { "date": "2026-10-24 13:40", "label": "Gemini weigert sich zu zeichnen", "detail": "Auslöser für Runde 5", "tone": "red" },
+    { "date": "2026-10-24 14:12", "label": "Runde 5 gestartet", "detail": "generative Canvas", "tone": "amber" }
+  ],
+  "sources": [{ "label": "STATE.md", "ref": "/home/flori/jobs/explainer-live-agent-page-20261024/STATE.md" }]
+}

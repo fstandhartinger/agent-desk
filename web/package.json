@@ -1,0 +1,30 @@
+{
+  "name": "agent-desk-web",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/check-build.mjs",
+    "preview": "vite preview",
+    "test": "node --experimental-transform-types --no-warnings --import ./test/setup.mjs --test test/*.test.ts",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "elkjs": "^0.12.0",
+    "lucide-react": "^0.576.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}

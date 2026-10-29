@@ -1,0 +1,25 @@
+{
+  "v": 2, "id": "video-send-block", "kind": "flow", "direction": "LR",
+  "title": "Wie der Video-Versand blockiert wird",
+  "caption": "notify lässt ein Erklärvideo nur mit Seitenlink durch – sonst Exit 75 und nichts geht raus.",
+  "highlight": "guard",
+  "nodes": [
+    { "id": "agent", "label": "Agent", "detail": "baut Erklärvideo", "tone": "violet", "shape": "person" },
+    { "id": "notify", "label": "notify --video", "detail": "x.mp4 + Caption", "shape": "pill" },
+    { "id": "guard", "label": "Link-Prüfung", "detail": "Caption enthält /p/<slug>?", "tone": "papaya", "shape": "diamond" },
+    { "id": "blocked", "label": "Exit 75", "detail": "NOT SENT: Seitenlink fehlt", "tone": "red", "shape": "box" },
+    { "id": "telegram", "label": "Telegram", "detail": "Video + Seitenlink", "tone": "moss", "shape": "box" },
+    { "id": "page", "label": "Erklärseite", "detail": "explainers.app.mintapis.com", "tone": "moss", "shape": "cylinder" }
+  ],
+  "edges": [
+    { "from": "agent", "to": "notify", "label": "sendet" },
+    { "from": "notify", "to": "guard", "style": "pulse" },
+    { "from": "guard", "to": "blocked", "label": "kein Link" },
+    { "from": "guard", "to": "telegram", "label": "Link da" },
+    { "from": "telegram", "to": "page", "label": "Florian öffnet", "style": "dashed" }
+  ],
+  "sources": [
+    { "label": "STATE.md", "ref": "/home/flori/jobs/explainer-live-agent-page-20261024/STATE.md" },
+    { "label": "notify", "ref": "/home/flori/bin/notify" }
+  ]
+}

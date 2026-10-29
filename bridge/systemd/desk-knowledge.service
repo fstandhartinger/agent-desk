@@ -1,0 +1,9 @@
+[Unit]
+Description=Agent Desk knowledge index refresh (writes only ~/desk-knowledge)
+
+[Service]
+Type=oneshot
+ExecStart=%h/desk-knowledge/.generator/refresh.sh
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
+TimeoutStartSec=10min

@@ -1,0 +1,11 @@
+[
+ {
+  "type": "error",
+  "event_id": "event_84afdf87-2ddc-4ee2-be6f-5f3bb236839c",
+  "error": {
+   "type": "invalid_request_error",
+   "code": "credit_balance_exhausted",
+   "message": "You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+  }
+ }
+]

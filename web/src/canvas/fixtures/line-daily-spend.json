@@ -1,0 +1,13 @@
+{
+  "v": 2, "id": "daily-spend", "kind": "line", "unit": "USD",
+  "title": "Tägliche Ausgaben im Oktober",
+  "caption": "Spitze am 14. Oktober durch den GPU-Lauf.",
+  "series": [
+    { "name": "Ausgaben", "tone": "moss", "points": [
+      { "x": "2026-10-01", "y": 12.5 }, { "x": "2026-10-03", "y": 9.2 }, { "x": "2026-10-05", "y": 14.8 }, { "x": "2026-10-07", "y": 11.1 },
+      { "x": "2026-10-09", "y": 18.4 }, { "x": "2026-10-11", "y": 16.0 }, { "x": "2026-10-14", "y": 41.7 }, { "x": "2026-10-16", "y": 22.3 },
+      { "x": "2026-10-18", "y": 15.9 }, { "x": "2026-10-20", "y": 13.4 }, { "x": "2026-10-22", "y": 19.6 }, { "x": "2026-10-24", "y": 17.2 }
+    ] }
+  ],
+  "sources": [{ "label": "ledger_spend groupBy=day", "ref": "board #22" }]
+}

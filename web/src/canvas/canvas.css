@@ -1,0 +1,125 @@
+/* Generative canvas: explainer visual language (dark stage, restrained accents, eased motion). Only transform,
+   opacity and stroke-dashoffset animate. */
+/* Container queries: the canvas lays out by its own width (side column, phone tab, demo). */
+.cv-root { container-type: inline-size; }
+.cv-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "icon text actions"; align-items: start; column-gap: 12px; row-gap: 8px; padding: 16px 20px 4px; }
+.cv-head > .cv-kind { grid-area: icon; }
+.cv-text { grid-area: text; }
+.cv-actions { grid-area: actions; display: flex; align-items: center; gap: 6px; }
+.cv-root { --cv-ease: cubic-bezier(0.22, 1, 0.36, 1); font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+.cv-svg { display: block; overflow: visible; }
+.cv-svg text { text-rendering: geometricPrecision; font-kerning: normal; }
+
+.cv-title { font-size: 21px; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; color: #ecebf3; animation: cv-title-in 420ms var(--cv-ease) both; text-wrap: balance; }
+@media (min-width: 1024px) { .cv-title { font-size: 23px; } }
+.cv-caption { margin-top: 4px; font-size: 14px; line-height: 1.45; color: #9897ad; max-width: 70ch; text-wrap: pretty; }
+.cv-kind { display: flex; height: 36px; width: 36px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 12px; color: #c4b5fd; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.28); margin-top: 1px; }
+.cv-kind-pending { animation: cv-breathe 2.4s ease-in-out infinite; }
+.cv-by { display: inline-flex; height: 26px; align-items: center; border-radius: 999px; padding: 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.01em; border: 1px solid; white-space: nowrap; }
+.cv-by-text { color: #cfcde0; border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); }
+.cv-by-voice { color: #8de7b8; border-color: rgba(99,210,151,0.35); background: rgba(99,210,151,0.08); }
+.cv-by-claude { color: #fdba8c; border-color: rgba(250,93,25,0.4); background: rgba(250,93,25,0.08); }
+.cv-by-auto { color: #fcd34d; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.08); }
+.cv-btn { display: flex; height: 32px; width: 32px; align-items: center; justify-content: center; border-radius: 10px; color: #9897ad; transition: background-color 160ms, color 160ms; }
+.cv-btn:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: #ecebf3; }
+.cv-btn:disabled { opacity: 0.4; }
+@media (max-width: 1023px) { .cv-btn { height: 40px; width: 40px; } }
+.cv-detail { display: inline-flex; height: 32px; align-items: center; gap: 6px; border-radius: 999px; padding: 0 12px; font-size: 13px; font-weight: 600; white-space: nowrap; color: #cfcde0; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); transition: background-color 160ms, color 160ms, border-color 160ms; }
+.cv-detail:hover { color: #ecebf3; background: rgba(255,255,255,0.08); }
+.cv-detail-on { color: #ecebf3; background: rgba(139,92,246,0.16); border-color: rgba(139,92,246,0.5); }
+.cv-detail:focus-visible { outline: 2px solid #8B5CF6; outline-offset: 2px; }
+@media (max-width: 1023px) { .cv-detail { height: 40px; padding: 0 14px; } }
+
+.cv-sources { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding-top: 10px; padding-bottom: 10px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 12px; color: #9897ad; }
+.cv-sources-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6f6d85; }
+.cv-src { cursor: help; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-src sup { margin-right: 3px; color: #6f6d85; font-weight: 700; font-size: 9.5px; }
+.cv-unsourced { border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; color: #fcd34d; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); }
+
+.cv-history { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px 10px; scrollbar-width: none; border-top: 1px solid rgba(255,255,255,0.05); }
+.cv-history::-webkit-scrollbar { display: none; }
+.cv-hist { display: inline-flex; max-width: 220px; flex-shrink: 0; align-items: center; gap: 6px; height: 30px; border-radius: 999px; padding: 0 12px; font-size: 12.5px; font-weight: 500; color: #9897ad; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); transition: background-color 160ms, color 160ms, border-color 160ms; }
+.cv-hist:hover { color: #ecebf3; background: rgba(255,255,255,0.06); }
+.cv-hist-on { color: #ecebf3; background: rgba(139,92,246,0.14); border-color: rgba(139,92,246,0.4); }
+.cv-hist-dot { height: 6px; width: 6px; border-radius: 999px; background: #FA5D19; animation: cv-breathe 1.6s ease-in-out infinite; }
+@media (max-width: 1023px) { .cv-hist { height: 38px; } }
+
+/* Stage = viewport + its own controls strip below: the zoom pill and the "Groß ansehen" hint never cover the drawing. */
+.cv-viewport:focus-visible { outline: 2px solid rgba(139,92,246,0.55); outline-offset: -2px; }
+.cv-scroll-y { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.cv-scroll-x { overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: none; }
+.cv-scroll-xy { overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.cv-scroll-y::-webkit-scrollbar, .cv-scroll-x::-webkit-scrollbar, .cv-scroll-xy::-webkit-scrollbar { display: none; }
+/* Scroll mode: a soft fade where the drawing continues (sits on the viewport edge, above the controls strip). */
+.cv-more { position: absolute; pointer-events: none; z-index: 2; }
+.cv-more-y { left: 0; right: 0; bottom: 44px; height: 44px; background: linear-gradient(to bottom, rgba(14,14,18,0), rgba(14,14,18,0.92)); }
+.cv-more-x { top: 0; bottom: 44px; right: 0; width: 40px; background: linear-gradient(to right, rgba(14,14,18,0), rgba(14,14,18,0.92)); }
+.cv-more-flush { bottom: 0; }
+/* Wide content (tables on phones): a visible hint that more columns follow; tapping it scrolls right. */
+.cv-more-hint { position: absolute; z-index: 3; right: 8px; bottom: 54px; display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #e9e7f5; background: rgba(27,27,36,0.94); border: 1px solid #3b3b4b; box-shadow: 0 4px 14px rgba(0,0,0,0.35); animation: cv-fade-in 360ms ease-out both; }
+.cv-more-hint.cv-more-flush { bottom: 10px; }
+.cv-controls { display: flex; height: 44px; flex-shrink: 0; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 10px; }
+.cv-controls-hidden { height: 0; padding: 0; }
+.cv-big-hint { white-space: nowrap; flex-shrink: 0; display: inline-flex; height: 30px; align-items: center; gap: 6px; margin-right: auto; border-radius: 999px; padding: 0 12px 0 10px; font-size: 12.5px; font-weight: 600; color: #c4b5fd; background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); transition: background-color 160ms, color 160ms; animation: cv-fade-in 360ms ease-out both; }
+.cv-big-hint:hover { color: #ecebf3; background: rgba(139,92,246,0.18); }
+.cv-fit-note { margin-right: auto; font-size: 12px; color: #9897ad; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; animation: cv-fade-in 360ms ease-out both; }
+.cv-big-hint + .cv-fit-note { margin-right: 0; }
+.cv-zoom { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(18,18,24,0.82); border: 1px solid rgba(255,255,255,0.08); opacity: 0.72; transition: opacity 160ms; }
+.cv-stage:hover .cv-zoom, .cv-zoom:focus-within { opacity: 1; }
+.cv-zbtn { display: flex; height: 30px; min-width: 30px; align-items: center; justify-content: center; border-radius: 999px; padding: 0 4px; color: #9897ad; transition: background-color 160ms, color 160ms; }
+.cv-zbtn:hover { background: rgba(255,255,255,0.08); color: #ecebf3; }
+.cv-zbtn-on { color: #c4b5fd; }
+.cv-zpct { white-space: nowrap; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0 3px; }
+/* Touch: 36 px targets still fit the 44 px strip. */
+@media (max-width: 1023px) { .cv-zoom { opacity: 1; } .cv-zbtn { height: 36px; min-width: 36px; } .cv-big-hint { height: 36px; } }
+
+/* entrance / exit (per-element delay via --d) */
+.cv-enter { animation: cv-rise 560ms var(--cv-ease) both; animation-delay: var(--d, 0ms); transform-box: fill-box; transform-origin: center; }
+.cv-fade { animation: cv-fade-in 360ms ease-out both; animation-delay: var(--d, 0ms); }
+.cv-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: cv-draw 760ms var(--cv-ease) forwards; animation-delay: var(--d, 0ms); }
+.cv-exit { animation: cv-fade-out 360ms ease-in forwards; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+.cv-flow { animation: cv-flow 1.1s linear infinite; }
+.cv-glow { animation: cv-breathe 2.8s ease-in-out infinite; }
+.cv-updating { transition: opacity 300ms; opacity: 0.86; }
+.cv-progress { position: absolute; left: 0; right: 0; top: 0; height: 2px; overflow: hidden; z-index: 2; }
+.cv-progress::after { content: ""; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, transparent, #8B5CF6, #FA5D19, transparent); animation: cv-sweep 1.6s var(--cv-ease) infinite; }
+
+.cv-pending { width: min(320px, 80%); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.cv-p { stroke-width: 2.2; stroke-dasharray: 1; stroke-dashoffset: 1; animation: cv-sketch 4.2s var(--cv-ease) infinite; }
+.cv-p1 { stroke: #8B5CF6; fill: rgba(139,92,246,0.06); }
+.cv-p2 { stroke: #5b5a6e; animation-delay: 0.35s; }
+.cv-p3 { stroke: #63D297; fill: rgba(99,210,151,0.05); animation-delay: 0.6s; }
+.cv-p4 { stroke: #5b5a6e; animation-delay: 0.95s; }
+.cv-p5 { stroke: #FA5D19; animation-delay: 1.2s; }
+
+@keyframes cv-rise { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes cv-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cv-fade-out { to { opacity: 0; transform: scale(0.94); } }
+@keyframes cv-draw { to { stroke-dashoffset: 0; } }
+@keyframes cv-flow { to { stroke-dashoffset: -32; } }
+@keyframes cv-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes cv-sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+@keyframes cv-title-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes cv-sketch { 0% { stroke-dashoffset: 1; opacity: 0; } 12% { opacity: 1; } 55% { stroke-dashoffset: 0; opacity: 1; } 85% { stroke-dashoffset: 0; opacity: 0.9; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+
+.cv-by-foot { display: none; }
+@container (max-width: 560px) {
+  /* Phones: one compact header row (title + PNG + enlarge), so the drawing keeps the height. */
+  .cv-head { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "text actions"; padding: 10px 10px 0 14px; column-gap: 6px; }
+  .cv-head > .cv-kind, .cv-actions > .cv-by, .cv-actions > .cv-copy { display: none; }
+  .cv-by-foot { display: inline; font-weight: 600; color: #cfcde0; white-space: nowrap; }
+  .cv-title { font-size: 17.5px !important; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .cv-caption { font-size: 13px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .cv-sources { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-left: 14px !important; padding-right: 14px !important; }
+  .cv-src { overflow: visible; }
+  .cv-history { padding-left: 14px; padding-right: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-enter, .cv-fade, .cv-draw, .cv-exit, .cv-title { animation: none !important; opacity: 1; stroke-dashoffset: 0; transform: none; }
+  .cv-draw { stroke-dasharray: none; }
+  .cv-exit { display: none; }
+  .cv-flow, .cv-glow, .cv-kind-pending, .cv-hist-dot { animation: none !important; }
+  .cv-p { animation: none; stroke-dashoffset: 0; opacity: 0.7; }
+  .cv-progress::after { animation: none; width: 100%; opacity: 0.5; }
+}

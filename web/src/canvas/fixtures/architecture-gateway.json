@@ -1,0 +1,49 @@
+{
+  "v": 2, "id": "desk-gateway-architecture", "kind": "architecture", "direction": "TB",
+  "title": "Architektur des Agent-Desk-Gateways",
+  "caption": "Browser spricht nur mit dem Gateway auf Sandy; die Bridge auf LeChonk liest Dateien und startet Claude.",
+  "highlight": "canvasbus",
+  "groups": [
+    { "id": "browser", "label": "Browser", "tone": "violet" },
+    { "id": "gateway", "label": "Gateway (Sandy)", "tone": "moss" },
+    { "id": "bridge", "label": "Bridge (LeChonk)", "tone": "amber" },
+    { "id": "vendors", "label": "Vendors", "tone": "neutral" }
+  ],
+  "nodes": [
+    { "id": "web", "label": "Desk-App", "detail": "React · web/src", "group": "browser", "tone": "violet" },
+    { "id": "canvas", "label": "Canvas", "detail": "SSE /api/canvas/events", "group": "browser", "tone": "violet" },
+    { "id": "server", "label": "server.js", "detail": "HTTP + Auth + CSP", "group": "gateway", "tone": "moss" },
+    { "id": "chat", "label": "chat.js", "detail": "Text-Agent, Tools", "group": "gateway" },
+    { "id": "voice", "label": "voice/", "detail": "xAI · OpenAI · Gemini", "group": "gateway" },
+    { "id": "illustrator", "label": "illustrator.js", "detail": "baut CanvasSpec", "group": "gateway" },
+    { "id": "canvasbus", "label": "canvasBus.js", "detail": "Ring der letzten 50", "group": "gateway", "tone": "moss" },
+    { "id": "hub", "label": "bridgeHub.js", "detail": "WebSocket zur Bridge", "group": "gateway" },
+    { "id": "bridgejs", "label": "bridge.js", "detail": "Read-Tools, Jobs", "group": "bridge", "tone": "amber" },
+    { "id": "claude", "label": "claude.js", "detail": "Claude-Code-Sitzungen", "group": "bridge" },
+    { "id": "board", "label": "board.js", "detail": "Board-Relay #22", "group": "bridge" },
+    { "id": "llm", "label": "OpenRouter", "detail": "DeepSeek V4.1 Flash", "group": "vendors", "shape": "pill" },
+    { "id": "realtime", "label": "Realtime-APIs", "detail": "Grok · GPT-Live · Gemini", "group": "vendors", "shape": "pill" },
+    { "id": "files", "label": "Jobs & Dateien", "detail": "~/jobs, ~/work", "group": "bridge", "shape": "cylinder" }
+  ],
+  "edges": [
+    { "from": "web", "to": "server", "label": "HTTPS" },
+    { "from": "canvas", "to": "canvasbus", "label": "SSE", "style": "pulse" },
+    { "from": "server", "to": "chat" },
+    { "from": "server", "to": "voice", "label": "WS" },
+    { "from": "chat", "to": "illustrator", "label": "canvas_draw" },
+    { "from": "voice", "to": "illustrator" },
+    { "from": "illustrator", "to": "canvasbus", "label": "ready" },
+    { "from": "chat", "to": "hub" },
+    { "from": "hub", "to": "bridgejs", "label": "WS" },
+    { "from": "bridgejs", "to": "files" },
+    { "from": "bridgejs", "to": "board" },
+    { "from": "hub", "to": "claude" },
+    { "from": "illustrator", "to": "llm" },
+    { "from": "voice", "to": "realtime", "style": "dashed" }
+  ],
+  "sources": [
+    { "label": "code_outline gateway/src", "ref": "/home/flori/work/agent-desk/gateway/src" },
+    { "label": "code_outline bridge/src", "ref": "/home/flori/work/agent-desk/bridge/src" },
+    { "label": "CANVAS.md", "ref": "/home/flori/work/agent-desk/docs/CANVAS.md" }
+  ]
+}

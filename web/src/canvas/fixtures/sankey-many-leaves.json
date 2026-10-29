@@ -1,0 +1,26 @@
+{
+  "v": 2, "id": "sankey-many-leaves", "kind": "sankey", "unit": "EUR",
+  "title": "Synthetische Geldflüsse mit langem Schwanz",
+  "nodes": [
+    { "id": "konto", "label": "Firmenkonto Beispiel" },
+    { "id": "rechen", "label": "Rechenleistung", "tone": "papaya" },
+    { "id": "team", "label": "Auszahlungen Team" },
+    { "id": "api", "label": "Sprachmodell-APIs" },
+    { "id": "tel", "label": "Telefonie" },
+    { "id": "a1", "label": "Anbieter Alpha Rechenzentrum" }, { "id": "a2", "label": "Anbieter Beta" },
+    { "id": "a3", "label": "Anbieter Gamma Cloud" }, { "id": "a4", "label": "Anbieter Delta" }, { "id": "a5", "label": "Anbieter Epsilon" },
+    { "id": "p1", "label": "Person Eins" }, { "id": "p2", "label": "Person Zwei" }, { "id": "p3", "label": "Person Drei" }, { "id": "p4", "label": "Person Vier" },
+    { "id": "m1", "label": "Modellhaus Eins" }, { "id": "m2", "label": "Modellhaus Zwei" }, { "id": "m3", "label": "Modellhaus Drei" },
+    { "id": "t1", "label": "Telefonanbieter" }
+  ],
+  "links": [
+    { "from": "konto", "to": "rechen", "value": 7100 }, { "from": "konto", "to": "team", "value": 4900 },
+    { "from": "konto", "to": "api", "value": 360 }, { "from": "konto", "to": "tel", "value": 20 },
+    { "from": "rechen", "to": "a1", "value": 6000 }, { "from": "rechen", "to": "a2", "value": 520 }, { "from": "rechen", "to": "a3", "value": 300 },
+    { "from": "rechen", "to": "a4", "value": 190 }, { "from": "rechen", "to": "a5", "value": 90 },
+    { "from": "team", "to": "p1", "value": 3400 }, { "from": "team", "to": "p2", "value": 760 }, { "from": "team", "to": "p3", "value": 600 }, { "from": "team", "to": "p4", "value": 140 },
+    { "from": "api", "to": "m1", "value": 190 }, { "from": "api", "to": "m2", "value": 150 }, { "from": "api", "to": "m3", "value": 20 },
+    { "from": "tel", "to": "t1", "value": 20 }
+  ],
+  "sources": [{ "label": "synthetische Testdaten", "ref": "Gespräch" }]
+}

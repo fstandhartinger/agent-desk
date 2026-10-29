@@ -1,0 +1,243 @@
+{
+ "meta": {
+  "by": "voice",
+  "provider": "gemini",
+  "ms": 11257,
+  "at": 1792853212260
+ },
+ "spec": {
+  "v": 2,
+  "id": "gateway-arch",
+  "kind": "architecture",
+  "title": "Gateway-Architektur: Server, Voice, Bridge, Tools",
+  "caption": "Der HTTP/WebSocket-Server nimmt Browser-Anfragen an, führt Tools über die Bridge auf dem Workshop aus und reicht Audio an die Voice-Adapter weiter.",
+  "highlight": "hang-tools",
+  "sources": [
+   {
+    "label": "src (Code)",
+    "ref": "/home/flori/work/agent-desk/gateway/src"
+   },
+   {
+    "label": "server.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/server.js"
+   },
+   {
+    "label": "bridgeHub.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/bridgeHub.js"
+   },
+   {
+    "label": "session.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/voice/session.js"
+   },
+   {
+    "label": "tools.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/tools.js"
+   }
+  ],
+  "direction": "LR",
+  "groups": [
+   {
+    "id": "browser",
+    "label": "Browser",
+    "tone": "neutral"
+   },
+   {
+    "id": "gateway",
+    "label": "Gateway (Sandy)",
+    "tone": "papaya"
+   },
+   {
+    "id": "voice",
+    "label": "Voice-Pipeline",
+    "tone": "violet"
+   },
+   {
+    "id": "bridge",
+    "label": "Bridge (LeChonk)",
+    "tone": "moss"
+   },
+   {
+    "id": "vendors",
+    "label": "Vendoren",
+    "tone": "amber"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "web-client",
+    "label": "Web-Client",
+    "detail": "Chat, Voice, Live Canvas",
+    "group": "browser",
+    "tone": "neutral",
+    "shape": "person"
+   },
+   {
+    "id": "http-server",
+    "label": "HTTP-Server",
+    "detail": "server.js: Routen, Security-Header, /api/*",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "auth-session",
+    "label": "Auth & Session",
+    "detail": "auth.js: Login, Cookie-Session, Origin-Check",
+    "group": "gateway",
+    "tone": "neutral",
+    "shape": "box"
+   },
+   {
+    "id": "chat-turn",
+    "label": "Chat-Turn",
+    "detail": "chat.js: Prompt, LLM-Aufruf, Tool-Schleife",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "voice-upgrade",
+    "label": "Voice-Upgrade",
+    "detail": "voice/index.js: WebSocket-Upgrade auf /voice",
+    "group": "gateway",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "voice-session",
+    "label": "Voice-Session",
+    "detail": "session.js: Protokoll, Limits, Kosten-Ticks, Audit",
+    "group": "voice",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "voice-adapter",
+    "label": "Voice-Adapter",
+    "detail": "gemini/openai/xai + Resampling PCM16",
+    "group": "voice",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "tool-run",
+    "label": "Tool-Ausführung",
+    "detail": "tools.js: TOOL_DEFS, runTool, Namensauflösung",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "diamond"
+   },
+   {
+    "id": "viz-gen",
+    "label": "Live Canvas",
+    "detail": "viz.js + vizFacts.js: CanvasSpec aus Tool-Fakten",
+    "group": "gateway",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "bridge-hub",
+    "label": "BridgeHub",
+    "detail": "bridgeHub.js: Request/Response + Pub/Sub je Host",
+    "group": "bridge",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "workshop",
+    "label": "Workshop-Agent",
+    "detail": "Dateien, Jobs, Board, Claude-Sessions",
+    "group": "bridge",
+    "tone": "moss",
+    "shape": "cylinder"
+   },
+   {
+    "id": "llm",
+    "label": "LLM-Provider",
+    "detail": "claudeApi/llm/transcribe",
+    "group": "vendors",
+    "tone": "amber",
+    "shape": "box"
+   }
+  ],
+  "edges": [
+   {
+    "from": "web-client",
+    "to": "http-server",
+    "label": "HTTPS",
+    "style": "solid"
+   },
+   {
+    "from": "http-server",
+    "to": "auth-session",
+    "label": "prüft",
+    "style": "solid"
+   },
+   {
+    "from": "http-server",
+    "to": "chat-turn",
+    "label": "/api/chat",
+    "style": "solid"
+   },
+   {
+    "from": "http-server",
+    "to": "voice-upgrade",
+    "label": "WebSocket",
+    "style": "solid"
+   },
+   {
+    "from": "voice-upgrade",
+    "to": "voice-session",
+    "style": "solid"
+   },
+   {
+    "from": "voice-session",
+    "to": "voice-adapter",
+    "label": "Audio",
+    "style": "solid"
+   },
+   {
+    "from": "chat-turn",
+    "to": "llm",
+    "label": "Prompt",
+    "style": "solid"
+   },
+   {
+    "from": "chat-turn",
+    "to": "tool-run",
+    "label": "Tool-Call",
+    "style": "solid"
+   },
+   {
+    "from": "voice-session",
+    "to": "tool-run",
+    "label": "Tool-Call",
+    "style": "solid"
+   },
+   {
+    "from": "tool-run",
+    "to": "bridge-hub",
+    "label": "call",
+    "style": "solid"
+   },
+   {
+    "from": "bridge-hub",
+    "to": "workshop",
+    "label": "WS je Host",
+    "style": "solid"
+   },
+   {
+    "from": "chat-turn",
+    "to": "viz-gen",
+    "label": "Fakten",
+    "style": "solid"
+   },
+   {
+    "from": "viz-gen",
+    "to": "web-client",
+    "label": "CanvasSpec",
+    "style": "dashed"
+   }
+  ]
+ }
+}

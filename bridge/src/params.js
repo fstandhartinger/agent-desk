@@ -1,0 +1,48 @@
+// The parameters each bridge method accepts, with JSON types. The gateway's tool definitions (gateway/src/tools.js)
+// are checked against this table by gateway/test/contract.test.js, and bridge/test/e2e.test.js checks it against the
+// methods the bridge really serves, so tool arguments and bridge parameters cannot drift apart unnoticed.
+// Units that matter: ctx.read offset/limit are LINES; ctx.core maxChars is characters.
+export const METHOD_PARAMS = {
+  'ctx.core': { name: 'string', maxChars: 'integer' },
+  'ctx.search': { query: 'string', scope: 'string', maxHits: 'integer', regex: 'boolean' },
+  'ctx.read': { path: 'string', offset: 'integer', limit: 'integer' },
+  'ctx.list': { path: 'string', limit: 'integer' },
+  'ctx.decisionsToday': { days: 'integer', maxChars: 'integer' },
+  'ctx.knowledge': { topic: 'string' },
+  'jobs.list': { filter: 'string', activeOnly: 'boolean', limit: 'integer' },
+  'jobs.get': { name: 'string' },
+  'board.threads': {},
+  'board.read': { thread: 'string', limit: 'integer', since: 'string' },
+  'board.search': { query: 'string' },
+  'chats.search': { query: 'string', agent: 'string', limit: 'integer' },
+  'chats.recent': { limit: 'integer' },
+  'chats.read': { ref: 'string', offset: 'integer', limit: 'integer' },
+  'skills.list': { query: 'string' },
+  'skills.read': { name: 'string', file: 'string' },
+  'discord.list': {},
+  'discord.read': { channel: 'string', limit: 'integer' },
+  'mail.search': { account: 'string', query: 'string', folder: 'string', limit: 'integer' },
+  'mail.read': { account: 'string', uid: 'string', folder: 'string' },
+  'ops.run': { command: 'string' },
+  'board.entry': { id: 'string' },
+  'board.handoff': { title: 'string', task: 'string', why: 'string' },
+  'claude.start': { title: 'string', prompt: 'string', page: 'object', chatContext: 'string', model: 'string', effort: 'string' },
+  'claude.send': { sid: 'string', text: 'string' },
+  'claude.stop': { sid: 'string' },
+  'claude.list': {},
+  'claude.get': { sid: 'string', sinceSeq: 'integer' },
+  'ledger.entries': { from: 'string', to: 'string', groupBy: 'string', kgOnly: 'boolean' },
+  'code.outline': { path: 'string' },
+  // 28 Oct read methods (docs/UPGRADES-1028.md §4); discord/mail/ops only on the Sandy bridge
+  'discord.list': {},
+  'discord.read': { channel: 'string', limit: 'integer' },
+  'mail.search': { account: 'string', query: 'string', folder: 'string', limit: 'integer' },
+  'mail.read': { account: 'string', uid: 'string', folder: 'string' },
+  'skills.list': { query: 'string' },
+  'skills.read': { name: 'string', file: 'string' },
+  'ops.run': { command: 'string' },
+  // the ONLY write: called by the gateway after Florian's click (POST /api/handoff), never by a model tool
+  'board.handoff': { title: 'string', task: 'string', why: 'string' },
+  'notify.loginLink': { url: 'string' },
+  'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
+};

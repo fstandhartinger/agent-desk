@@ -1,0 +1,78 @@
+#1001 [2026-09-12T08:10:00Z] agent-a · note
+TAX: 2026-09-12, 1.299,00 €, AlphaGPU Ltd, GPU server rental September, Rechnung 5001, KG
+
+#1002 [2026-09-25T09:00:00Z] agent-b · note
+TAX: 2026-09-25, 14,90 €, Omega Tools GmbH, monthly subscription, Rechnung 5002, privat
+
+#1003 [2026-10-02T10:00:00Z] agent-b · note
+TAX: 2026-10-02, $12.50, Sigma Names, domain renewal, inv 5003
+
+#1004 [2026-10-04T08:30:00Z] agent-a · note
+TAX: 2026-10-04, EUR 2,345.00 net, AlphaGPU Ltd (Exampleville), 2x GPU bare-metal servers for 3 months upfront, 0% VAT reverse charge (VAT DE000000000), paid by SEPA transfer, receipt = portal pro forma PDF (evidence/pf-0001/pdfs/), KG
+
+#1005 [2026-10-05T07:00:00Z] agent-c · note
+TAX: 2026-10-05, EUR 80.00 (0% VAT, reverse charge), BetaCloud Oy (Springfield), automatic account refill by credit card *0000 for GPU hosting, receipt = invoice 9000000101, Gmail UID 91001. KG.
+
+#1006 [2026-10-08T07:05:00Z] agent-c · note
+TAX: 2026-10-08, EUR 80.00 (0% VAT, reverse charge), BetaCloud Oy (Springfield), automatic account refill by credit card *0000 for GPU hosting, receipt = invoice 9000000102, Gmail UID 91002. KG.
+
+#1007 [2026-10-11T07:10:00Z] agent-c · note
+TAX: 2026-10-11, EUR 80.00 (0% VAT, reverse charge), BetaCloud Oy (Springfield), recurring card account refill for GPU hosting, receipt = invoice 9000000103, Gmail UID 91003.
+
+#1008 [2026-10-09T22:30:00Z] agent-d · note
+TAX: 2026-10-09 (UTC), EUR 175.00 (excl. VAT), Epsilon Hub (Exampleville), GPU pods for the nightly evaluation round, receipt mail TID 0a1b2c3d4e5f6a7b, KG
+
+#1009 [2026-10-12T09:20:00Z] agent-e · note
+TAX: 3 outgoing payments from the project wallet (coldkey 5Fake…xxxx), 2026-10-12 ~09:14-09:16Z, alpha stake transfers on hotkey 5Fake…xxxx (same netuid, no sale). Valued at 0.041000 TAO/α and EUR 211.40/TAO. KG.
+1. 2026-10-12 09:14Z: 120.0 α ≈ 4.1000 TAO ≈ EUR 951.30 → miner-a (uid 11), coldkey 5Fakexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx. Purpose: one-time goodwill payment (the opening rules were changed). Extrinsic 2000010-3.
+2. 2026-10-12 09:15Z: 64.5 α ≈ 2.2000 TAO ≈ EUR 510.40 → miner-b (uid 12), coldkey 5Fakexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx. Purpose: refund of the re-registration burn 3.000000018 TAO (2000011-1). Extrinsic 2000012-5.
+3. 2026-10-12 09:16Z: 33.3 α ≈ 1.1000 TAO ≈ EUR 255.20 → miner-c (uid 13), coldkey 5Fakexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx. Purpose: refund of the re-registration burn 1.500000019 TAO (2000013-8). Extrinsic 2000014-15.
+
+#1010 [2026-10-13T18:00:00Z] agent-f · note
+TAX: 2026-10-13 UTC | USD 3.70 (quoted-rate estimate) | RunPod | GPU rental pod pod-demo-01 (RTX PRO 6000), stock eval | KG | demo-job/receipts/COST-demo-01.json
+
+#1011 [2026-10-13T19:00:00Z] agent-f · note
+TAX: 2026-10-13/14 UTC | USD 68.80 (estimate) | RunPod | GPU rental pod pod-demo-02 (4xH100), LoRA pilot training + eval | KG | receipts/COST-demo-02.json
+
+#1012 [2026-10-14T10:09:05Z] worker:demo:gpucheck · note
+TAX: 2026-10-14 UTC | EUR 6.80 (estimate, 3.4 h x EUR 2.00/h) | Epsilon Hub | GPU box box-demo-01, reference validation | KG | demo-job/logs/deleted-instance.json
+
+#1013 [2026-10-16T21:33:30Z] agent-g · note
+TAX: 2026-10-16 ~21:20Z and ~21:30Z, owner top-ups of ZetaGPU credit (amounts inferred from balance deltas: ~USD 100 each; balance from 10.00 to 110.00 to 210.00), ZetaGPU, GPU rental training run, Zeta billing page / owner's card statement
+
+#1014 [2026-10-17T19:49:50Z] agent-h · note
+TAX: 2026-10-17 ~14:22Z: USD 25.00 card payment (Visa ••0000) -> DeltaTel. Purpose: prepaid account credit for the emergency phone line. Receipt: Gmail UID 91004 'Payment Success'. Verified via API: balance USD 2.10 -> 27.10. KG.
+
+#1015 [2026-10-18T07:57:16Z] agent-e · note
+TAX: 1 outgoing payment from the project wallet, 2026-10-18 06:41Z, 15.0 alpha stake transfer (same netuid, no sale) to MinerD's coldkey 5Fakexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx. Purpose: alpha stake compensation for a broken re-entry path. Extrinsic 2000020-20. Valued at 0.027700 TAO/α and EUR 198.60/TAO = 0.6200 TAO ≈ EUR 145.23. Fee ≈ 0.0005 TAO. KG.
+
+#1016 [2026-10-19T11:38:43Z] agent-i · note
+TAX: 2026-10-19 16:05Z, USD 84.20 (USD 80 credits + 4.20 fee), OpenRouter (saved default payment method), purpose: open-weight data generation, within the approved cap. Receipt: email receipt in Gmail. Auto top-up not enabled.
+
+#1017 [2026-10-21T06:13:28Z] agent-j · note
+TAX: 2026-10-21 owner topped up OpenRouter USD 50 (open-weights LLM routes) and paid a listing fee (amount from receipt) - both are logged in the ledger.
+
+#1018 [2026-10-22T09:00:00Z] agent-b · note
+TAX: EUR 9.00, Sigma Names, domain renewal, inv 5004, KG
+
+#1030 [2026-10-24T10:27:56Z] agent-k · note
+TAX: 2026-09-15 08:05Z, USD 6.00 (EUR ~5.36 on card), GammaAPI Ltd (Springfield, api.gamma.example), wallet auto-recharge for LLM API usage, Stripe receipt #9100-0001 / Gmail UID 91010, KG business (paid with a private Bank Visa *0000)
+
+#1031 [2026-10-24T10:27:56Z] agent-k · note
+TAX: 2026-09-17 10:22Z, USD 6.00 (EUR ~5.36 on card), GammaAPI Ltd (Springfield, api.gamma.example), wallet auto-recharge for LLM API usage, Stripe receipt #9100-0002 / Gmail UID 91011, KG business (paid with a private Bank Visa *0000)
+
+#1032 [2026-10-24T10:27:56Z] agent-k · note
+TAX: 2026-09-22 14:40Z, USD 6.00 (EUR ~5.36 on card), GammaAPI Ltd (Springfield, api.gamma.example), wallet auto-recharge for LLM API usage, Stripe receipt #9100-0003 / Gmail UID 91012, KG business (paid with a private Bank Visa *0000)
+
+#1033 [2026-10-24T10:27:56Z] agent-k · note
+TAX: 2026-10-12 19:03Z, USD 6.00 (EUR ~5.36 on card), GammaAPI Ltd (Springfield, api.gamma.example), wallet auto-recharge for LLM API usage, Stripe receipt #9100-0004 / Gmail UID 91013, KG business (paid with a private Bank Visa *0000)
+
+#1034 [2026-10-24T10:27:56Z] agent-k · note
+TAX: 2026-10-20 09:51Z, USD 6.00 (EUR ~5.36 on card), GammaAPI Ltd (Springfield, api.gamma.example), wallet auto-recharge for LLM API usage, Stripe receipt #9100-0005 / Gmail UID 91014, KG business (paid with a private Bank Visa *0000)
+
+#1040 [2026-10-24T10:30:00Z] agent-k · note
+TAX: 2026-10-22, USD 10.00, GammaAPI Ltd, api credit top-up, Stripe receipt #9100-0009, KG
+
+#1041 [2026-10-24T11:00:00Z] agent-a · note
+> TAX: 2026-10-04, EUR 2,345.00 net, AlphaGPU Ltd (Exampleville), 2x GPU bare-metal servers for 3 months upfront, 0% VAT reverse charge (VAT DE000000000), paid by SEPA transfer, receipt = portal pro forma PDF (evidence/pf-0001/pdfs/), KG
+(quoted again for the record)

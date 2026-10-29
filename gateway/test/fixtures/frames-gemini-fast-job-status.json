@@ -1,0 +1,405 @@
+[
+ {
+  "setupComplete": {}
+ },
+ {
+  "sessionResumptionUpdate": {
+   "newHandle": "3ce93226-036c-44c9-99b5-85214a41aa2e",
+   "resumable": true
+  }
+ },
+ {
+  "voiceActivity": {
+   "type": "ACTIVITY_START",
+   "audioOffset": "0.200s"
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "inputTranscription": {
+    "text": "Wie ist der Stand vom Job Rags to Next Steps?"
+   }
+  }
+ },
+ {
+  "voiceActivity": {
+   "type": "ACTIVITY_END",
+   "audioOffset": "4.120s"
+  }
+ },
+ {},
+ {
+  "serverContent": {}
+ },
+ {
+  "toolCall": {
+   "functionCalls": [
+    {
+     "name": "job_status",
+     "args": {
+      "name": "reax2-next-steps"
+     },
+     "id": "call_224716"
+    }
+   ]
+  }
+ },
+ {
+  "serverContent": {
+   "generationComplete": true
+  }
+ },
+ {
+  "serverContent": {
+   "turnComplete": true
+  },
+  "usageMetadata": {
+   "promptTokenCount": 883,
+   "responseTokenCount": 18,
+   "totalTokenCount": 901,
+   "promptTokensDetails": [
+    {
+     "modality": "TEXT",
+     "tokenCount": 526
+    },
+    {
+     "modality": "AUDIO",
+     "tokenCount": 302
+    }
+   ],
+   "thoughtsTokenCount": 66
+  }
+ },
+ {},
+ {
+  "serverContent": {}
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "AAA="
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": "Der Job läuft aktuell "
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 12800>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 10240>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 15360>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 12800>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 25600>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": "und hat Phase"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 30720>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 7680>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 40960>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " drei von fünf abgeschlossen."
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 28160>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Als"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 12800>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 25600>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " Nächstes steht der Review"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 23040>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 38400>"
+      }
+     }
+    ],
+    "role": "model"
+   },
+   "outputTranscription": {
+    "text": " durch den Critic an."
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 20480>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 25600>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {},
+ {
+  "serverContent": {
+   "modelTurn": {
+    "parts": [
+     {
+      "inlineData": {
+       "mimeType": "audio/pcm;rate=24000",
+       "data": "<b64 12800>"
+      }
+     }
+    ],
+    "role": "model"
+   }
+  }
+ },
+ {
+  "serverContent": {
+   "generationComplete": true
+  }
+ }
+]

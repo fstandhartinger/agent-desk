@@ -1,0 +1,13 @@
+{
+  "v": 2, "id": "gpu-hours-by-job", "kind": "bar", "unit": "Std",
+  "title": "GPU-Stunden pro Job diese Woche",
+  "highlight": "jevbench-sn92",
+  "items": [
+    { "label": "jevbench-sn92", "value": 41.5 },
+    { "label": "image-bench-r3", "value": 26 },
+    { "label": "voice-stt-compare", "value": 12.25 },
+    { "label": "kimi-k3-eval", "value": 9 },
+    { "label": "sankey-test", "value": 2.5 }
+  ],
+  "sources": [{ "label": "GPU-Ledger", "ref": "/home/flori/data/gpu/ledger.jsonl" }]
+}

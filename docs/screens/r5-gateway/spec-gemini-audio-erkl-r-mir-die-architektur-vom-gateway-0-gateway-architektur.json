@@ -1,0 +1,206 @@
+{
+ "meta": {
+  "by": "auto",
+  "provider": "gemini",
+  "ms": 7263,
+  "at": 1792853208267
+ },
+ "spec": {
+  "v": 2,
+  "id": "gateway-architektur",
+  "kind": "architecture",
+  "title": "Architektur des Agent Desk Gateway",
+  "caption": "Ein Node-Prozess nimmt Browser-Anfragen an, führt Chat und Voice über Tools und Bridge aus und spricht mit den Vendoren.",
+  "highlight": "server",
+  "sources": [
+   {
+    "label": "gateway/src/server.js",
+    "ref": "gateway/src/server.js"
+   },
+   {
+    "label": "gateway/src/voice/session.js",
+    "ref": "gateway/src/voice/session.js"
+   },
+   {
+    "label": "src (Code)",
+    "ref": "/home/flori/work/agent-desk/gateway/src"
+   },
+   {
+    "label": "src (Code)",
+    "ref": "/home/flori/work/agent-desk/bridge/src"
+   },
+   {
+    "label": "server.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/server.js"
+   },
+   {
+    "label": "session.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/voice/session.js"
+   }
+  ],
+  "direction": "LR",
+  "groups": [
+   {
+    "id": "browser",
+    "label": "Browser (web/src)",
+    "tone": "neutral"
+   },
+   {
+    "id": "gateway",
+    "label": "Gateway",
+    "tone": "papaya"
+   },
+   {
+    "id": "bridge",
+    "label": "Bridge (LeChonk)",
+    "tone": "violet"
+   },
+   {
+    "id": "vendors",
+    "label": "Vendoren",
+    "tone": "amber"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "web",
+    "label": "Web-Client",
+    "detail": "Chat, Sprache, Live-Canvas",
+    "group": "browser",
+    "tone": "neutral",
+    "shape": "person"
+   },
+   {
+    "id": "server",
+    "label": "server.js",
+    "detail": "HTTP-Routen, Security-Header, statische Dateien",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "auth",
+    "label": "auth.js + limits.js",
+    "detail": "Session, Origin-Check, Tageslimits",
+    "group": "gateway",
+    "tone": "neutral",
+    "shape": "box"
+   },
+   {
+    "id": "chat",
+    "label": "chat.js",
+    "detail": "Text-Chat mit Prompt, Tools, Redaction",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "voice",
+    "label": "voice/session.js",
+    "detail": "Audio-Relay, Transkript, Tool-Calls, Kosten-Ticks",
+    "group": "gateway",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "tools",
+    "label": "tools.js + viz.js",
+    "detail": "Tool-Definitionen und Live-Canvas-Generator",
+    "group": "gateway",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "hub",
+    "label": "bridgeHub.js",
+    "detail": "WebSocket-Verbindung zur Bridge",
+    "group": "gateway",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "ledger",
+    "label": "bridge.js",
+    "detail": "jobs, chats, ledger, board, canvas, outline",
+    "group": "bridge",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "llm",
+    "label": "llm.js + Adapter",
+    "detail": "Claude, OpenAI, Gemini, xAI",
+    "group": "vendors",
+    "tone": "amber",
+    "shape": "box"
+   },
+   {
+    "id": "probe",
+    "label": "providerProbe + Health",
+    "detail": "Prüft, welcher Vendor gerade nutzbar ist",
+    "group": "vendors",
+    "tone": "amber",
+    "shape": "box"
+   }
+  ],
+  "edges": [
+   {
+    "from": "web",
+    "to": "server",
+    "label": "HTTPS / WSS",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "auth",
+    "style": "dashed"
+   },
+   {
+    "from": "server",
+    "to": "chat",
+    "label": "/api/chat",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "voice",
+    "label": "Voice-Upgrade",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "tools",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "llm",
+    "label": "Prompt",
+    "style": "solid"
+   },
+   {
+    "from": "voice",
+    "to": "llm",
+    "label": "Audio",
+    "style": "solid"
+   },
+   {
+    "from": "tools",
+    "to": "hub",
+    "label": "call",
+    "style": "solid"
+   },
+   {
+    "from": "hub",
+    "to": "ledger",
+    "label": "JSON-RPC",
+    "style": "solid"
+   },
+   {
+    "from": "llm",
+    "to": "probe",
+    "style": "dashed"
+   }
+  ]
+ }
+}

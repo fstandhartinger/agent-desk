@@ -1,0 +1,214 @@
+[
+ {
+  "provider": "text",
+  "mode": "chat",
+  "question": "Erklär mir die Architektur vom Gateway",
+  "tools": [
+   "code_outline",
+   "code_outline:done",
+   "read_file",
+   "read_file:done",
+   "canvas_render",
+   "canvas_render:done"
+  ],
+  "canvasPhases": [
+   "ready:gateway-arch:text@3884ms"
+  ],
+  "readyMs": 3884,
+  "readyKinds": [
+   "architecture:gateway-arch"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": []
+ },
+ {
+  "provider": "text",
+  "mode": "chat",
+  "question": "Wie funktioniert die Video-Sendeblockierung?",
+  "tools": [
+   "search_files",
+   "search_facts",
+   "search_facts:error",
+   "search_files:done",
+   "read_file",
+   "read_file:error",
+   "read_file:done",
+   "canvas_render",
+   "canvas_render:done"
+  ],
+  "canvasPhases": [
+   "ready:video-sendeblockierung-in-notify-video:text@9844ms"
+  ],
+  "readyMs": 9844,
+  "readyKinds": [
+   "flow:video-sendeblockierung-in-notify-video"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": []
+ },
+ {
+  "provider": "text",
+  "mode": "chat",
+  "question": "Wofür geben wir das Geld aus? Zeig es mir.",
+  "tools": [
+   "ledger_spend",
+   "ledger_spend:done",
+   "canvas_render",
+   "canvas_render:done"
+  ],
+  "canvasPhases": [
+   "ready:ledger-kategorien:text@1597ms"
+  ],
+  "readyMs": 1597,
+  "readyKinds": [
+   "bar:ledger-kategorien"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": []
+ },
+ {
+  "provider": "gemini",
+  "mode": "audio",
+  "question": "Erklär mir die Architektur vom Gateway",
+  "tools": [
+   "canvas_draw",
+   "canvas_draw:done",
+   "code_outline",
+   "code_outline:done"
+  ],
+  "canvasPhases": [
+   "ready:gateway-architektur:auto@7263ms",
+   "pending:gateway-arch:voice@7532ms",
+   "ready:gateway-arch:voice@11257ms"
+  ],
+  "readyMs": 7263,
+  "readyKinds": [
+   "architecture:gateway-architektur",
+   "architecture:gateway-arch"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": [],
+  "audioSeconds": 21.7
+ },
+ {
+  "provider": "gemini",
+  "mode": "text",
+  "question": "Wofür geben wir das Geld aus? Zeig es mir.",
+  "tools": [
+   "ledger_spend",
+   "canvas_draw",
+   "canvas_draw:done",
+   "ledger_spend:done"
+  ],
+  "canvasPhases": [
+   "pending:ausgaben-uebersicht:voice@7799ms",
+   "ready:ausgaben-uebersicht:voice@13242ms"
+  ],
+  "readyMs": 13242,
+  "readyKinds": [
+   "pie:ausgaben-uebersicht"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": [],
+  "audioSeconds": 21.8
+ },
+ {
+  "provider": "openai",
+  "mode": "audio",
+  "question": "Erklär mir die Architektur vom Gateway",
+  "tools": [
+   "canvas_draw",
+   "canvas_draw:done",
+   "code_outline",
+   "code_outline:done",
+   "read_file",
+   "read_file:done"
+  ],
+  "canvasPhases": [
+   "pending:gateway-architektur:voice@5091ms",
+   "ready:gateway-architektur:voice@10517ms"
+  ],
+  "readyMs": 10517,
+  "readyKinds": [
+   "architecture:gateway-architektur"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": [],
+  "audioSeconds": 91.1
+ },
+ {
+  "provider": "openai",
+  "mode": "text",
+  "question": "Wofür geben wir das Geld aus? Zeig es mir.",
+  "tools": [
+   "canvas_draw",
+   "canvas_draw:done",
+   "ledger_spend",
+   "ledger_spend:done"
+  ],
+  "canvasPhases": [
+   "pending:kg-ausgaben-oktober:voice@6020ms",
+   "ready:kg-ausgaben-oktober:voice@13478ms",
+   "pending:kg-ausgaben-oktober:voice@21529ms"
+  ],
+  "readyMs": 13478,
+  "readyKinds": [
+   "bar:kg-ausgaben-oktober"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": []
+ },
+ {
+  "provider": "xai",
+  "mode": "audio",
+  "question": "Erklär mir die Architektur vom Gateway",
+  "tools": [
+   "code_outline",
+   "canvas_draw",
+   "canvas_draw:done",
+   "code_outline:done"
+  ],
+  "canvasPhases": [
+   "pending:gateway-arch:voice@2631ms",
+   "ready:gateway-arch:voice@6492ms"
+  ],
+  "readyMs": 6492,
+  "readyKinds": [
+   "architecture:gateway-arch"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": [],
+  "audioSeconds": 55
+ },
+ {
+  "provider": "xai",
+  "mode": "text",
+  "question": "Wofür geben wir das Geld aus? Zeig es mir.",
+  "tools": [
+   "ledger_spend",
+   "canvas_draw",
+   "canvas_draw:done",
+   "ledger_spend:done"
+  ],
+  "canvasPhases": [
+   "pending:geld-ausgaben-kategorien:voice@1440ms",
+   "ready:geld-ausgaben-kategorien:voice@7193ms"
+  ],
+  "readyMs": 7193,
+  "readyKinds": [
+   "pie:geld-ausgaben-kategorien"
+  ],
+  "onBus": true,
+  "refusal": false,
+  "errors": [],
+  "audioSeconds": 37.4
+ }
+]

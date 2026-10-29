@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Agent Desk knowledge refresh, 07:30 Europe/Berlin
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 Europe/Berlin
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

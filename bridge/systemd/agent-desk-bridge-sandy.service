@@ -1,0 +1,20 @@
+[Unit]
+Description=Agent Desk bridge on Sandy (read-only: chats, skills, mail, Discord, ops; board handoff on click)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# `env BRIDGE_HOST=sandy` wins over anything in bridge.env (EnvironmentFile overrides Environment=), so a copied
+# LeChonk env file can never make this instance announce itself as "lechonk".
+ExecStart=/usr/bin/env BRIDGE_HOST=sandy /usr/bin/node %h/apps/agent-desk-bridge-sandy/src/bridge.js
+WorkingDirectory=%h/apps/agent-desk-bridge-sandy
+EnvironmentFile=%h/.config/agent-desk/bridge.env
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=3
+MemoryMax=2G
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

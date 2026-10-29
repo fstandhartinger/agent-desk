@@ -1,0 +1,203 @@
+{
+ "meta": {
+  "by": "voice",
+  "provider": "openai",
+  "ms": 10517,
+  "at": 1792853108622
+ },
+ "spec": {
+  "v": 2,
+  "id": "gateway-architektur",
+  "kind": "architecture",
+  "title": "Gateway-Architektur: HTTP, SSE, WebSockets",
+  "caption": "Ein Node-HTTP-Server routet Web und API, streamt Chat per SSE und hält WebSocket-Verbindungen für Stimme und Bridge.",
+  "highlight": "chat",
+  "sources": [
+   {
+    "label": "gateway/src/server.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/server.js"
+   },
+   {
+    "label": "gateway/src/chat.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/chat.js"
+   },
+   {
+    "label": "gateway/src/bridgeHub.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/bridgeHub.js"
+   },
+   {
+    "label": "src (Code)",
+    "ref": "/home/flori/work/agent-desk/gateway/src"
+   }
+  ],
+  "direction": "LR",
+  "groups": [
+   {
+    "id": "web",
+    "label": "Web-Frontend",
+    "tone": "neutral"
+   },
+   {
+    "id": "gw",
+    "label": "Gateway (server.js)",
+    "tone": "papaya"
+   },
+   {
+    "id": "vendor",
+    "label": "Vendor-APIs",
+    "tone": "violet"
+   },
+   {
+    "id": "bridge",
+    "label": "Bridge (LeChonk)",
+    "tone": "moss"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "web",
+    "label": "Browser / web",
+    "detail": "liefert statische Dateien, ruft /api/*",
+    "group": "web",
+    "tone": "neutral",
+    "shape": "box"
+   },
+   {
+    "id": "server",
+    "label": "server.js – Router",
+    "detail": "HTTP-Routen, Auth-Check, statische Auslieferung",
+    "tone": "papaya",
+    "shape": "pill"
+   },
+   {
+    "id": "auth",
+    "label": "auth.js",
+    "detail": "Login, Session-Cookie, Origin-Prüfung",
+    "group": "gw",
+    "shape": "box"
+   },
+   {
+    "id": "chat",
+    "label": "chat.js",
+    "detail": "POST /api/chat → SSE-Stream, Tool-Loop",
+    "group": "gw",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "llm",
+    "label": "llm.js",
+    "detail": "Sprachmodell-Aufrufe, Limits, Redaction",
+    "group": "gw",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "tools",
+    "label": "tools.js",
+    "detail": "runTool: Werkzeuge ausführen",
+    "group": "gw",
+    "shape": "box"
+   },
+   {
+    "id": "voice",
+    "label": "voice/index.js",
+    "detail": "WebSocket-Upgrade für Sprachsessions",
+    "group": "gw",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "hub",
+    "label": "bridgeHub.js",
+    "detail": "eine WS-Verbindung pro Host, req/res + Events",
+    "group": "gw",
+    "shape": "box"
+   },
+   {
+    "id": "vendors",
+    "label": "Modell-/Sprach-APIs",
+    "detail": "Text-Modell und Live-Sprach-APIs",
+    "group": "vendor",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "lechonk",
+    "label": "Bridge-Host",
+    "detail": "führt Claude-Sessions, liefert Events",
+    "group": "bridge",
+    "tone": "moss",
+    "shape": "box"
+   }
+  ],
+  "edges": [
+   {
+    "from": "web",
+    "to": "server",
+    "label": "HTTP",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "auth",
+    "label": "Session",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "chat",
+    "label": "/api/chat",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "voice",
+    "label": "WS-Upgrade",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "llm",
+    "label": "Prompts",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "tools",
+    "label": "Tool-Calls",
+    "style": "solid"
+   },
+   {
+    "from": "tools",
+    "to": "hub",
+    "label": "bridge.call",
+    "style": "solid"
+   },
+   {
+    "from": "hub",
+    "to": "lechonk",
+    "label": "req/evt",
+    "style": "solid"
+   },
+   {
+    "from": "llm",
+    "to": "vendors",
+    "label": "HTTPS",
+    "style": "solid"
+   },
+   {
+    "from": "voice",
+    "to": "vendors",
+    "label": "WSS",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "web",
+    "label": "SSE-Events",
+    "style": "solid"
+   }
+  ]
+ }
+}

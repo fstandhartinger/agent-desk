@@ -1,0 +1,18 @@
+{
+  "v": 2, "id": "money-2026-10", "kind": "pie", "unit": "USD",
+  "title": "Wofür das Geld im Oktober ausgegeben wurde",
+  "caption": "Echte Abbuchungen aus Board #22, nach Kategorie summiert (Beispielwerte für die Demo).",
+  "highlight": "LLM-APIs",
+  "items": [
+    { "label": "LLM-APIs", "value": 165, "detail": "33 Aufladungen", "tone": "papaya" },
+    { "label": "GPU", "value": 96.4, "detail": "Lium + RunPod" },
+    { "label": "Hosting/Server", "value": 58.9, "detail": "Hetzner, Coolify" },
+    { "label": "Abos", "value": 40, "detail": "2 Abos" },
+    { "label": "Domains", "value": 12.5 },
+    { "label": "Sonstiges", "value": 7.85 }
+  ],
+  "sources": [
+    { "label": "ledger_spend groupBy=category", "ref": "board #22" },
+    { "label": "GELDBEWEGUNGEN_2026.md", "ref": "/home/flori/data/ledger/GELDBEWEGUNGEN_2026.md" }
+  ]
+}

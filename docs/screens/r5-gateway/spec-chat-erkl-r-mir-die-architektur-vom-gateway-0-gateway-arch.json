@@ -1,0 +1,297 @@
+{
+ "meta": {
+  "by": "text",
+  "ms": 3884,
+  "at": 1792853324782
+ },
+ "spec": {
+  "v": 2,
+  "id": "gateway-arch",
+  "kind": "architecture",
+  "title": "Gateway-Architektur (gateway/src)",
+  "caption": "Ein HTTP-Server, drei Eintrittspunkte (REST, /bridge, /api/voice), darunter Slice-Module hinter contracts.js.",
+  "sources": [
+   {
+    "label": "server.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/server.js"
+   },
+   {
+    "label": "code_outline gateway/src",
+    "ref": "/home/flori/work/agent-desk/gateway/src"
+   }
+  ],
+  "direction": "TB",
+  "groups": [
+   {
+    "id": "entry",
+    "label": "Eintritt",
+    "tone": "papaya"
+   },
+   {
+    "id": "slices",
+    "label": "Slice-Module (Web)",
+    "tone": "moss"
+   },
+   {
+    "id": "core",
+    "label": "Querschnitt",
+    "tone": "violet"
+   },
+   {
+    "id": "voice",
+    "label": "Voice-Relay",
+    "tone": "amber"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "web",
+    "label": "Browser (web/)",
+    "detail": "REST + WebSocket /api/voice",
+    "group": "entry",
+    "shape": "person"
+   },
+   {
+    "id": "bridge",
+    "label": "Bridge (bridge/src)",
+    "detail": "WS /bridge, Bearer-Token",
+    "group": "entry",
+    "shape": "person"
+   },
+   {
+    "id": "server",
+    "label": "server.js",
+    "detail": "http.createServer, Router, Security-Header",
+    "group": "entry",
+    "shape": "box"
+   },
+   {
+    "id": "static",
+    "label": "static.js",
+    "detail": "liefert web/ aus",
+    "group": "entry",
+    "shape": "box"
+   },
+   {
+    "id": "auth",
+    "label": "auth.js",
+    "detail": "Login, Session, originOk, bridgeFailures",
+    "group": "core",
+    "shape": "box"
+   },
+   {
+    "id": "limits",
+    "label": "limits.js",
+    "detail": "Rate-Limit, Voice-Minuten, Tagescap",
+    "group": "core",
+    "shape": "box"
+   },
+   {
+    "id": "audit",
+    "label": "audit.js + redact.js",
+    "detail": "Audit → Bridge, Secret-Scrubbing",
+    "group": "core",
+    "shape": "box"
+   },
+   {
+    "id": "http",
+    "label": "http.js + config.js + messages.js",
+    "detail": "Helfer, env, deutsche Texte",
+    "group": "core",
+    "shape": "box"
+   },
+   {
+    "id": "hub",
+    "label": "bridgeHub.js",
+    "detail": "Hosts registrieren, call(), status()",
+    "group": "core",
+    "shape": "box"
+   },
+   {
+    "id": "chat",
+    "label": "chat.js",
+    "detail": "/api/chat: Tool-Loop, 148 Z.",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "claudeapi",
+    "label": "claudeApi.js",
+    "detail": "/v1/messages-kompatibel, 108 Z.",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "tools",
+    "label": "tools.js",
+    "detail": "TOOL_DEFS + runTool, 184 Z.",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "llm",
+    "label": "llm.js + providerHealth/Probe",
+    "detail": "Vendor-Aufrufe, Status-Punkte",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "viz",
+    "label": "viz.js + vizFacts.js",
+    "detail": "Live-Canvas, 320 + 280 Z.",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "explainer",
+    "label": "explainer.js",
+    "detail": "/api/explainer/:job/:point",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "transcribe",
+    "label": "transcribe.js",
+    "detail": "/api/transcribe (STT)",
+    "group": "slices",
+    "shape": "box"
+   },
+   {
+    "id": "voiceidx",
+    "label": "voice/index.js",
+    "detail": "Upgrade /api/voice → session",
+    "group": "voice",
+    "shape": "box"
+   },
+   {
+    "id": "session",
+    "label": "voice/session.js",
+    "detail": "Protokoll, Tools, Limits, Kosten",
+    "group": "voice",
+    "shape": "box"
+   },
+   {
+    "id": "adapters",
+    "label": "Adapters",
+    "detail": "gemini / openai / xai + resample, schema",
+    "group": "voice",
+    "shape": "box"
+   },
+   {
+    "id": "vendor",
+    "label": "Vendor-APIs",
+    "detail": "Live-Sockets, Kosten in prices.js",
+    "group": "voice",
+    "shape": "cylinder"
+   }
+  ],
+  "edges": [
+   {
+    "from": "web",
+    "to": "server",
+    "style": "solid"
+   },
+   {
+    "from": "bridge",
+    "to": "hub",
+    "label": "WS /bridge",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "static",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "chat",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "claudeapi",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "explainer",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "transcribe",
+    "style": "solid"
+   },
+   {
+    "from": "server",
+    "to": "voiceidx",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "tools",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "llm",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "viz",
+    "style": "solid"
+   },
+   {
+    "from": "chat",
+    "to": "hub",
+    "style": "solid"
+   },
+   {
+    "from": "claudeapi",
+    "to": "tools",
+    "style": "solid"
+   },
+   {
+    "from": "tools",
+    "to": "hub",
+    "style": "solid"
+   },
+   {
+    "from": "voiceidx",
+    "to": "session",
+    "style": "solid"
+   },
+   {
+    "from": "session",
+    "to": "adapters",
+    "style": "solid"
+   },
+   {
+    "from": "session",
+    "to": "tools",
+    "style": "solid"
+   },
+   {
+    "from": "adapters",
+    "to": "vendor",
+    "style": "solid"
+   },
+   {
+    "from": "auth",
+    "to": "server",
+    "style": "dashed"
+   },
+   {
+    "from": "limits",
+    "to": "server",
+    "style": "dashed"
+   },
+   {
+    "from": "audit",
+    "to": "hub",
+    "style": "dashed"
+   }
+  ]
+ }
+}

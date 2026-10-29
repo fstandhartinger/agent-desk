@@ -1,0 +1,295 @@
+{
+ "meta": {
+  "by": "voice",
+  "provider": "xai",
+  "ms": 6492,
+  "at": 1792852836501
+ },
+ "spec": {
+  "v": 2,
+  "id": "gateway-arch",
+  "kind": "architecture",
+  "title": "Gateway-Architektur",
+  "caption": "Der Node-HTTP-Server routet alles; Chat, Bridge, Voice und Live Canvas hängen als eigene Scheiben an derselben Wurzel.",
+  "highlight": "server",
+  "sources": [
+   {
+    "label": "code_outline gateway/src",
+    "ref": "/home/flori/work/agent-desk/gateway/src"
+   },
+   {
+    "label": "server.js",
+    "ref": "/home/flori/work/agent-desk/gateway/src/server.js"
+   }
+  ],
+  "direction": "TB",
+  "groups": [
+   {
+    "id": "g-server",
+    "label": "HTTP-Server",
+    "tone": "moss"
+   },
+   {
+    "id": "g-auth",
+    "label": "Auth & Grenzen",
+    "tone": "amber"
+   },
+   {
+    "id": "g-chat",
+    "label": "Chat & LLM",
+    "tone": "papaya"
+   },
+   {
+    "id": "g-viz",
+    "label": "Live Canvas",
+    "tone": "violet"
+   },
+   {
+    "id": "g-bridge",
+    "label": "WebSocket-Bridge",
+    "tone": "moss"
+   },
+   {
+    "id": "g-voice",
+    "label": "Voice",
+    "tone": "violet"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "root",
+    "label": "gateway/src",
+    "detail": "35 Dateien, Wurzel des Gateways",
+    "tone": "neutral",
+    "shape": "cylinder"
+   },
+   {
+    "id": "server",
+    "label": "server.js",
+    "detail": "147 Z. – Routen, CSP-Header, zwei WebSocket-Server",
+    "group": "g-server",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "http",
+    "label": "http.js",
+    "detail": "60 Z. – sendJson, clientIp",
+    "group": "g-server",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "static",
+    "label": "static.js",
+    "detail": "67 Z. – statische Dateien ausliefern",
+    "group": "g-server",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "auth",
+    "label": "auth.js",
+    "detail": "168 Z. – login, logout, originOk, readSession",
+    "group": "g-auth",
+    "tone": "amber",
+    "shape": "box"
+   },
+   {
+    "id": "limits",
+    "label": "limits.js",
+    "detail": "115 Z. – Tageslimits pro Sitzung/IP",
+    "group": "g-auth",
+    "tone": "amber",
+    "shape": "box"
+   },
+   {
+    "id": "audit",
+    "label": "audit.js",
+    "detail": "32 Z. – Audit-Zeilen in die Bridge",
+    "group": "g-auth",
+    "tone": "amber",
+    "shape": "box"
+   },
+   {
+    "id": "redact",
+    "label": "redact.js",
+    "detail": "22 Z. – Secret scrubbing für alles, was den Prozess verlässt",
+    "group": "g-auth",
+    "tone": "amber",
+    "shape": "box"
+   },
+   {
+    "id": "chat",
+    "label": "chat.js",
+    "detail": "148 Z. – POST /api/chat, orchestriert Tools und Canvas",
+    "group": "g-chat",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "llm",
+    "label": "llm.js",
+    "detail": "96 Z. – Textmodell-Aufrufe je Vendor",
+    "group": "g-chat",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "tools",
+    "label": "tools.js",
+    "detail": "184 Z. – TOOL_DEFS und runTool",
+    "group": "g-chat",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "claudeapi",
+    "label": "claudeApi.js",
+    "detail": "108 Z. – Claude-kompatible API-Fassade",
+    "group": "g-chat",
+    "tone": "papaya",
+    "shape": "box"
+   },
+   {
+    "id": "viz",
+    "label": "viz.js",
+    "detail": "320 Z. – Live-Canvas-Generator (viz slice)",
+    "group": "g-viz",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "vizfacts",
+    "label": "vizFacts.js",
+    "detail": "280 Z. – strukturierte Tool-Fakten für den Canvas",
+    "group": "g-viz",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "explainer",
+    "label": "explainer.js",
+    "detail": "104 Z. – /api/explainer-Route",
+    "group": "g-viz",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "bridgehub",
+    "label": "bridgeHub.js",
+    "detail": "127 Z. – Hub für die LeChonk-Bridges",
+    "group": "g-bridge",
+    "tone": "moss",
+    "shape": "box"
+   },
+   {
+    "id": "voiceindex",
+    "label": "voice/index.js",
+    "detail": "30 Z. – Voice-Relay-Einstieg, handleVoiceUpgrade",
+    "group": "g-voice",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "voicesession",
+    "label": "voice/session.js",
+    "detail": "185 Z. – Protokoll mit dem Web-Client, Caps",
+    "group": "g-voice",
+    "tone": "violet",
+    "shape": "box"
+   },
+   {
+    "id": "voiceadapters",
+    "label": "voice/gemini·openai·xai",
+    "detail": "Adapter für die drei Voice-Vendors",
+    "group": "g-voice",
+    "tone": "violet",
+    "shape": "box"
+   }
+  ],
+  "edges": [
+   {
+    "from": "root",
+    "to": "server",
+    "label": "entry",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "auth",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "limits",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "audit",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "redact",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "chat",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "llm",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "tools",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "claudeapi",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "viz",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "vizfacts",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "explainer",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "bridgehub",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "voiceindex",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "voicesession",
+    "style": "solid"
+   },
+   {
+    "from": "root",
+    "to": "voiceadapters",
+    "style": "solid"
+   }
+  ]
+ }
+}

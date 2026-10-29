@@ -1,0 +1,14 @@
+{
+  "v": 2, "id": "running-jobs", "kind": "table",
+  "title": "Laufende Jobs und ihr Stand",
+  "highlight": "explainer-live-agent-page",
+  "columns": ["Job", "Stand", "Engine", "Kosten"],
+  "rows": [
+    ["explainer-live-agent-page", "Runde 5 läuft", "Opus 5.5", "4,20 $"],
+    ["jevbench-sn92", "wartet auf GPU", "Sol", "12,85 $"],
+    ["image-bench-r3", "Review", "Sonnet 5.5", "1,10 $"],
+    ["morning-briefing", "fertig", "Luna", "0,35 $"],
+    ["voice-stt-compare", "läuft", "Devin", "2,05 $"]
+  ],
+  "sources": [{ "label": "job_status", "ref": "/home/flori/jobs" }]
+}

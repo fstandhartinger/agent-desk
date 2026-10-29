@@ -1,0 +1,21 @@
+{
+  "v": 2, "id": "canvas-draw-sequence", "kind": "sequence",
+  "title": "Was bei canvas_draw passiert",
+  "caption": "Die Stimme redet weiter, während der Illustrator im Hintergrund zeichnet.",
+  "actors": [
+    { "id": "voice", "label": "Voice-Agent", "tone": "violet" },
+    { "id": "gw", "label": "Gateway", "tone": "moss" },
+    { "id": "ill", "label": "Illustrator", "tone": "amber" },
+    { "id": "web", "label": "Canvas" }
+  ],
+  "messages": [
+    { "from": "voice", "to": "gw", "label": "canvas_draw(request)", "style": "sync" },
+    { "from": "gw", "to": "web", "label": "pending", "style": "async", "note": "< 1 s" },
+    { "from": "gw", "to": "voice", "label": "{ok, status: zeichne}", "style": "reply" },
+    { "from": "gw", "to": "ill", "label": "Anfrage + Kontext", "style": "async" },
+    { "from": "ill", "to": "ill", "label": "ledger_spend", "style": "sync" },
+    { "from": "ill", "to": "gw", "label": "CanvasSpec", "style": "reply" },
+    { "from": "gw", "to": "web", "label": "ready", "style": "async", "note": "< 8 s nach der Frage" }
+  ],
+  "sources": [{ "label": "CANVAS.md", "ref": "/home/flori/work/agent-desk/docs/CANVAS.md" }]
+}

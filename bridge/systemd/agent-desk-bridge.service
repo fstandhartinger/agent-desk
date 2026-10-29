@@ -1,0 +1,19 @@
+[Unit]
+Description=Agent Desk bridge (read-only workshop context + Claude Code sessions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node %h/apps/agent-desk-bridge/src/bridge.js
+WorkingDirectory=%h/apps/agent-desk-bridge
+EnvironmentFile=%h/.config/agent-desk/bridge.env
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=3
+MemoryMax=6G
+# Claude Code sessions run in their own process groups and must outlive a bridge restart.
+KillMode=process
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,20 @@
+{
+  "v": 2, "id": "money-flow", "kind": "sankey", "unit": "USD",
+  "title": "Wohin das Geld fließt",
+  "nodes": [
+    { "id": "card", "label": "Kreditkarte", "tone": "violet" },
+    { "id": "paypal", "label": "PayPal", "tone": "violet" },
+    { "id": "llm", "label": "LLM-APIs", "tone": "papaya" },
+    { "id": "gpu", "label": "GPU", "tone": "amber" },
+    { "id": "hosting", "label": "Hosting", "tone": "moss" },
+    { "id": "other", "label": "Abos & Domains" }
+  ],
+  "links": [
+    { "from": "card", "to": "llm", "value": 120 },
+    { "from": "card", "to": "hosting", "value": 58.9 },
+    { "from": "card", "to": "other", "value": 52.5 },
+    { "from": "paypal", "to": "llm", "value": 45 },
+    { "from": "paypal", "to": "gpu", "value": 96.4 }
+  ],
+  "sources": [{ "label": "ledger_spend groupBy=counterparty", "ref": "board #22" }]
+}
