@@ -28,7 +28,7 @@ import { handleTranscribe } from './transcribe.js';
 import { createActivityViz } from './viz.js';
 import { handleVoiceUpgrade } from './voice/index.js';
 
-const EXPLAINER_ROUTE = /^\/api\/explainer\/([^/]+)\/([^/]+)$/;
+const EXPLAINER_ROUTE = /^\/api\/explainer\/([^/]+)\/([^/]+|end-frames\/\d{3}\.png)$/;
 
 function securityHeaders() {
   const wsOrigin = cfg.deskOrigin().replace(/^http/, 'ws');

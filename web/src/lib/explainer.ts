@@ -7,7 +7,8 @@ export interface Scene { id: string; start: number; end: number; text?: string }
 export interface Timeline { title?: string; duration: number; scenes: Scene[]; words: Word[] }
 export interface Point { title: string; short?: string; more?: string; sources?: string[] }
 export interface Points { page: { title?: string; subtitle?: string; lang?: string }; points: Record<string, Point> }
-export interface Explainer { slug: string; timeline: Timeline; points: Points; sentences: number[][] }
+export interface EndFrame { id: string; start: number; end: number; endFrame: string; text?: string }
+export interface Explainer { cardId?: number; endFrames?: EndFrame[]; slug: string; timeline: Timeline; points: Points; sentences: number[][] }
 
 export const SLUG_RE = /^[a-z0-9-]{3,80}$/;
 export const assetUrl = (slug: string, file: string) => `/api/explainer/${slug}/${file}`;
@@ -41,13 +42,32 @@ export function splitSentences(words: Word[]): number[][] {
 }
 
 export async function loadExplainer(slug: string): Promise<Explainer> {
-  const [timeline, points] = await Promise.all([
+  const [timeline, points, metadata, card] = await Promise.all([
     getJSON<Timeline>(slug, 'timeline.json'),
     getJSON<Points>(slug, 'points.json').catch(() => ({ page: {}, points: {} }) as Points),
+    getJSON<{ scenes?: EndFrame[] }>(slug, 'metadata.json').catch(() => null),
+    loadCardId(slug),
   ]);
   timeline.scenes ||= [];
   timeline.words ||= [];
-  return { slug, timeline, points, sentences: splitSentences(timeline.words) };
+  return { slug, timeline, points, cardId: card, endFrames: Array.isArray(metadata?.scenes) ? metadata.scenes : [], sentences: splitSentences(timeline.words) };
+}
+
+export async function loadCardId(slug: string): Promise<number | undefined> {
+  const card = await getJSON<{ card_id?: unknown }>(slug, 'card.json').catch(() => null);
+  return typeof card?.card_id === 'number' && Number.isSafeInteger(card.card_id) && card.card_id > 0 ? card.card_id : undefined;
+}
+
+/** Only allow the frame paths the publisher generates, under this explainer's authenticated proxy. */
+export function endFrameAt(x: Explainer, t: number) {
+  const scene = sceneAt(x, t);
+  return x.endFrames?.find((s) => s.id === scene?.id && /^end-frames\/\d{3}\.png$/.test(s.endFrame));
+}
+
+export function slideTextAt(x: Explainer, t: number) {
+  const scene = sceneAt(x, t);
+  if (!scene) return '';
+  return endFrameAt(x, t)?.text || [x.points.points[scene.id]?.title || scene.id, scene.text].filter(Boolean).join('\n\n');
 }
 
 export const titleOf = (x: Explainer) => x.points.page.title || x.timeline.title || x.slug;
@@ -81,9 +101,9 @@ export function buildContext(x: Explainer, t: number, pointId?: string | null): 
 }
 
 const RECENT_KEY = 'desk.recentExplainers.v1';
-export interface Recent { slug: string; title: string; at: number }
+export interface Recent { slug: string; title: string; at: number; cardId?: number }
 export const recentExplainers = () => load<Recent[]>(RECENT_KEY, []);
-export function rememberExplainer(slug: string, title: string) {
-  const next = [{ slug, title, at: Date.now() }, ...recentExplainers().filter((r) => r.slug !== slug)].slice(0, 8);
+export function rememberExplainer(slug: string, title: string, cardId?: number) {
+  const next = [{ slug, title, cardId, at: Date.now() }, ...recentExplainers().filter((r) => r.slug !== slug)].slice(0, 8);
   save(RECENT_KEY, next);
 }

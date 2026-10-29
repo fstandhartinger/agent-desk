@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Expand, Gauge, ListVideo, Maximize2, Minimize2, Pause, Play, RotateCcw, RotateCw, Shrink, X } from 'lucide-react';
-import { assetUrl, loadExplainer, posterTime, rememberExplainer, sceneAt, titleOf, type Explainer } from '../../lib/explainer';
+import { Camera, Copy, Expand, Gauge, ListVideo, Maximize2, Minimize2, Pause, Play, RotateCcw, RotateCw, Shrink, X } from 'lucide-react';
+import { assetUrl, endFrameAt, slideTextAt, loadExplainer, posterTime, rememberExplainer, sceneAt, titleOf, type Explainer } from '../../lib/explainer';
 import { getPlayer, pageStore, registerPlayer, selectPoint } from '../../lib/page';
 import { useStore } from '../../lib/store';
 import { kinoStore, OVERLAY_W, toggleKino } from '../../lib/layout';
@@ -8,6 +8,9 @@ import { logActivity } from '../../lib/activity';
 import { clamp, fmtTime } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
 import { useFullscreen } from '../../lib/fullscreen';
+import { copyPng, copyText } from '../../lib/clipboard';
+import { toast, toastStore } from '../../lib/toast';
+import CardChip from '../ui/CardChip';
 import IconButton from '../ui/IconButton';
 import Popover from '../ui/Popover';
 import SlugPicker from './SlugPicker';
@@ -48,6 +51,7 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
   const [duration, setDuration] = useState(0);
   const { sceneId, pointId } = useStore(pageStore);
   const { kino, chat: kinoChat } = useStore(kinoStore);
+  const copyNotice = useStore(toastStore).at(-1);
 
   const audio = useRef<HTMLAudioElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -74,7 +78,7 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
         setX(ex);
         setDuration(ex.timeline.duration);
         pageStore.set((s) => ({ ...s, explainer: ex, sceneId: ex.timeline.scenes[0]?.id ?? null, pointId: null, attached: false }));
-        rememberExplainer(slug, titleOf(ex));
+        rememberExplainer(slug, titleOf(ex), ex.cardId);
         logActivity('explainer', 'Erklärung geladen', titleOf(ex), 'violet');
       })
       .catch((e: unknown) => {
@@ -106,6 +110,26 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
     selectPoint(id);
     logActivity('explainer', 'Punkt angeklickt', ex.points.points[id].title, 'violet');
   }, []);
+
+  const copyFinalFrame = useCallback(() => {
+    if (!x) return;
+    const endFrame = endFrameAt(x, audio.current?.currentTime ?? 0);
+    if (!endFrame) { toast('Endbild noch nicht verfügbar. Bitte später erneut versuchen.', 'info'); return; }
+    void copyPng(assetUrl(x.slug, endFrame.endFrame), `${x.slug}-${endFrame.endFrame.split('/').pop()}`);
+  }, [x]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'c') return;
+      const target = document.activeElement as HTMLElement | null;
+      if (target?.isContentEditable || target?.closest('input,textarea,select,[contenteditable="true"]')) return;
+      if (!x || window.getSelection()?.toString()) return;
+      e.preventDefault();
+      copyFinalFrame();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [x, copyFinalFrame]);
 
   const closePoint = useCallback(() => selectPoint(null), []);
 
@@ -223,6 +247,7 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
             <div className="skeleton mt-1.5 h-5 w-2/3 rounded-md" />
           )}
         </div>
+        <CardChip cardId={x?.cardId} />
         <button type="button" onClick={toggleKino} aria-pressed={kino} title={kino ? 'Kino verlassen (K)' : 'Kino: Bühne groß, Chat schwebt darüber (K)'}
           className={`hidden h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors lg:flex ${kino ? 'bg-violet/15 text-violet-light hover:bg-violet/25' : 'text-dim hover:bg-white/[0.06] hover:text-fg'}`}>
           {kino ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -317,6 +342,18 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
                     <Shrink className="h-4 w-4" />
                   </IconButton>
                 )}
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="Folie kopieren">
+                <IconButton label="Endbild der aktuellen Folie kopieren" title="Endbild der aktuellen Folie kopieren (C)" size="sm" onClick={copyFinalFrame} data-testid="copy-final-frame">
+                  <Camera className="h-4 w-4" />
+                </IconButton>
+                <IconButton label="Folientext kopieren" title="Folientext kopieren" size="sm" onClick={() => void copyText(slideTextAt(x, audio.current?.currentTime ?? 0))} data-testid="copy-slide-text">
+                  <Copy className="h-4 w-4" />
+                </IconButton>
+                <span className="text-[11px] text-mute">Endbild <kbd>C</kbd> · Folientext</span>
+                {fs.active && <CardChip cardId={x.cardId} className="ml-auto" />}
+                {fs.active && copyNotice && <span role="status" className="text-xs text-fg-2">{copyNotice.text}</span>}
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/[0.06] bg-ink-850/70 px-4 py-3.5 fs-caption">

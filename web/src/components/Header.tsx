@@ -9,6 +9,7 @@ import { titleOf } from '../lib/explainer';
 import { newConversation } from '../lib/conversation';
 import { fmtUsd } from '../lib/format';
 import { auth } from '../lib/api';
+import CardChip from './ui/CardChip';
 import Logo from './Logo';
 import Popover from './ui/Popover';
 import Kbd from './ui/Kbd';
@@ -40,6 +41,7 @@ export default function Header({ compact, onLoggedOut }: { compact: boolean; onL
           <>
             <span className="text-mute">/</span>
             <span className="truncate text-sm text-dim">{titleOf(explainer)}</span>
+            <CardChip cardId={explainer.cardId} />
           </>
         )}
       </div>
@@ -97,6 +99,7 @@ export default function Header({ compact, onLoggedOut }: { compact: boolean; onL
               ['/', 'Eingabe fokussieren'],
               ['V', 'Live-Sprache an/aus'],
               ['K', 'Kino-Modus'],
+              ['C', 'Folien-Endbild kopieren'],
               ['Esc', 'Punkt schließen'],
               ['←  →', 'Zeitleiste ±5 s'],
             ].map(([k, l]) => (

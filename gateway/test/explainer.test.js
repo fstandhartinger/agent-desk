@@ -17,6 +17,8 @@ before(async () => {
   upstream = await fakeServer((req, res) => {
     const file = req.url.split('/').pop();
     if (file === 'points.json') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(POINTS));
+    if (file === 'card.json') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ card_id: 18917 }));
+    if (file === '000.png') return res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from([137,80,78,71,13,10,26,10]));
     if (file === 'timeline.json') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(TIMELINE));
     if (file === 'audio.mp3') {
       const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
@@ -52,6 +54,16 @@ describe('explainer proxy', () => {
     assert.match(first.headers.get('content-security-policy'), /'unsafe-inline'/);
     await get('demo-slug/points.json');
     assert.equal(upstream.seen.filter((r) => r.url === '/p/demo-slug/points.json').length, 1);
+  });
+
+  it('proxies the public card and only generated end-frame paths', async () => {
+    assert.deepEqual(await (await get('demo-slug/card.json')).json(), { card_id: 18917 });
+    const frame = await get('demo-slug/end-frames/000.png');
+    assert.equal(frame.status, 200);
+    assert.equal(frame.headers.get('content-type'), 'image/png');
+    for (const path of ['context.json', 'deepdive.md', 'end-frames/other.png', 'end-frames/000.png/extra', 'other/000.png']) {
+      assert.ok([400, 404].includes((await get(`demo-slug/${path}`)).status), path);
+    }
   });
 
   it('maps upstream 404 to 404', async () => {

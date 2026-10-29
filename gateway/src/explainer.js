@@ -3,7 +3,7 @@ import { sendJson } from './http.js';
 import { TEXT } from './messages.js';
 
 const SLUG = /^[a-z0-9-]{3,80}$/;
-const NAMED_FILES = new Set(['index.html', 'stage.html', 'explainer-core.js', 'timeline.js', 'timeline.json', 'points.json', 'audio.mp3', 'words.json']);
+const NAMED_FILES = new Set(['index.html', 'stage.html', 'explainer-core.js', 'timeline.js', 'timeline.json', 'points.json', 'audio.mp3', 'words.json', 'metadata.json', 'card.json']);
 const ASSET = /^[a-z0-9_-]+\.(png|jpg|svg|webp|woff2|css|js)$/;
 const TYPES = {
   html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', json: 'application/json; charset=utf-8', css: 'text/css; charset=utf-8',
@@ -19,7 +19,7 @@ export const EXPLAINER_CSP = "default-src 'self'; script-src 'self' 'unsafe-inli
 const cache = new Map(); // "slug/file" -> {status, type, body, exp}
 let cacheBytes = 0;
 
-export const validPath = (slug, file) => SLUG.test(slug) && (NAMED_FILES.has(file) || ASSET.test(file));
+export const validPath = (slug, file) => SLUG.test(slug) && (NAMED_FILES.has(file) || ASSET.test(file) || /^end-frames\/\d{3}\.png$/.test(file));
 const extOf = (file) => file.slice(file.lastIndexOf('.') + 1);
 
 function remember(key, entry) {

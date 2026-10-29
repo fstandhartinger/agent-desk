@@ -1,13 +1,22 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Clapperboard, History, RefreshCw } from 'lucide-react';
-import { parseSlug, recentExplainers } from '../../lib/explainer';
+import { loadCardId, parseSlug, recentExplainers } from '../../lib/explainer';
+import CardChip from '../ui/CardChip';
 import { fmtAgo } from '../../lib/format';
 
 /** No listing API exists: paste a slug or explainer URL; recent ones are remembered locally. */
 export default function SlugPicker({ onPick, error, onRetry }: { onPick: (slug: string) => void; error?: string | null; onRetry?: () => void }) {
   const [value, setValue] = useState('');
   const [invalid, setInvalid] = useState(false);
-  const recent = recentExplainers();
+  const [recent] = useState(recentExplainers);
+  const [cardIds, setCardIds] = useState<Record<string, number | undefined>>({});
+  useEffect(() => {
+    let live = true;
+    void Promise.all(recent.map(async (r) => [r.slug, await loadCardId(r.slug)] as const)).then((entries) => {
+      if (live) setCardIds(Object.fromEntries(entries));
+    });
+    return () => { live = false; };
+  }, [recent]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -61,16 +70,17 @@ export default function SlugPicker({ onPick, error, onRetry }: { onPick: (slug: 
             </p>
             <ul className="space-y-1">
               {recent.map((r) => (
-                <li key={r.slug}>
+                <li key={r.slug} className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => onPick(r.slug)}
-                    className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
+                    className="group flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                   >
                     <span className="h-2 w-2 shrink-0 rounded-full bg-violet/70 transition-colors group-hover:bg-violet" />
                     <span className="min-w-0 flex-1 truncate text-[15px] text-fg-2 group-hover:text-fg">{r.title}</span>
                     <span className="shrink-0 text-xs text-mute">{fmtAgo(r.at)}</span>
                   </button>
+                  <CardChip cardId={cardIds[r.slug] ?? r.cardId} />
                 </li>
               ))}
             </ul>
