@@ -57,7 +57,12 @@ describe('explainer proxy', () => {
   });
 
   it('proxies the public card and only generated end-frame paths', async () => {
-    assert.deepEqual(await (await get('demo-slug/card.json')).json(), { card_id: 18917 });
+    const card = await get('demo-slug/card.json');
+    assert.deepEqual(await card.json(), { card_id: 18917 });
+    assert.equal(card.headers.get('cache-control'), 'no-store');
+    const before = upstream.seen.filter((r) => r.url === '/p/demo-slug/card.json').length;
+    await get('demo-slug/card.json');
+    assert.equal(upstream.seen.filter((r) => r.url === '/p/demo-slug/card.json').length, before + 1);
     const frame = await get('demo-slug/end-frames/000.png');
     assert.equal(frame.status, 200);
     assert.equal(frame.headers.get('content-type'), 'image/png');

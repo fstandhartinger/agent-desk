@@ -121,14 +121,29 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'c') return;
-      const target = document.activeElement as HTMLElement | null;
+      const target = (e.target as HTMLElement | null)?.closest ? e.target as HTMLElement : document.activeElement as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input,textarea,select,[contenteditable="true"]')) return;
-      if (!x || window.getSelection()?.toString()) return;
+      if (!x || window.getSelection()?.toString() || target?.ownerDocument?.defaultView?.getSelection()?.toString()) return;
       e.preventDefault();
       copyFinalFrame();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const iframe = frame.current;
+    let stageKeys: Window | null = null;
+    const bindStageKeys = () => {
+      try {
+        stageKeys?.removeEventListener('keydown', onKey);
+        stageKeys = iframe?.contentWindow ?? null;
+        stageKeys?.addEventListener('keydown', onKey);
+      } catch { /* Not ready or a cross-origin stage: the parent shortcut still works. */ }
+    };
+    bindStageKeys();
+    iframe?.addEventListener('load', bindStageKeys);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      iframe?.removeEventListener('load', bindStageKeys);
+      try { stageKeys?.removeEventListener('keydown', onKey); } catch { /* stage navigated */ }
+    };
   }, [x, copyFinalFrame]);
 
   const closePoint = useCallback(() => selectPoint(null), []);

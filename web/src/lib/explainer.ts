@@ -22,7 +22,7 @@ export function parseSlug(input: string): string | null {
 }
 
 async function getJSON<T>(slug: string, file: string): Promise<T> {
-  const res = await fetch(assetUrl(slug, file), { credentials: 'same-origin' });
+  const res = await fetch(assetUrl(slug, file), { credentials: 'same-origin', ...(file === 'card.json' ? { cache: 'no-store' as const } : {}) });
   if (!res.ok) throw new Error(res.status === 404 ? 'Diese Erklärseite gibt es nicht.' : `Laden fehlgeschlagen (${res.status}).`);
   return res.json() as Promise<T>;
 }

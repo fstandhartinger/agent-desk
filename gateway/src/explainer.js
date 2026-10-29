@@ -43,12 +43,12 @@ export async function fetchExplainerFile(slug, file) {
   if (!validPath(slug, file)) return null;
   const key = `${slug}/${file}`;
   const hit = cache.get(key);
-  if (hit && hit.exp > Date.now()) return hit;
+  if (file !== 'card.json' && hit && hit.exp > Date.now()) return hit;
   const upstream = await fetchUpstream(slug, file);
   if (!upstream.ok) return null;
   const body = Buffer.from(await upstream.arrayBuffer());
   const entry = { status: 200, type: TYPES[extOf(file)], body, exp: Date.now() + TTL_MS };
-  if (body.length <= MAX_ENTRY_BYTES) remember(key, entry);
+  if (file !== 'card.json' && body.length <= MAX_ENTRY_BYTES) remember(key, entry);
   return entry;
 }
 
@@ -115,7 +115,7 @@ export async function handleExplainer(req, res, slug, file) {
     if (file === 'audio.mp3') return await streamAudio(req, res, slug, file);
     const entry = await fetchExplainerFile(slug, file);
     if (!entry) return sendJson(res, 404, { error: TEXT.notFound });
-    res.writeHead(200, { ...COMMON, 'content-type': entry.type, 'content-length': entry.body.length });
+    res.writeHead(200, { ...COMMON, ...(file === 'card.json' ? { 'cache-control': 'no-store' } : {}), 'content-type': entry.type, 'content-length': entry.body.length });
     res.end(req.method === 'HEAD' ? undefined : entry.body);
   } catch {
     if (!res.headersSent) sendJson(res, 502, { error: TEXT.explainerDown });

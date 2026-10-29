@@ -21,6 +21,13 @@ try {
     const ctx = await browser.newContext({ viewport: { width, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
     const p = await ctx.newPage();
     const errors = [];
+    await p.addInitScript(() => {
+      window.__writes = []; window.__pendingWrites = [];
+      for (const name of ['write','writeText']) {
+        const original = navigator.clipboard[name].bind(navigator.clipboard);
+        navigator.clipboard[name] = (...args) => { window.__writes.push([name, typeof args[0] === 'string' ? args[0] : 'image']); const pending = original(...args); window.__pendingWrites.push(pending); return pending; };
+      }
+    });
     p.on('pageerror', (e) => errors.push(e.message));
     await p.route('**/api/explainer/demo-copy/**', async (route) => {
       const file = route.request().url().split('/api/explainer/demo-copy/')[1];
@@ -56,12 +63,25 @@ try {
     await p.keyboard.press('c');
     await p.waitForTimeout(200);
     assert.equal(await p.evaluate(async () => (await navigator.clipboard.read())[0].types.includes('image/png')), true);
+    // C also works after the user clicked inside the animation iframe.
+    await p.evaluate(() => navigator.clipboard.writeText('stage sentinel'));
+    await p.getByRole('slider', { name: 'Zeitleiste' }).press('End');
+    await p.locator('iframe').first().click({ position: { x: 30, y: 30 } });
+    const writesBeforeFrameC = await p.evaluate(() => window.__writes.length);
+    await p.keyboard.press('c');
+    await p.evaluate(() => Promise.all(window.__pendingWrites));
+    assert.equal(await p.evaluate(() => window.__writes.length), writesBeforeFrameC + 1);
+    await p.waitForFunction(async () => (await navigator.clipboard.read())[0].types.includes('image/png'));
     // Typing c in the composer must leave the clipboard alone.
     await p.evaluate(() => navigator.clipboard.writeText('typing sentinel'));
+    const writesBeforeTyping = await p.evaluate(() => window.__writes.length);
     if (width === 390) await p.getByRole('navigation', { name: 'Bereiche' }).getByRole('button', { name: 'Chat', exact: true }).click();
     await p.getByLabel('Nachricht', { exact: true }).fill('');
     await p.getByLabel('Nachricht', { exact: true }).press('c');
-    assert.equal(await p.evaluate(() => navigator.clipboard.readText()), 'typing sentinel');
+    assert.equal(await p.evaluate(() => window.__writes.length), writesBeforeTyping);
+    const typedClipboard = await p.evaluate(() => navigator.clipboard.readText());
+    if (typedClipboard !== 'typing sentinel') console.log(await p.evaluate(() => ({ writes: window.__writes, active: document.activeElement.outerHTML })));
+    assert.equal(typedClipboard, 'typing sentinel');
     if (width === 390) await p.getByRole('navigation', { name: 'Bereiche' }).getByRole('button', { name: 'Erklärung', exact: true }).click();
     await p.waitForTimeout(2000);
     await p.screenshot({ path: `${out}/desk-copy-${width}.png` });
@@ -82,7 +102,7 @@ try {
     await p.getByRole('button', { name: 'Karte 18917 kopieren', exact: true }).click();
     assert.equal(await p.evaluate(() => navigator.clipboard.readText()), 'Karte 18917');
     assert.equal(errors.length, 0, errors.join('\n'));
-    results.push({ width, cardCopy: true, clipboardImage: 'image/png 1920x1080', sceneBText: true, shortcut: true, typingIgnored: true, downloadFallback: true, overflow: false, errors });
+    results.push({ width, cardCopy: true, clipboardImage: 'image/png 1920x1080', sceneBText: true, shortcut: true, iframeShortcut: true, recentCardCopy: true, fullscreenFeedback: width === 1440, typingIgnored: true, downloadFallback: true, overflow: false, errors });
     await ctx.close();
   }
   writeFileSync(`${out}/report.json`, JSON.stringify(results, null, 2));
