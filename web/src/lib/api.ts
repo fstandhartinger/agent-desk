@@ -1,3 +1,4 @@
+import { nativeHost } from './companion';
 // Same-origin JSON API helpers. Cookie auth; nothing secret ever lives in the browser.
 export class ApiError extends Error {
   status: number;
@@ -83,7 +84,11 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
 }
 
 export const auth = {
-  me: () => api<{ ok: boolean; sid: string }>('/api/auth/me'),
+  me: async () => {
+    const result = await api<{ ok: boolean; sid: string }>('/api/auth/me');
+    if (new URLSearchParams(location.search).get('companion') === '1') nativeHost()?.postMessage({ type: 'session', sid: result.sid });
+    return result;
+  },
   login: (code: string) => api<{ ok: boolean }>('/api/auth/login', { method: 'POST', json: { code } }),
   logout: () => api<void>('/api/auth/logout', { method: 'POST' }),
 };

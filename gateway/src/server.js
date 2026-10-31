@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createDeviceService } from './devices.js';
 import { createArtifactService, artifactInstructions } from './artifacts.js';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -59,9 +60,10 @@ function streamCanvas(req, res, url, bus) {
   res.on('close', unsubscribe);
 }
 
-export function createApp() {
+export function createApp({ deviceOptions = {} } = {}) {
   const hub = new BridgeHub();
   const artifacts = createArtifactService();
+  const devices = createDeviceService({ artifacts, ...deviceOptions });
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));
   const canvasBus = createCanvasBus();
@@ -85,6 +87,8 @@ export function createApp() {
 
     if (pathname === '/healthz') return sendJson(res, 200, { ok: true, bridges: hub.status().map((b) => b.host) });
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
+
+    if (await devices.route(req, res, url)) return;
 
     if (req.method === 'POST' && req.headers.origin && !originOk(req)) return sendJson(res, 403, { error: TEXT.badOrigin });
     if (pathname === '/api/auth/login' && req.method === 'POST') return login(req, res);
@@ -181,7 +185,7 @@ export function createApp() {
     return reject(socket, 404, 'Not Found');
   });
 
-  return { server, hub, canvasBus, illustrator, artifacts };
+  return { server, hub, canvasBus, illustrator, artifacts, devices };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

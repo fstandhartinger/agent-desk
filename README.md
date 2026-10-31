@@ -46,3 +46,67 @@ voice, and does not queue turns or inject passive instructions. This is the late
 highlight integration point; it has no UI yet.
 
 Artifact launch safety: `q` never auto-sends. `voice` auto-starts only for a referrer origin in `DESK_TRUSTED_LAUNCH_ORIGINS` (comma/space separated); otherwise a start button is shown. Companion auto-start awaits device authentication. `DESK_GITHUB_OWNERS` defaults to `fstandhartinger`; GitHub credentials attach only to exact `owner/repo` entries in `DESK_GITHUB_TOKEN_REPOS` (empty by default). Board/job/decision artifact readers expose title/status only; card readers expose a generic title and existing details link only. No financial content reader is enabled by these references.
+
+## Windows Screen Agent device API
+
+Open `/device` while logged in and choose **Dieses Gerät verbinden**. The gateway issues a
+32-byte base64url bearer token with `dictate`, `dictionary`, `screen`, `exists` scopes and
+90-day expiry. In WebView2 the page posts `{type:"device-token",token,deviceId,expiresAt}`
+to the native host; in a browser it displays the token once (never local storage).
+`expiresAt` is Unix milliseconds. `GET /api/device/list` and
+`DELETE /api/device/revoke/:deviceId` manage devices with cookie auth; pair and revoke
+require an explicit same-origin Origin. Tokens are HMAC-hashed with the session secret
+and persisted atomically, mode 0600, in `DESK_DEVICES_FILE` (default
+`/tmp/agent-desk-devices.json`, matching the existing auth persistence pattern). Mount a
+persistent writable file directory and set this variable to survive container replacements.
+Rotation of `DESK_SESSION_SECRET` invalidates all tokens. Persistence failures fail closed.
+
+Desk currently has no account table: a device belongs to its exact pairing cookie `sid`.
+It may only update that sid. A fresh browser login needs fresh pairing; the 90-day native
+token does not extend the cookie's 30-day validity. The companion (`/?companion=1`)
+posts `{type:"session",sid}` when `/api/auth/me` learns the session, on focus and every
+30 seconds. Native `{type:"mute",on:boolean}` messages suppress voice-mic transmission
+and reply `{type:"mute-ack",on}`; `{type:"screen",ids:[sixHex,...]}` displays chips.
+A host still needs to POST screen context to the API; chip messages alone do not update it.
+
+All native routes require `Authorization: Bearer <device token>`; cookies never substitute
+for it. No CORS headers are emitted, foreign Origin values are rejected, and rate limits
+apply (120 native requests/device/minute, 240/IP/minute, 12 media/device/minute;
+20 management requests/session/minute and 20 paired devices/session).
+
+- `GET /api/device/exists?ids=abcdef,123abc`: up to 20 hex IDs, returns `{known:[sixHex,...]}`.
+- `POST /api/device/session/:sid/screen`: `{ids,window:{process,blocked},frameVersion}`.
+  Returns `{ok:true,newIds}`. IDs resolve with depth-one links in a separate screen context;
+  blocked windows clear IDs/process. Nonnegative safe-integer versions must strictly increase,
+  including across devices on one sid; late frames return 409. Context expires after 30 minutes.
+  Chat and every voice provider share the fenced `screen_context` tool.
+- `POST /api/device/session/:sid/highlight`: `{crop,context?,bbox:{x,y,w,h},ids}`. Crop is
+  base64 PNG up to 2 MiB, optional context base64 JPEG up to 1 MiB; coordinates are physical
+  integers (negative monitor origins supported). Google Gemini 3.8 Flash supplies a German
+  summary. The shared context-turn function sends the ordinary user text
+  `[Markierung] Ich habe auf dem Bildschirm etwas markiert: <summary> (IDs: a#...)`.
+  Returns `{ok:true,summary}`; without ready voice returns 409. Only the last five summaries
+  remain in the screen context. Images are never persisted or logged.
+- `POST /api/device/dictate`: multipart `audio` (PCM16 WAV, 16 kHz mono, at most 60 s),
+  `context` JSON `{process,fieldBefore,visibleIds,recentTerms}`. Field text is at most 500
+  characters; at most 20 IDs and 50 recent terms (100 chars each). Groq Whisper large v3,
+  OpenAI `gpt-4o-transcribe` and Gemini 3.8 Flash run in parallel; missing keys skip providers.
+  Gemini reconciles completed variants with dictionary/context when time remains. The
+  four-second budget includes dictionary lookup; on expiry use the first completed valid
+  transcript, abort remaining requests, or return 504 if none completed. Short-clip word-count
+  checks reject implausible output; explicit dictionary `replace_from` corrections apply.
+  Returns `{text,sources:{groq,openai,gemini},ms}` (unavailable sources are null). Audio stays
+  in memory; no uploads are written to disk or logged.
+- `GET /api/device/dictionary`: registry `{items:[{term,replace_from,...}]}`, cached 5 min.
+- `POST /api/device/dictionary/learn`: `{from,to}`, 1–3 words, Unicode letters and internal
+  hyphens only, at most 100 chars each. Writes `{term:to,replace_from:[from],source:"learned"}`
+  to the registry and clears the cache. The native app is responsible for observing the
+  same correction twice before sending. No learned-term deletion API is available upstream.
+
+Server keys: existing `ARTIFACTS_URL`, `ARTIFACTS_DESK_TOKEN` (read + dict scopes),
+`GOOGLE_API_KEY` (or `GEMINI_API_KEY`) for vision/audio/reconciliation, optional `GROQ_API_KEY`
+and `OPENAI_API_KEY` for the other transcribers. For test endpoints the existing
+`GOOGLE_BASE_URL`, `OPENAI_BASE_URL` and new `GROQ_BASE_URL` overrides are supported.
+Processors: Google receives highlighted images and enabled dictation audio; Groq and OpenAI
+receive dictation audio when configured. Field context/dictionary reach Google reconciliation.
+No real provider calls are needed for the device route/media tests.

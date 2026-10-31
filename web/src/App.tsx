@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError, auth, errorMessage } from './lib/api';
 import { takeHashCode } from './lib/hashLogin';
+import Device from './components/Device';
 import Gate from './components/Gate';
 import Desk from './components/Desk';
 import Logo from './components/Logo';
@@ -12,6 +13,7 @@ type GateError = { text: string; retryAfter?: number };
 async function linkLogin(code: string): Promise<GateError | null> {
   try {
     await auth.login(code);
+    await auth.me();
     return null;
   } catch (e) {
     const text = e instanceof ApiError && e.status === 401 ? 'Der Login-Link ist ungültig oder abgelaufen.' : errorMessage(e);
@@ -76,5 +78,6 @@ export default function App() {
     );
   }
   if (phase === 'gate') return <Gate initialError={gateError} onUnlocked={() => setPhase('desk')} />;
+  if (location.pathname === '/device') return <Device />;
   return <Desk onLoggedOut={() => { resetArtifactEntry(); setPhase('gate'); }} />;
 }

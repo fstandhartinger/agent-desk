@@ -155,6 +155,7 @@ const NEXT_PATH = /^\/(\?[^#\s\\]*)?$/;
 /** Same-origin target the login link opens: "/" or "/?x=…"; anything else is refused. */
 export function safeNext(value) {
   if (value === undefined || value === null || value === '') return '/';
+  if (value === '/device') return value;
   if (typeof value === 'string' && value.length <= 500 && /^\/a\/[^?#\s\\]+(?:\?[^#\s\\]*)?$/.test(value)) {
     try {
       const u = new URL(value, 'https://desk.local');

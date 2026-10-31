@@ -33,3 +33,19 @@ test('retry formatting', () => {
   assert.equal(fmtRetry(7200), 'in 2 h');
   assert.equal(withRetry('Gesperrt.', undefined), 'Gesperrt.');
 });
+
+test('auth.me posts companion session IDs to the native host only in companion mode', async () => {
+  const { auth } = await import('../src/lib/api.ts');
+  const originalFetch = globalThis.fetch;
+  const runtime = globalThis as unknown as { location?: { search: string }; chrome?: unknown };
+  const originalLocation = runtime.location, originalChrome = runtime.chrome;
+  const messages: unknown[] = [];
+  runtime.chrome = { webview: { postMessage: (message: unknown) => messages.push(message) } };
+  globalThis.fetch = async () => res(200, { ok: true, sid: 'fake-sid' });
+  try {
+    runtime.location = { search: '?companion=1' };
+    assert.equal((await auth.me()).sid, 'fake-sid');
+    assert.deepEqual(messages, [{ type: 'session', sid: 'fake-sid' }]);
+    runtime.location = { search: '' }; await auth.me(); assert.equal(messages.length, 1);
+  } finally { globalThis.fetch = originalFetch; runtime.location = originalLocation; runtime.chrome = originalChrome; }
+});
