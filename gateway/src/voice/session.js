@@ -21,13 +21,15 @@ const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 // Topic files of the desk knowledge are dense and ordered by importance; voice models need most of one at once.
 /** Round 11: {focusedId} from a client message (`focusedCanvasId`: string or null); {} when the client did not say. */
 const focusOf = (msg) => (Object.hasOwn(msg ?? {}, 'focusedCanvasId') ? { focusedId: typeof msg.focusedCanvasId === 'string' ? msg.focusedCanvasId.slice(0, 64) : null } : {});
-const voiceCap = (name) => (name === 'knowledge_read' ? 6000 : name === 'explainer_context' ? 4000 : VOICE_TOOL_CHARS);
+const voiceCap = (name) => (name === 'artifact_ref_read' ? 6000 : name === 'knowledge_read' ? 6000 : name === 'explainer_context' ? 4000 : VOICE_TOOL_CHARS);
 const PAGE_LOAD_MS = 4000; // the server-side page context may delay the vendor connect at most this long
 
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs() }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
   let adapter = null;
+  let artifactBlock = '';
+  let unregisterText = null;
   let starting = false;
   let page = null;
   let closed = false;
@@ -362,10 +364,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       if (loaded) page = loaded;
       else audit({ action: 'voice.page.fallback', detail: `${provider} slug=${page.slug}` });
     }
+    artifactBlock = deps.artifactInstructions?.() ?? '';
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider }), tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    unregisterText = deps.registerText?.((text) => readyAt !== null && deliverText(text));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
     if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {});
@@ -391,7 +395,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider }) });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
@@ -407,11 +411,31 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       tick();
       audit({ action: 'voice.stop', detail: `${provider} ${reason} ${billedSeconds}s`, cost_usd: estimateCost(provider, billedSeconds) });
     }
+    unregisterText?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus
     sendJson({ type: 'closed' });
     if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close();
+  }
+
+  // Both browser WS text and authenticated context-turn use this exact user-turn path.
+  function deliverText(raw, msg = {}) {
+    const text = raw.slice(0, 2000).trim();
+    if (!text || !adapter || closed) return false;
+    if (Object.hasOwn(msg, 'focusedCanvasId')) canvas?.setFocus?.(focusOf(msg).focusedId);
+    flushTranscript();
+    commitUser();
+    beginUserTurn(true);
+    userOpen = false;
+    contentOpen = false;
+    interrupted = false;
+    viz?.noteTurn({ role: 'user', text });
+    canvas?.noteTurn({ role: 'user', text });
+    expectFacts(canvas?.userTurn(text));
+    sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
+    adapter.sendText(text);
+    return true;
   }
 
   ws.on('message', (data, isBinary) => {
@@ -426,20 +450,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     else if (msg.type === 'page' && adapter) updatePage(msg.page);
     else if (msg.type === 'focus') canvas?.setFocus?.(focusOf(msg).focusedId); // round 11: the canvas the browser shows now
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {
-      const text = msg.text.slice(0, 2000).trim();
-      if (!text) return;
-      if (Object.hasOwn(msg, 'focusedCanvasId')) canvas?.setFocus?.(focusOf(msg).focusedId);
-      flushTranscript();
-      commitUser();
-      beginUserTurn(true);
-      userOpen = false;
-      contentOpen = false;
-      interrupted = false;
-      viz?.noteTurn({ role: 'user', text });
-      canvas?.noteTurn({ role: 'user', text });
-      expectFacts(canvas?.userTurn(text));
-      sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
-      adapter.sendText(text);
+      deliverText(msg.text, msg);
     }
     else if (msg.type === 'interrupt' && adapter) { dropAudio = true; adapter.interrupt(); }
     else if (msg.type === 'stop') finish('client-stop');

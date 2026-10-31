@@ -8,8 +8,8 @@ const fakeHub = (handlers) => ({ calls: [], async call(method, params) { this.ca
 const ctx = (hub, extra = {}) => ({ hub, page: null, audit: () => {}, limits: new Limits(), ...extra });
 
 describe('tool definitions', () => {
-  it('cover the 18 tools of the spec with JSON-schema parameters', () => {
-    assert.deepEqual(TOOL_DEFS.map((t) => t.name), ['read_core_doc', 'knowledge_read', 'search_files', 'read_file', 'decisions_recent', 'list_jobs', 'job_status', 'board_threads', 'board_read', 'board_entry', 'board_search', 'chats_search', 'explainer_point', 'explainer_context', 'claude_task', 'claude_status', 'canvas_draw', 'canvas_render', 'ledger_spend', 'desk_status', 'code_outline', 'web_read', 'chat_read', 'discord_read', 'mail_search', 'mail_read', 'skills_list', 'skill_read', 'run_readonly', 'handoff_propose']);
+  it('cover the registered tools of the spec with JSON-schema parameters', () => {
+    assert.deepEqual(TOOL_DEFS.map((t) => t.name), ['artifact_context', 'artifact_resolve', 'artifact_search', 'artifact_ref_read', 'read_core_doc', 'knowledge_read', 'search_files', 'read_file', 'decisions_recent', 'list_jobs', 'job_status', 'board_threads', 'board_read', 'board_entry', 'board_search', 'chats_search', 'explainer_point', 'explainer_context', 'claude_task', 'claude_status', 'canvas_draw', 'canvas_render', 'ledger_spend', 'desk_status', 'code_outline', 'web_read', 'chat_read', 'discord_read', 'mail_search', 'mail_read', 'skills_list', 'skill_read', 'run_readonly', 'handoff_propose']);
     for (const t of TOOL_DEFS) assert.equal(t.parameters.type, 'object', t.name);
   });
 });

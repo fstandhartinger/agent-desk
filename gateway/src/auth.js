@@ -155,6 +155,16 @@ const NEXT_PATH = /^\/(\?[^#\s\\]*)?$/;
 /** Same-origin target the login link opens: "/" or "/?x=…"; anything else is refused. */
 export function safeNext(value) {
   if (value === undefined || value === null || value === '') return '/';
+  if (typeof value === 'string' && value.length <= 500 && /^\/a\/[^?#\s\\]+(?:\?[^#\s\\]*)?$/.test(value)) {
+    try {
+      const u = new URL(value, 'https://desk.local');
+      const ids = decodeURIComponent(u.pathname.slice(3).replace(/\/$/, '')).split(',');
+      if (!ids.length || ids.length > 8 || ids.some(id => !/^(?:a#)?[0-9a-f]{6}$/i.test(id))) return null;
+      u.searchParams.set('a', ids.map(id => id.replace(/^a#/i, '').toLowerCase()).join(','));
+      u.searchParams.delete('k');
+      return `/?${u.searchParams}`;
+    } catch { return null; }
+  }
   return typeof value === 'string' && value.length <= 500 && NEXT_PATH.test(value) ? value : null;
 }
 

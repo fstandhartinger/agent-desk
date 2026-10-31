@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createArtifactService, artifactInstructions } from './artifacts.js';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { audit, setAuditSink } from './audit.js';
@@ -60,6 +61,7 @@ function streamCanvas(req, res, url, bus) {
 
 export function createApp() {
   const hub = new BridgeHub();
+  const artifacts = createArtifactService();
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));
   const canvasBus = createCanvasBus();
@@ -93,13 +95,14 @@ export function createApp() {
     if (!session) return sendJson(res, 401, { error: TEXT.loginRequired });
     const { sid } = session;
 
-    if (pathname === '/api/auth/me') return sendJson(res, 200, { ok: true });
+    if (pathname === '/api/auth/me') return sendJson(res, 200, { ok: true, sid });
+    if (await artifacts.route(req, res, url, sid)) return;
     if (pathname === '/api/status') {
       return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });
     }
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -158,7 +161,9 @@ export function createApp() {
       toolDefs: TOOL_DEFS,
       loadPage: loadPageContext,
       runTool,
-      makeCtx: (page) => ({ hub, page, limits, sid, ip, maxChars: 2500, audit: (entry) => audit({ ip, ...entry }) }),
+      artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
+      registerText: (send) => artifacts.registerVoice(sid, send),
+      makeCtx: (page) => ({ artifacts, hub, page, limits, sid, ip, maxChars: 2500, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
@@ -176,7 +181,7 @@ export function createApp() {
     return reject(socket, 404, 'Not Found');
   });
 
-  return { server, hub, canvasBus, illustrator };
+  return { server, hub, canvasBus, illustrator, artifacts };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

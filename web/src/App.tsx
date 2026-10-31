@@ -4,6 +4,7 @@ import { takeHashCode } from './lib/hashLogin';
 import Gate from './components/Gate';
 import Desk from './components/Desk';
 import Logo from './components/Logo';
+import { resetArtifactEntry } from './components/ArtifactContext';
 
 type Phase = 'checking' | 'gate' | 'desk';
 type GateError = { text: string; retryAfter?: number };
@@ -55,7 +56,7 @@ export default function App() {
       setGateError(error);
       if (!error) setPhase('desk');
     };
-    const onUnauthorized = () => setPhase('gate');
+    const onUnauthorized = () => { resetArtifactEntry(); setPhase('gate'); };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('desk:unauthorized', onUnauthorized);
     return () => {
@@ -75,5 +76,5 @@ export default function App() {
     );
   }
   if (phase === 'gate') return <Gate initialError={gateError} onUnlocked={() => setPhase('desk')} />;
-  return <Desk onLoggedOut={() => setPhase('gate')} />;
+  return <Desk onLoggedOut={() => { resetArtifactEntry(); setPhase('gate'); }} />;
 }

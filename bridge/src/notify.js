@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import { HOME } from './paths.js';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -25,4 +27,19 @@ export async function loginLink({ url } = {}) {
       resolve({ sent: false, detail: out || 'notify failed', ...(typeof err.code === 'number' ? { exit: err.code } : {}) });
     });
   });
+}
+
+/** Fixed notify card index only; no details body or arbitrary files. */
+export async function cardLink({ id } = {}) {
+  if (typeof id !== 'string' || !/^[1-9]\d{0,11}$/.test(id)) throw new Error('invalid card id');
+  const file = path.join(HOME, '.notify', 'cards', `${id}.json`);
+  const fd = await fs.open(file, 'r');
+  try {
+    const buf = Buffer.alloc(65537);
+    const { bytesRead } = await fd.read(buf, 0, buf.length, 0);
+    if (bytesRead > 65536) throw new Error('card too large');
+    const card = JSON.parse(buf.toString('utf8', 0, bytesRead));
+    const url = String(card.text ?? '').match(/https:\/\/cards\.app\.mintapis\.com\/p\/[A-Za-z0-9_-]+/)?.[0];
+    return { title: `Karte ${id}`, ...(url ? { url } : {}), note: 'Nur Link und Titel verfügbar; Karteninhalt nicht freigegeben.' };
+  } finally { await fd.close(); }
 }

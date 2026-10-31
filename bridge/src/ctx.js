@@ -337,3 +337,25 @@ export async function list({ path: p = '/home/flori/jobs', limit = 200 } = {}) {
 }
 
 export { claudeProjectDirs };
+
+/** Exact defining key only; never cumulative resolved-keys footers. Bounded full-document read. */
+export function findDecisionKey(text, key) {
+  for (const section of text.split(/(?=^## )/m)) {
+    const heading = section.split('\n')[0];
+    const keys = [...section.matchAll(/^\s*(?:\*\*)?Key:(?:\*\*)?\s*`?([\w.-]+)`?\s*$/gmi)].map(m => m[1]);
+    const headingKeys = heading.match(/`[\w.-]+`|\[[\w.-]+\]/g) ?? [];
+    if (keys.includes(key) || headingKeys.some(v => v.slice(1, -1) === key) || (heading.slice(3).match(/[A-Za-z0-9_.-]+/g) ?? []).includes(key)) return { found: true, heading };
+  }
+  return { found: false };
+}
+export async function decisionKey({ key } = {}) {
+  if (typeof key !== 'string' || !/^[\w.-]{1,120}$/.test(key)) throw new Error('invalid decision key');
+  const fd = await fs.promises.open(resolveAllowed(CORE.DECISIONS), 'r');
+  try {
+    if ((await fd.stat()).size > 2_000_000) return { found: false, truncated: true };
+    const buf = Buffer.alloc(2_000_001);
+    const { bytesRead } = await fd.read(buf, 0, buf.length, 0);
+    if (bytesRead > 2_000_000) return { found: false, truncated: true };
+    return findDecisionKey(redact(buf.toString('utf8', 0, bytesRead)), key);
+  } finally { await fd.close(); }
+}

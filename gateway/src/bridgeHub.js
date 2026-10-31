@@ -11,6 +11,7 @@ export const BRIDGE_HOST = /^(lechonk|sandy)$/;
 // Preferred hosts per method, first connected one wins (docs/UPGRADES-1028.md §4 ROUTE). Exact names before prefixes.
 // chats.search is fanned out to every host by the tools (callAll); here it only needs a single-host fallback.
 export const ROUTE = {
+  'notify.cardLink': ['sandy'],
   'ctx.knowledge': ['lechonk', 'sandy'],
   'discord.*': ['sandy'],
   'mail.*': ['sandy'],
