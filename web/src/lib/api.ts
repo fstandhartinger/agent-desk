@@ -83,7 +83,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
 }
 
 export const auth = {
-  me: () => api<{ ok: boolean }>('/api/auth/me'),
+  me: () => api<{ ok: boolean; sid: string }>('/api/auth/me'),
   login: (code: string) => api<{ ok: boolean }>('/api/auth/login', { method: 'POST', json: { code } }),
   logout: () => api<void>('/api/auth/logout', { method: 'POST' }),
 };

@@ -1,3 +1,4 @@
+import { artifactInstructions } from './artifacts.js';
 import { audit } from './audit.js';
 import { cfg } from './config.js';
 import { openSse, readJson, sendJson } from './http.js';
@@ -74,7 +75,7 @@ function parseArgs(raw) {
 }
 
 /** POST /api/chat → SSE. `session` = {sid, ip, hub, limits}. */
-export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, canvasRegistry = conversationCanvases }) {
+export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, canvasRegistry = conversationCanvases }) {
   const body = await readJson(req);
   const messages = cleanMessages(body.messages);
   if (!messages) return sendJson(res, 400, { error: TEXT.badMessages });
@@ -112,7 +113,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     canvas?.startTurn();
     canvas?.userTurn(lastUser);
     const ctx = {
-      canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
+      artifacts, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
       chatContext: formatChatContext(messages),
       // Round 10 (critic r9 F2): the deterministic money list replaces the model's money sentences only for a spending
@@ -120,7 +121,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
       moneyQuestion: isMoneyQuestion(lastUser),
       results: [], // every tool result of this turn: what names and amounts in the prose may come from
     };
-    const convo = [{ role: 'system', content: buildInstructions(page) }, ...messages];
+    const convo = [{ role: 'system', content: buildInstructions(page) + artifactInstructions(artifacts?.get(sid)) }, ...messages];
     const paths = userPaths(lastUser);
     if (paths.length) convo.push({ role: 'system', content: pathHint(paths) });
     const givenBase = convo.map((m) => m.content).join('\n');

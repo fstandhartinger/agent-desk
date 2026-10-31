@@ -12,3 +12,36 @@ Production runs the gateway on Node 24 (`node:24-alpine`); the Sandy bridge runs
   `cd gateway && npx -y node@24 --test test/*.test.js`.
 - `bridge` declares `>= 20` and is tested on Node 20 and 24.
 - `web` needs `>= 22.18` (`--experimental-transform-types`): `cd web && npx -y node@24 $(command -v npm) test`.
+
+## Artifact links and session context
+
+Open `/?a=abcdef,123abc&voice=gemini&q=...` or `/a/abcdef`. IDs are six hex characters;
+encoded `a%23ABCDEF` inputs are accepted, and generated URLs never contain a raw `#`.
+The existing login gate keeps the URL. Invalid IDs show a small notice. After resolution,
+`voice=gemini|openai|xai` opens that voice session; `q` is sent once when connected (or as
+chat when no voice provider is selected).
+
+Gateway configuration: `ARTIFACTS_URL` (registry origin) and `ARTIFACTS_DESK_TOKEN` (read
+bearer token). Both stay on the server. Authenticated `GET /api/artifacts/resolve?ids=`
+accepts at most eight IDs and optional `depth=1|2`; `GET /api/artifacts/search?q=` searches.
+Registry requests have a three-second timeout and sixty-second cache. Resolution replaces
+this cookie session's `artifactContext`, including parent chains and optional linked nodes,
+with a thirty-minute TTL. Search does not change context. The UI displays expandable
+Artefakt-Kontext chips. Registry strings are untrusted data in the chat/voice start prompts
+(at most 8,000 characters); resolving a new context does not passively interrupt live voice.
+
+All agents share `artifact_context`, `artifact_resolve {ids, depth?}`, `artifact_search {q}`,
+and `artifact_ref_read {id, ref_index}`. Reference reads allow pinned 40-character GitHub
+commit hashes with explicit line ranges, or existing bridge `board.entry`, `jobs.get`, and
+`ctx.core` decision reads. GitHub requests use the existing server `GITHUB_TOKEN`/`GH_TOKEN`
+if present; otherwise they are anonymous. Unavailable/private sources report unreadable;
+private finance sources return a description directing the user to the Earnings app. The
+bridge file allowlist stays unchanged. Each reference read is capped at 6,000 characters.
+Diagrams and click-confirmed Claude Code proposals use the same dispatcher as before.
+
+`GET /api/auth/me` also returns the current `sid`. Session-authenticated
+`POST /api/session/:sid/context-turn {text}` accepts 1–2,000 characters and sends a normal
+user text turn through every ready voice connection of that same cookie session, including
+transcript echo and canvas handling. It returns 403 for a foreign sid, 409 with no ready
+voice, and does not queue turns or inject passive instructions. This is the later screen
+highlight integration point; it has no UI yet.
