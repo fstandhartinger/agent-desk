@@ -31,3 +31,8 @@ test('normalizes artifact login returns and preserves the selected voice and que
   const next = deepLinkNext({ pathname: '/a/ABCDEF%2C123abc', search: '?voice=xai&q=Hello&k=secret' });
   assert.equal(next, '/?a=abcdef%2C123abc&voice=xai&q=Hello');
 });
+
+test('keeps device pairing and companion destinations behind login', () => {
+  assert.equal(deepLinkNext({ pathname: '/device', search: '' }), '/device');
+  assert.equal(deepLinkNext({ pathname: '/', search: '?companion=1&voice=gemini' }), '/?companion=1&voice=gemini');
+});

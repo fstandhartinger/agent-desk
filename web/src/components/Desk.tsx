@@ -1,3 +1,4 @@
+import Companion from './Companion';
 import ArtifactContext from './ArtifactContext';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { Clapperboard, MessagesSquare, PanelLeftOpen, PanelRightOpen, PanelLeftClose, PanelRightClose, Radio, X } from 'lucide-react';
@@ -115,6 +116,7 @@ export default function Desk({ onLoggedOut }: { onLoggedOut: () => void }) {
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <ChatBar onHistory={() => setHistoryOpen(true)} />
       <ArtifactContext />
+      <Companion />
       <VoiceDock />
       <Thread />
       <Composer />

@@ -1,3 +1,4 @@
+import { companionMuted } from './companion';
 import { createStore } from './store';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
 import type { ClaudeProposalEvent, HandoffEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
@@ -84,7 +85,7 @@ export class VoiceSession {
     this.mic = new AudioWorkletNode(ctx, 'mic-capture', { processorOptions: { targetRate: 24000 } });
     this.mic.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
       levels.mic = Math.min(1, e.data.rms * 4);
-      if (this.ready && this.ws?.readyState === WebSocket.OPEN) this.ws.send(e.data.pcm);
+      if (!companionMuted() && this.ready && this.ws?.readyState === WebSocket.OPEN) this.ws.send(e.data.pcm);
     };
     src.connect(this.mic);
     this.player = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [1], processorOptions: { sourceRate: 24000 } });

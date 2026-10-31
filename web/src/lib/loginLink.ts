@@ -5,7 +5,12 @@ import { ApiError, api, errorMessage, fmtRetry } from './api';
 
 /** The path+query to come back to, when the URL is an explainer deep link (`?x=<slug>`); otherwise null. */
 export function deepLinkNext(loc: { pathname: string; search: string }): string | null {
+  if (loc.pathname === '/device') return '/device';
   const q = new URLSearchParams(loc.search);
+  if (loc.pathname === '/' && q.get('companion') === '1') {
+    q.delete('k');
+    return `/?${q}`;
+  }
   const artifact = parseArtifactUrl(`${loc.pathname}${loc.search}`);
   if (artifact.ids.length) return artifactUrl(artifact.ids, artifact.voice ?? undefined, artifact.question || undefined);
   const slug = q.get('x');
