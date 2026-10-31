@@ -147,11 +147,21 @@ export async function handoff({ title, task, why } = {}) {
 }
 
 // Read one entry by its number (Sandy: the board database itself, opened read-only; no read pointer moves).
-const ENTRY_PY = `import json,os,sqlite3,sys
+const ENTRY_PY = `import json,os,re,sqlite3,sys,urllib.parse
 d=os.environ.get('AGENT_BOARD_DIR') or os.path.expanduser('~/.agent-board')
-c=sqlite3.connect('file:'+os.path.join(d,'board.db')+'?mode=ro',uri=True,timeout=10)
-r=c.execute('select e.id,e.thread_id,t.title,e.author,e.kind,e.created_at,e.body from entries e join threads t on t.id=e.thread_id where e.id=?',(int(sys.argv[1]),)).fetchone()
-print(json.dumps(None if r is None else dict(zip(['id','threadId','thread','author','kind','ts','text'],r))))`;
+db=os.environ.get('AGENT_BOARD_DB') or os.path.join(d,'board.db')
+c=sqlite3.connect('file:'+urllib.parse.quote(os.path.abspath(db),safe='/')+'?mode=ro',uri=True,timeout=10)
+has_ids=any(col[1]=='artifact_ids' for col in c.execute('pragma table_info(entries)'))
+column='e.artifact_ids' if has_ids else "'[]'"
+r=c.execute('select e.id,e.thread_id,t.title,e.author,e.kind,e.created_at,e.body,'+column+' from entries e join threads t on t.id=e.thread_id where e.id=?',(int(sys.argv[1]),)).fetchone()
+out=None if r is None else dict(zip(['id','threadId','thread','author','kind','ts','text','artifact_ids'],r))
+if out is not None:
+ try:
+  ids=json.loads(out['artifact_ids'])
+ except (ValueError,TypeError):
+  ids=[]
+ out['artifact_ids']=list(dict.fromkeys(i.lower() for i in ids if isinstance(i,str) and re.fullmatch('[0-9a-fA-F]{6}',i))) if isinstance(ids,list) else []
+print(json.dumps(out))`;
 
 export function entry({ id } = {}) {
   const n = Number(String(id ?? '').replace(/^#/, ''));
