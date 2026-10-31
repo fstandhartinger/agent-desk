@@ -18,6 +18,7 @@ export function setEnv(extra = {}) {
     DESK_ORIGIN,
     DESK_VIZ_GRACE_MS: '0',
     OPENROUTER_API_KEY: 'or-test-key',
+    DESK_SESSIONS_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'desk-sessions-')), 'sessions.json'),
     DESK_DEVICES_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'desk-devices-')), 'devices.json'),
     DESK_REVOKED_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'desk-revoked-')), 'revoked.json'),
     DESK_LINK_USES_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'desk-links-')), 'uses.json'),

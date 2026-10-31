@@ -58,3 +58,24 @@ it('maximum-size base64 is validated without recursive regex stack growth', () =
   assert.equal(imageBytes(png.toString('base64'), png.length, 'png').length, png.length);
   assert.throws(() => imageBytes('aaaa===a', 100, 'png'));
 });
+it('soft deadline merges completed sources while a third provider hangs; bounded context and spend are shared', async () => {
+  const { limits } = await import('../src/limits.js');
+  const before = limits.costToday(); let merge;
+  const media = createDeviceMedia({ budgetMs: 160, env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake', GOOGLE_API_KEY: 'fake' }, fetchImpl: async (url, opts) => {
+    if (String(url).includes('groq')) return Response.json({ text: 'One' });
+    if (String(url).includes('openai')) return new Promise(() => {});
+    const parts = JSON.parse(opts.body).contents[0].parts;
+    if (parts[0].text) { merge = parts[0].text; return gemini('Merged'); }
+    return gemini('Two');
+  } });
+  const result = await media.dictate(wav(), { ...ctx, visibleArtifacts: '<artifact_data>screen title</artifact_data>' }, dict);
+  assert.equal(result.text, 'Merged'); assert.equal(result.sources.openai, null);
+  assert(result.ms >= 80 && result.ms < 160); assert.match(merge, /screen title/);
+  assert(!merge.includes('visibleArtifacts":"<artifact_data>'));
+  assert(limits.costToday() > before);
+  const old = process.env.DESK_DAILY_USD_CAP; process.env.DESK_DAILY_USD_CAP = '0'; let calls = 0;
+  try {
+    await assert.rejects(createDeviceMedia({ env: { GOOGLE_API_KEY: 'fake' }, fetchImpl: async () => { calls++; return gemini('Should not call'); } }).highlight(Buffer.from('fake'), null, {}, []), e => e.status === 429);
+    assert.equal(calls, 0);
+  } finally { if (old === undefined) delete process.env.DESK_DAILY_USD_CAP; else process.env.DESK_DAILY_USD_CAP = old; }
+});

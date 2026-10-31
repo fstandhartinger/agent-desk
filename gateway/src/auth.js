@@ -99,7 +99,34 @@ export function safeEqual(a, b) {
 
 export function issueCookie(now = Date.now()) {
   const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + MAX_AGE_S * 1000, sid: crypto.randomBytes(9).toString('base64url') })).toString('base64url');
+  rememberSession(payload);
   return `${COOKIE_NAME}=${payload}.${hmac(payload)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${MAX_AGE_S}`;
+}
+
+// Known signed cookie receipts permit native devices to target any still-valid owner session.
+// Missing receipts fail closed after replacement until that browser authenticates again.
+const sessionsFile = () => process.env.DESK_SESSIONS_FILE || '/tmp/agent-desk-auth-sessions.json';
+const sessionReceipts = new Map();
+function sessionMac(sid, exp) { return hmac(`device-session:${sid}:${exp}`); }
+function storedSessions() {
+  try { return JSON.parse(fs.readFileSync(sessionsFile(), 'utf8')); } catch { return {}; }
+}
+function rememberSession(payload) {
+  const { sid, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  const receipt = { exp, mac: sessionMac(sid, exp) };
+  sessionReceipts.set(sid, receipt);
+  if (sessionReceipts.size > 1000) sessionReceipts.delete(sessionReceipts.keys().next().value);
+  const stored = { ...storedSessions(), ...Object.fromEntries(sessionReceipts) };
+  for (const [key, value] of Object.entries(stored)) if (!(value.exp > Date.now())) delete stored[key];
+  if (Object.keys(stored).length > 1000) delete stored[Object.keys(stored)[0]];
+  try { fs.writeFileSync(sessionsFile(), JSON.stringify(stored), { mode: 0o600 }); } catch { /* memory-only, fail closed on restart */ }
+}
+export function validSessionId(sid, now = Date.now()) {
+  if (!cfg.sessionSecret() || revoked.has(sid)) return false;
+  const receipt = sessionReceipts.get(sid) || storedSessions()[sid];
+  if (!receipt || !(receipt.exp > now) || typeof receipt.mac !== 'string') return false;
+  const expected = Buffer.from(sessionMac(sid, receipt.exp)), given = Buffer.from(receipt.mac);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
 export const clearCookie = () => `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
@@ -117,6 +144,7 @@ export function readSession(req, now = Date.now()) {
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (typeof session.sid !== 'string' || !(session.exp > now) || !(session.iat <= now + 60_000) || revoked.has(session.sid)) return null;
+    if (!sessionReceipts.has(session.sid)) rememberSession(payload);
     return session;
   } catch {
     return null;

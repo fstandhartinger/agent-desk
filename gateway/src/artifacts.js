@@ -44,7 +44,7 @@ export function artifactInstructions(context) {
 }
 
 export function createArtifactService({ fetchImpl = fetch, now = Date.now, env = process.env, readExplainer = fetchExplainerJson } = {}) {
-  const screens = new Map();
+  const screens = new Map(), screenVersions = new Map();
   const sessions = new Map(), cache = new Map(), voices = new Map();
   function sweep() {
     for (const [key, value] of screens) if (value.expires <= now()) screens.delete(key);
@@ -146,7 +146,11 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
   async function setScreen(sid, frame) {
     sweep();
     const prev = screens.get(sid);
-    if (prev && frame.frameVersion <= prev.value.frameVersion) throw fail('Veralteter Bildschirm-Frame.', 409);
+    const versionKey = `${sid}:${frame.deviceId ?? 'legacy'}`;
+    const newest = screenVersions.get(versionKey);
+    if (newest !== undefined && frame.frameVersion < newest) throw fail('Veralteter Bildschirm-Frame.', 409);
+    if (screenVersions.size >= 4000 && !screenVersions.has(versionKey)) screenVersions.delete(screenVersions.keys().next().value);
+    screenVersions.set(versionKey, frame.frameVersion);
     const record = { expires: now() + CONTEXT_TTL, value: { ...frame, ids: [], items: [], highlights: prev?.value.highlights ?? [] } };
     if (screens.size >= 1000 && !screens.has(sid)) screens.delete(screens.keys().next().value);
     screens.set(sid, record);
@@ -160,14 +164,24 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     record.value.ids = items.map(item => item.id).filter(id => frame.ids.includes(id));
     return { ok: true, newIds: record.value.ids.filter(id => !prev?.value.ids.includes(id)) };
   }
+  function clearScreen(sid, deviceId) {
+    screens.delete(sid);
+    // Keep high-water mark: an already-running earlier frame must never revive a cleared screen.
+    return { ok: true };
+  }
+  async function visibleTitles(ids) {
+    const items = [];
+    for (let pos = 0; pos < ids.length; pos += 8) items.push(...(await registry(`/v1/resolve?ids=${ids.slice(pos, pos + 8).join(',')}&depth=1`)).items);
+    return items.filter(item => ids.includes(item.id)).map(({ id, title }) => ({ id, title: title.slice(0, 60) }));
+  }
   function addHighlight(sid, summary, ids) {
     sweep();
     const record = screens.get(sid) ?? { expires: now() + CONTEXT_TTL, value: { ids: [], items: [], highlights: [] } };
     record.value.highlights = [...record.value.highlights, { summary, ids }].slice(-5);
     record.expires = now() + CONTEXT_TTL; screens.set(sid, record);
   }
-  function contextTurn(sid, text) {
-    if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw fail('Text muss 1–2000 Zeichen lang sein.');
+  function contextTurn(sid, text, { screen = false } = {}) {
+    if (typeof text !== 'string' || !text.trim() || text.length > (screen ? 12000 : 2000)) throw fail('Text hat ungültige Länge.');
     const delivered = [...(voices.get(sid) ?? [])].filter(send => send(text)).length;
     if (!delivered) throw fail('Keine verbundene Sprachsitzung.', 409);
     return { ok: true, delivered };
@@ -193,7 +207,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const { text } = await readJson(req, 12_000);
     sendJson(res, 200, contextTurn(sid, text)); return true;
   }
-  return { get, resolve, search, refRead, registerVoice, route, screen, setScreen, addHighlight, contextTurn };
+  return { get, resolve, search, refRead, registerVoice, route, screen, setScreen, clearScreen, visibleTitles, addHighlight, contextTurn };
 }
 async function boundedText(res, max) {
   let size = 0; const chunks = [];

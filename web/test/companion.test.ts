@@ -20,3 +20,15 @@ it('screen row accepts only canonical IDs, deduplicates and bounds host messages
   assert.equal(ids.length, 20);
   handleNativeMessage({ type: 'screen', ids: [] }, { postMessage() {} }, show); assert.deepEqual(ids, []);
 });
+it('host voice starts/stops immediately and reports actual lifecycle state', () => {
+  const messages: unknown[] = []; const calls: string[] = []; let state = 'idle';
+  const voice = { start(provider?: string) { calls.push(`start:${provider}`); state = 'connecting'; }, stop() { calls.push('stop'); state = 'idle'; }, state: () => state };
+  const host = { postMessage(message: unknown) { messages.push(message); } };
+  handleNativeMessage({ type: 'voice', on: true, provider: 'gemini' }, host, () => {}, voice);
+  assert.equal(companionMuted(), false);
+  handleNativeMessage({ type: 'voice', on: false }, host, () => {}, voice);
+  assert.equal(companionMuted(), true);
+  handleNativeMessage({ type: 'voice', on: true, provider: 'invalid' }, host, () => {}, voice);
+  assert.deepEqual(calls, ['start:gemini', 'stop']);
+  assert.deepEqual(messages, [{ type: 'voice-ack', on: true, state: 'connecting' }, { type: 'voice-ack', on: false, state: 'idle' }]);
+});
