@@ -1,3 +1,4 @@
+import { parseArtifactUrl } from '../../lib/artifactUrl';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, AudioLines, Check, ChevronDown, Clock, Loader2, MapPin, Mic, Square, X } from 'lucide-react';
 import { useStore } from '../../lib/store';
@@ -18,7 +19,7 @@ import Popover from '../ui/Popover';
 type Dictation = { phase: 'idle' } | { phase: 'recording'; since: number } | { phase: 'transcribing' };
 
 export default function Composer() {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => parseArtifactUrl(globalThis.location?.href ?? '/').voice ? '' : parseArtifactUrl(globalThis.location?.href ?? '/').question);
   const [dict, setDict] = useState<Dictation>({ phase: 'idle' });
   const [pickerOpen, setPickerOpen] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);

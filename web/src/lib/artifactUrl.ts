@@ -2,7 +2,9 @@
 export function parseArtifactUrl(input: string) {
   const url = new URL(input, 'https://desk.local');
   const path = /^\/a\/(.+?)\/?$/.exec(url.pathname)?.[1];
-  const parts = [url.searchParams.get('a'), path].filter(Boolean).join(',').split(',').filter(Boolean);
+  const parts = [...url.searchParams.getAll('a'), path].filter(Boolean).flatMap(value => {
+    try { return decodeURIComponent(value!).split(','); } catch { return [value!]; }
+  }).filter(Boolean);
   const ids: string[] = [], invalid: string[] = [];
   for (let part of parts) {
     try { part = decodeURIComponent(part); } catch { invalid.push(part); continue; }
@@ -11,7 +13,7 @@ export function parseArtifactUrl(input: string) {
     else if (!ids.includes(id)) ids.push(id);
   }
   const rawVoice = url.searchParams.get('voice');
-  const voice = rawVoice === 'gemini' || rawVoice === 'openai' || rawVoice === 'xai' ? rawVoice : null;
+  const voice: 'gemini' | 'openai' | 'xai' | null = rawVoice === 'gemini' || rawVoice === 'openai' || rawVoice === 'xai' ? rawVoice : null;
   return { ids, invalid, voice, question: (url.searchParams.get('q') ?? '').slice(0, 2000) };
 }
 export function artifactUrl(ids: string[], voice?: 'gemini' | 'openai' | 'xai', question?: string) {

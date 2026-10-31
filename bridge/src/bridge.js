@@ -11,7 +11,7 @@ import * as ops from './ops.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
-import { loginLink } from './notify.js';
+import { cardLink, loginLink } from './notify.js';
 import { knowledge } from './knowledge.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
@@ -48,6 +48,7 @@ export const METHOD_TIMEOUT_MS = {
 export function buildMethods(claude, host = 'lechonk') {
   const shared = {
     'ctx.core': ctx.core,
+    'ctx.decisionKey': ctx.decisionKey,
     'ctx.search': ctx.search,
     'ctx.read': ctx.read,
     'ctx.list': ctx.list,
@@ -76,6 +77,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'ops.run': ops.run,
       'board.handoff': board.handoff,
       'board.entry': board.entry,
+      'notify.cardLink': cardLink,
     };
   }
   return {

@@ -26,3 +26,8 @@ test('success, rate limit (with retry time) and Telegram outage read in German',
   const down = await requestLoginLink('/?x=a', async () => { throw new ApiError(502, 'Der Dienst antwortet gerade nicht.'); });
   assert.match(down.text, /Telegram ist gerade nicht erreichbar/);
 });
+
+test('normalizes artifact login returns and preserves the selected voice and question', () => {
+  const next = deepLinkNext({ pathname: '/a/ABCDEF%2C123abc', search: '?voice=xai&q=Hello&k=secret' });
+  assert.equal(next, '/?a=abcdef%2C123abc&voice=xai&q=Hello');
+});

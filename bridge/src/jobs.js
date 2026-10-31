@@ -5,7 +5,7 @@ import { isDenied, jobsRoot, toCanonical } from './paths.js';
 import { clearWinner, rank } from './fuzzy.js';
 
 const ACTIVE_WINDOW_MS = 12 * 3600 * 1000;
-const NAME = /^[A-Za-z0-9._-]{1,120}$/;
+const NAME = /^(?!.*\.\.)[A-Za-z0-9][\w.-]{0,119}$/;
 
 async function readEdge(file, bytes, fromEnd) {
   let fd;
@@ -178,6 +178,7 @@ async function similarJobs(query) {
  */
 export async function get({ name } = {}) {
   const query = String(name ?? '').trim();
+  if (query.includes('..') || /^[.]/.test(query) || /[\\/]/.test(query)) throw new Error('invalid job name');
   if (!query) throw new Error('job name required');
   if (NAME.test(query) && !isDenied(query)) {
     const exact = await readJob(query);

@@ -16,3 +16,8 @@ it('caps ids and generates URLs without raw hashes', () => {
   assert(!link.includes('#'));
   assert.deepEqual(parseArtifactUrl(link).ids, ['abcdef', '123abc']);
 });
+
+it('supports repeated query params and encoded path commas', () => {
+  assert.deepEqual(parseArtifactUrl('/?a=abcdef&a=123abc').ids, ['abcdef', '123abc']);
+  assert.deepEqual(parseArtifactUrl('/a/abcdef%2C123abc').ids, ['abcdef', '123abc']);
+});

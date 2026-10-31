@@ -115,5 +115,5 @@ test('job_status with an ambiguous or unknown name returns candidates instead of
   assert.equal(none.found, false);
   assert.deepEqual(none.candidates, []);
   await assert.rejects(jobs.get({ name: '  ' }), /job name required/);
-  assert.equal((await jobs.get({ name: '../../etc/passwd' })).found, false, 'path-like input is only ever a search phrase');
+  await assert.rejects(jobs.get({ name: '../../etc/passwd' }), /invalid job name/, 'traversal is rejected before fuzzy matching');
 });

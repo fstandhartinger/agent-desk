@@ -18,8 +18,7 @@ Production runs the gateway on Node 24 (`node:24-alpine`); the Sandy bridge runs
 Open `/?a=abcdef,123abc&voice=gemini&q=...` or `/a/abcdef`. IDs are six hex characters;
 encoded `a%23ABCDEF` inputs are accepted, and generated URLs never contain a raw `#`.
 The existing login gate keeps the URL. Invalid IDs show a small notice. After resolution,
-`voice=gemini|openai|xai` opens that voice session; `q` is sent once when connected (or as
-chat when no voice provider is selected).
+`voice=gemini|openai|xai` requests that voice session, subject to the trusted-referrer rule below. `q` pre-fills chat or appears as a suggested voice question; sending requires a user action.
 
 Gateway configuration: `ARTIFACTS_URL` (registry origin) and `ARTIFACTS_DESK_TOKEN` (read
 bearer token). Both stay on the server. Authenticated `GET /api/artifacts/resolve?ids=`
@@ -45,3 +44,5 @@ user text turn through every ready voice connection of that same cookie session,
 transcript echo and canvas handling. It returns 403 for a foreign sid, 409 with no ready
 voice, and does not queue turns or inject passive instructions. This is the later screen
 highlight integration point; it has no UI yet.
+
+Artifact launch safety: `q` never auto-sends. `voice` auto-starts only for a referrer origin in `DESK_TRUSTED_LAUNCH_ORIGINS` (comma/space separated); otherwise a start button is shown. Companion auto-start awaits device authentication. `DESK_GITHUB_OWNERS` defaults to `fstandhartinger`; GitHub credentials attach only to exact `owner/repo` entries in `DESK_GITHUB_TOKEN_REPOS` (empty by default). Board/job/decision artifact readers expose title/status only; card readers expose a generic title and existing details link only. No financial content reader is enabled by these references.

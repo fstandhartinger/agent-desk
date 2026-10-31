@@ -1,3 +1,4 @@
+import { artifactUrl, parseArtifactUrl } from './artifactUrl';
 // Gate "login link" UX (docs/CANVAS.md "Login UX gap"): someone opens the desk from an explainer page without a
 // session; the gate can ask the gateway to send a fresh login link via Telegram that leads back to the same place.
 import { ApiError, api, errorMessage, fmtRetry } from './api';
@@ -5,6 +6,8 @@ import { ApiError, api, errorMessage, fmtRetry } from './api';
 /** The path+query to come back to, when the URL is an explainer deep link (`?x=<slug>`); otherwise null. */
 export function deepLinkNext(loc: { pathname: string; search: string }): string | null {
   const q = new URLSearchParams(loc.search);
+  const artifact = parseArtifactUrl(`${loc.pathname}${loc.search}`);
+  if (artifact.ids.length) return artifactUrl(artifact.ids, artifact.voice ?? undefined, artifact.question || undefined);
   const slug = q.get('x');
   if (!slug || !/^[a-z0-9-]{1,80}$/.test(slug)) return null;
   q.delete('k');

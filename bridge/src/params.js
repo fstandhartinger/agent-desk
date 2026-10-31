@@ -3,6 +3,7 @@
 // methods the bridge really serves, so tool arguments and bridge parameters cannot drift apart unnoticed.
 // Units that matter: ctx.read offset/limit are LINES; ctx.core maxChars is characters.
 export const METHOD_PARAMS = {
+  'ctx.decisionKey': { key: 'string' },
   'ctx.core': { name: 'string', maxChars: 'integer' },
   'ctx.search': { query: 'string', scope: 'string', maxHits: 'integer', regex: 'boolean' },
   'ctx.read': { path: 'string', offset: 'integer', limit: 'integer' },
@@ -43,6 +44,7 @@ export const METHOD_PARAMS = {
   'ops.run': { command: 'string' },
   // the ONLY write: called by the gateway after Florian's click (POST /api/handoff), never by a model tool
   'board.handoff': { title: 'string', task: 'string', why: 'string' },
+  'notify.cardLink': { id: 'string' },
   'notify.loginLink': { url: 'string' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
 };
