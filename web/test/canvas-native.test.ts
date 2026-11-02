@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canvasPendingNotifier } from '../src/canvas/nativeNotify.ts';
+import { createCanvasBus } from '../src/canvas/bus.ts';
 import { addMessage, convStore, dismissMainAgentPrompt, upsertMainAgentPrompt, type MainPromptCard } from '../src/lib/conversation.ts';
 import { VoiceSession, VOICE_OPTIONS } from '../src/lib/voice.ts';
 import type { CanvasBusEvent } from '../src/canvas/types.ts';
@@ -58,4 +59,13 @@ test('the voice session hands main_agent_prompt to its handler', () => {
   const s = new VoiceSession(VOICE_OPTIONS[0], undefined, { onMainAgentPrompt: (p: unknown) => got.push(p) } as never) as unknown as { handle(m: unknown): void };
   s.handle({ type: 'main_agent_prompt', text: 'hallo' });
   assert.deepEqual(got, [{ type: 'main_agent_prompt', text: 'hallo' }]);
+});
+
+test('an event pushed from the voice stream reaches the callback once, also when the SSE copy follows', () => {
+  const seen: string[] = [];
+  const bus = createCanvasBus({ fetch: async () => new Response(''), setTimeout: () => 0, clearTimeout: () => {}, onEvent: (e) => seen.push(`${e.id}:${e.phase}`) });
+  const e = ev({ id: 'voice', phase: 'pending', at: 5 });
+  bus.push(e);
+  bus.push(e);
+  assert.deepEqual(seen, ['voice:pending']);
 });

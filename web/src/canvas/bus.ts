@@ -230,18 +230,21 @@ export function createCanvasBus(deps: BusDeps, store: Store<CanvasState> = creat
     },
     select(id) { set((s) => selectCanvas(s, id)); },
     toggleDetail(id) { set((s) => toggleDetail(s, id)); },
-    push(ev) { set((s) => applyEvent(s, ev)); },
+    // Same callback as the stream: in a voice session the event usually comes through here first, and the stream's copy is then a duplicate.
+    push(ev) { const before = store.get(); set((s) => applyEvent(s, ev)); if (store.get().entries !== before.entries) deps.onEvent?.(ev); },
   };
 }
 
 let shared: CanvasBus | null = null;
-/** The app-wide bus (browser deps). */
+let sharedOnEvent: ((ev: CanvasBusEvent) => void) | undefined;
+/** The app-wide bus (browser deps). Whoever renders first creates it; a later caller's callback still counts. */
 export function canvasBus(onEvent?: (ev: CanvasBusEvent) => void): CanvasBus {
+  if (onEvent) sharedOnEvent = onEvent;
   shared ??= createCanvasBus({
     fetch: (...a) => window.fetch(...a),
     setTimeout: (fn, ms) => window.setTimeout(fn, ms),
     clearTimeout: (t) => window.clearTimeout(t as number),
-    onEvent,
+    onEvent: (ev) => sharedOnEvent?.(ev),
   });
   return shared;
 }
