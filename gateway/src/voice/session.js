@@ -439,7 +439,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('response.created', { turn: turnId, id: e.id });
         break;
       case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
-        trace.event('screen.context.error', { message: String(e.message ?? '').slice(0, 200) });
+        // xAI sometimes drops a passive item before we replace it (a#7f54a5): the delete then finds nothing, which is harmless.
+        if (/item not found/i.test(e.message ?? '')) trace.event('screen.context.gone', {});
+        else trace.event('screen.context.error', { message: String(e.message ?? '').slice(0, 200) });
         break;
       case 'watchdog': // the model stayed silent after its tool results: the adapter asked for the answer again
         audit({ action: 'voice.watchdog', detail: `${provider} #${e.n}` });

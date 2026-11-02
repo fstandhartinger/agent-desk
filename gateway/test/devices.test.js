@@ -97,6 +97,10 @@ it('highlight validates foreign sid, sizes and bbox, sends normal text turn, sto
   const noImageTurns = [], end = app.artifacts.registerVoice(sid, t => { noImageTurns.push(t); return true; });
   assert.equal((await native(`session/${sid}/highlight`, { ids: ['abcdef'], bbox: highlight.bbox, noImage: true })).status, 200); end();
   assert.match(noImageTurns[0], /Fake artifact/); assert.equal(seenImages, 2);
+  // a#7f54a5: a circle in the Earnings app with no id under it said "Element(e)  ()"
+  const emptyTurns = [], end2 = app.artifacts.registerVoice(sid, t => { emptyTurns.push(t); return true; });
+  assert.equal((await native(`session/${sid}/highlight`, { ids: [], bbox: highlight.bbox, noImage: true })).status, 200); end2();
+  assert.match(emptyTurns[0], /Earnings-App[\s\S]*keine a#-IDs erkannt/); assert.doesNotMatch(emptyTurns[0], /Element\(e\)/);
   assert.equal((await native(`session/${sid}/screen/clear`, {})).status, 200);
   assert.deepEqual(app.artifacts.screen(sid).ids, []);
 });

@@ -160,8 +160,9 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
         else if (!abort.signal.aborted) sendJson(res, 200, answer);
       } catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, stop: true }); }
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
+      // Screen Agent sends this only for the ids-only Earnings app (v0.1.4 with an empty body, v0.1.5 with why).
       await readJson(req).catch(() => ({}));
-      vision.clear(target[1]);
+      vision.clear(target[1], 'ids-only');
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
@@ -179,7 +180,9 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       const crop = body.noImage ? null : imageBytes(body.crop, 2 * 1024 * 1024, 'png'), context = body.noImage || body.context === undefined ? null : imageBytes(body.context, 1024 * 1024, 'jpeg');
       const box = body.bbox;
       if (!box || ['x', 'y', 'w', 'h'].some(k => !Number.isSafeInteger(box[k]) || Math.abs(box[k]) > 100000) || box.w <= 0 || box.h <= 0) throw fail('Ungültiger Bildausschnitt.');
-      const summary = body.noImage
+      const summary = body.noImage && !ids.length
+        ? 'Markierung in der Earnings-App (davon bekomme ich absichtlich kein Bild); im markierten Bereich wurden keine a#-IDs erkannt.'
+        : body.noImage
         ? `Element(e) ${ids.map(id => `a#${id}`).join(', ')} (${(await artifacts.visibleTitles(ids)).map(item => item.title).join('; ')})`.slice(0, 1500)
         : await limited(record, 'highlight', () => media.highlight(crop, context, { x: box.x, y: box.y, w: box.w, h: box.h }, ids));
       const data = artifactData(summary).replace('<artifact_data>', '<artifact_data source="screen">');

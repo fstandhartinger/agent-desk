@@ -234,4 +234,10 @@ it('a private screen: the agent is told, stops describing the old window and loo
   v.clear('s');
   assert.equal(sent.length, 1, 'said once');
   assert.match(sent[0], /Frühere Bildschirm-Updates gelten nicht mehr/);
+  assert.doesNotMatch(sent[0], /Earnings/);
+  v.clear('s', 'ids-only');
+  assert.equal(sent.length, 2, 'the reason changed: said again');
+  assert.match(sent[1], /Earnings-App/); assert.doesNotMatch(sent[1], /\(Bank/);
+  v.clear('s', 'ids-only');
+  assert.equal(sent.length, 2);
 });

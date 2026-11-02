@@ -46,8 +46,10 @@ export function jpegSize(b) {
 const sleep = (ms, signal) => new Promise(resolve => { const t = setTimeout(resolve, ms); signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); });
 const dataBlock = obj => artifactData(obj).replace('<artifact_data>', '<artifact_data source="screen">');
 
-const PRIVATE_LOOK = 'Das aktuelle Fenster ist geschützt (Bank, Passwortmanager oder die Earnings-App): davon sehe ich kein Bild, höchstens seine IDs. Sag das ehrlich.';
-const PRIVATE_NOTE = `[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] ${PRIVATE_LOOK} Frühere Bildschirm-Updates gelten nicht mehr.`;
+const PRIVATE_LOOK = 'Das aktuelle Fenster ist geschützt (Bank, Passwortmanager, Börse oder ein Sicherheitsdialog): davon sehe ich kein Bild. Sag das ehrlich.';
+// The Earnings app is fenced on purpose (ids only, never an image): say so plainly, never call it a bank (Florian's test a#7f54a5).
+const IDS_ONLY_LOOK = 'Im Vordergrund ist die Earnings-App. Davon bekomme ich absichtlich kein Bild, nur die a#-IDs, die darauf stehen; Florian kann das in der Screen-Agent-Einstellung ändern. Sag das so und nenne es nicht Bank oder Passwortmanager.';
+const privateNote = look => `[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] ${look} Frühere Bildschirm-Updates gelten nicht mehr.`;
 
 export function createScreenVision({ media, artifacts, limits = defaultLimits, now = Date.now } = {}) {
   const states = new Map();
@@ -97,13 +99,14 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   }
   function touchChat(sid) { state(sid).chatUntil = now() + CHAT_ACTIVE_MS; }
   /** The screen turned private (blocked window, secure desktop, the ids-only Earnings app): the agent must not go on describing what it saw before. */
-  function clear(sid) {
+  function clear(sid, why = 'blocked') {
     const S = states.get(sid);
     if (!S) return;
     S.desc = null; S.sent = { text: '', at: 0, n: S.sent.n };
-    if (S.private) return;
-    S.private = true;
-    for (const h of S.handles) h.trace('screen.private', { how: h.setContext(PRIVATE_NOTE) });
+    const look = why === 'ids-only' ? IDS_ONLY_LOOK : PRIVATE_LOOK;
+    if (S.private === look) return;
+    S.private = look;
+    for (const h of S.handles) h.trace('screen.private', { why, how: h.setContext(privateNote(look)) });
   }
 
   // --- cost: a sliding hour per sid ---
@@ -203,7 +206,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   async function look(sid, question) {
     if (!attached(sid)) return { attached: false, hinweis: 'kein aktiver Screen Agent: ich sehe den Bildschirm nicht und habe keine Beschreibung davon.' };
     const S = states.get(sid);
-    if (S.private) return { attached: true, frisch: false, privat: true, hinweis: PRIVATE_LOOK, ids: snapshot(sid).ids };
+    if (S.private) return { attached: true, frisch: false, privat: true, hinweis: S.private, ids: snapshot(sid).ids };
     let fresh = false;
     if (capped(S)) fresh = null;
     else {
