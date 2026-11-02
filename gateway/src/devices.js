@@ -131,7 +131,7 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       sendJson(res, 200, { cookie, expiresAt: Math.min(record.expiresAt, now() + 30 * 86400000) });
       return true;
     }
-    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|highlight|trace|frame|commands)$/.exec(path);
+    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|screen\/private|highlight|trace|frame|commands)$/.exec(path);
     const scope = target ? 'screen' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
     if (target && !validSessionId(target[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
@@ -159,9 +159,12 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
         if (answer.stop) sendJson(res, 409, { error: 'Keine aktive Sprach- oder Chat-Sitzung.', code: 'no-session', stop: true });
         else if (!abort.signal.aborted) sendJson(res, 200, answer);
       } catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, stop: true }); }
+    } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
+      await readJson(req).catch(() => ({}));
+      vision.clear(target[1]);
+      sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
-      vision.seen(target[1]);
       if (!Number.isSafeInteger(body.frameVersion) || body.frameVersion < 0 || !body.window || typeof body.window.blocked !== 'boolean' || typeof body.window.process !== 'string' || body.window.process.length > 100) throw fail('Ungültiger Bildschirm-Kontext.');
       sendJson(res, 200, await artifacts.setScreen(target[1], { deviceId: record.deviceId, ids: body.window.blocked ? [] : ids, window: { process: body.window.blocked ? '' : body.window.process, blocked: body.window.blocked }, frameVersion: body.frameVersion }));
     } else if (target && target[2] === 'trace' && req.method === 'POST') {

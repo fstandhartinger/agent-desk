@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=22.18" },
-  "scripts": { "start": "node src/server.js", "test": "node --test test/*.test.js" },
+  "scripts": { "start": "node src/server.js", "test": "ARTIFACTS_URL= ARTIFACTS_DESK_TOKEN= node --test test/*.test.js" },
   "dependencies": { "ws": "^8.18.0" }
 }

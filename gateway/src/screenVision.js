@@ -46,6 +46,9 @@ export function jpegSize(b) {
 const sleep = (ms, signal) => new Promise(resolve => { const t = setTimeout(resolve, ms); signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); });
 const dataBlock = obj => artifactData(obj).replace('<artifact_data>', '<artifact_data source="screen">');
 
+const PRIVATE_LOOK = 'Das aktuelle Fenster ist geschützt (Bank, Passwortmanager oder die Earnings-App): davon sehe ich kein Bild, höchstens seine IDs. Sag das ehrlich.';
+const PRIVATE_NOTE = `[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] ${PRIVATE_LOOK} Frühere Bildschirm-Updates gelten nicht mehr.`;
+
 export function createScreenVision({ media, artifacts, limits = defaultLimits, now = Date.now } = {}) {
   const states = new Map();
   let sweeper = null;
@@ -93,7 +96,15 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return () => { S.handles.delete(h); if (!active(sid)) drop(sid, S); };
   }
   function touchChat(sid) { state(sid).chatUntil = now() + CHAT_ACTIVE_MS; }
-  function clear(sid) { const S = states.get(sid); if (S) { S.desc = null; S.sent = { text: '', at: 0, n: S.sent.n }; } }
+  /** The screen turned private (blocked window, secure desktop, the ids-only Earnings app): the agent must not go on describing what it saw before. */
+  function clear(sid) {
+    const S = states.get(sid);
+    if (!S) return;
+    S.desc = null; S.sent = { text: '', at: 0, n: S.sent.n };
+    if (S.private) return;
+    S.private = true;
+    for (const h of S.handles) h.trace('screen.private', { how: h.setContext(PRIVATE_NOTE) });
+  }
 
   // --- cost: a sliding hour per sid ---
   const hourUsd = S => { const cut = now() - HOUR; S.spend = S.spend.filter(e => e.t > cut); return S.spend.reduce((a, e) => a + e.usd, 0); };
@@ -136,6 +147,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     const S = state(sid), key = record.deviceId;
     if (frameVersion < (S.newest.get(key) ?? -1)) throw Object.assign(deviceError('Veralteter Bildschirm-Frame.', 409), { code: 'stale-frame' });
     S.newest.set(key, frameVersion);
+    S.private = false;
     seen(sid);
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
     tr('screen.frame', { reason, ids, masked, process: redact(proc), bytes: jpeg.length });
@@ -149,7 +161,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
       settle(); return { ...out, vision: 'capped' };
     }
     S.capNoted = false;
-    if (S.busy && reason !== 'fresh') return { ...out, vision: 'busy' };
+    if (S.busy && !(reason === 'fresh' && S.waiters.has(body.commandId))) return { ...out, vision: 'busy' };
     S.busy++;
     const prev = S.desc?.text ?? null;
     try {
@@ -158,7 +170,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
       S.frames++; S.usd += usd; S.spend.push({ t: now(), usd }); limits.addCost(usd);
       const text = redact(r.text).slice(0, 1500), changed = !prev || !similar(prev, text, r.change);
       if (frameVersion >= (S.desc?.version ?? -1) && active(sid)) S.desc = { seq: ++S.seq, text, change: redact(r.change).slice(0, 300), at: now(), version: frameVersion, process: redact(proc), title: redact(title).slice(0, 200), url: url ? redact(url).slice(0, 300) : undefined, ids, masked, old: false };
-      tr('screen.vision', { ms: r.ms, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costUsd: Number(usd.toFixed(5)), changed, text: text.slice(0, 500), frameVersion });
+      tr('screen.vision', { ms: r.ms, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costUsd: Number(usd.toFixed(5)), changed, text: text.slice(0, 200), frameVersion });
       if (changed) push(sid);
       Object.assign(out, { changed, vision: changed ? 'ok' : 'unchanged' });
     } catch (err) {
@@ -191,6 +203,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   async function look(sid, question) {
     if (!attached(sid)) return { attached: false, hinweis: 'kein aktiver Screen Agent: ich sehe den Bildschirm nicht und habe keine Beschreibung davon.' };
     const S = states.get(sid);
+    if (S.private) return { attached: true, frisch: false, privat: true, hinweis: PRIVATE_LOOK, ids: snapshot(sid).ids };
     let fresh = false;
     if (capped(S)) fresh = null;
     else {
