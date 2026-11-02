@@ -11,7 +11,7 @@ import * as ops from './ops.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
-import { cardLink, loginLink } from './notify.js';
+import { cardLink, cardRead, loginLink } from './notify.js';
 import { knowledge } from './knowledge.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
@@ -78,6 +78,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.handoff': board.handoff,
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
+      'notify.cardRead': cardRead,
     };
   }
   return {

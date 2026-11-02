@@ -12,6 +12,7 @@ export const BRIDGE_HOST = /^(lechonk|sandy)$/;
 // chats.search is fanned out to every host by the tools (callAll); here it only needs a single-host fallback.
 export const ROUTE = {
   'notify.cardLink': ['sandy'],
+  'notify.cardRead': ['sandy'],
   'ctx.knowledge': ['lechonk', 'sandy'],
   'discord.*': ['sandy'],
   'mail.*': ['sandy'],
