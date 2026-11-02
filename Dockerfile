@@ -3,6 +3,8 @@ WORKDIR /web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+ARG SOURCE_COMMIT=
+ENV DESK_COMMIT=$SOURCE_COMMIT
 RUN npm run build
 
 FROM node:24-alpine

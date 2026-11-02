@@ -1,6 +1,12 @@
 import { defineConfig, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+// Docker builds have no .git: the platform passes the commit as env (Coolify SOURCE_COMMIT / DESK_COMMIT), else git, else "dev".
+const commit = (process.env.DESK_COMMIT || process.env.SOURCE_COMMIT || (() => { try { return execSync('git rev-parse --short=12 HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } })() || 'dev').slice(0, 12);
+const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? '0';
 
 // Dev/preview only: explainer assets straight from the published pages (the gateway does this in production),
 // everything else to a local gateway, or to DESK_API (e.g. the live desk, for reviewing a UI change against real
@@ -17,6 +23,7 @@ const proxy: Record<string, ProxyOptions> = {
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: { __DESK_COMMIT__: JSON.stringify(commit), __DESK_VERSION__: JSON.stringify(version) },
   server: { proxy },
   preview: { proxy },
   // elkjs (~440 KB gzip) is a lazy chunk loaded with the first flow/architecture canvas; check-build guards that.
