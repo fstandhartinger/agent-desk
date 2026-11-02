@@ -442,7 +442,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     await waitForFacts(name);
     if (closed) return;
-    if (myEpoch !== contentEpoch) {
+    // An action tool's answer is never swallowed: xAI can call before the transcript of the same sentence arrives (which moves the epoch), and a refusal must reach the model so it calls again or says why
+    if (myEpoch !== contentEpoch && !ACTION_TOOLS.has(name)) {
       audit({ action: 'voice.tool.stale', detail: `${provider}:${name}` });
       trace.event('tool.stale', { turn: turnId, id, name, myEpoch, epoch: contentEpoch, reachedModel: true, responseRequested: provider === 'gemini', reason: fromFragment ? 'fragment superseded' : oldChain ? 'args fit the previous question' : 'result arrived after a new question began' });
       if (provider === 'gemini') { // the model waits for every call it made: answer it, but say the result is old (dropping it made Gemini report "ich bearbeite noch deine vorherige Anfrage")

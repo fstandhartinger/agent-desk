@@ -59,11 +59,13 @@ async function gate(name, ctx, clock) {
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
   const epoch = vt.epoch(), t0 = clock.now();
+  const heard = () => vt.spoken().at(-1)?.at; // a sentence that grows while we wait keeps the epoch but makes the task out of date
+  const before = heard();
   while (vt.speaking()) {
-    if (vt.epoch() !== epoch || clock.now() - t0 >= SETTLE_MAX_MS) break;
+    if (vt.epoch() !== epoch || heard() !== before || clock.now() - t0 >= SETTLE_MAX_MS) break;
     await clock.sleep(POLL_MS);
   }
-  if (vt.epoch() !== epoch || vt.speaking()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
+  if (vt.epoch() !== epoch || heard() !== before || vt.speaking()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
   if (!hasTrigger(name, spoken, clock.now())) {
     return { refused: refuse(ctx, name, 'no-trigger', `Nichts passiert: Florian hat dafür kein Auslösewort gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll; sagt er ${SAY[name]}, klappt der nächste Aufruf.`) };
