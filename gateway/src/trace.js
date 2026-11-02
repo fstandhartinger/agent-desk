@@ -9,7 +9,7 @@ export const MAX_TEXT = 4096; // transcripts are kept in full up to this size
 const MAX_STR = 1000; // any other string
 const MAX_ARGS = 2000; // tool arguments, serialised
 const BATCH = 100;
-const FIRST_FLUSH_MS = 1000; // session.ready (the model name) arrives within this window
+const FIRST_FLUSH_MS = 3000; // session.ready (the model name) arrives within this window
 const RECENT = 200; // local ring for session_trace "current" when the registry cannot answer
 const CLIENT_CAP = 3000; // client + screen-agent events accepted per session
 const SOURCES = new Set(['gateway', 'client', 'screen-agent']);
@@ -64,7 +64,7 @@ function metaOf(data, kind) {
   return {
     kind,
     provider: data.provider ?? null, model: data.model ?? null, slug: data.slug ?? null, title: data.title ?? null,
-    page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null, entry: { path: entry.path ?? null, page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null },
+    page_aid: entry.page_aid ?? (data.slug ? `explainer:${data.slug}` : null), card: entry.card ?? null, element: entry.element ?? null, entry: { path: entry.path ?? null, page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null },
     device: client.device ?? null, client: { app: client.app ?? null, version: client.version ?? null, commit: client.commit ?? null },
     screen_ids: Array.isArray(entry.screen_ids) ? entry.screen_ids.slice(0, 20) : [],
   };
