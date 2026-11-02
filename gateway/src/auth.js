@@ -66,7 +66,13 @@ const linkUses = new Map();
 const linkMac = (body) => crypto.createHmac('sha256', crypto.createHmac('sha256', cfg.sessionSecret()).update('login-link-v1').digest()).update(body).digest('base64url');
 
 export function mintLoginLink(ttlMs = 24 * 3600_000, now = Date.now(), singleUse = false) {
-  const body = `${singleUse ? "L2" : "L1"}.${now + Math.min(ttlMs, singleUse ? 5 * 60_000 : LINK_MAX_TTL_MS)}.${crypto.randomBytes(9).toString('base64url')}`;
+  const nonce = crypto.randomBytes(9).toString('base64url');
+  const body = `${singleUse ? "L2" : "L1"}.${now + Math.min(ttlMs, singleUse ? 5 * 60_000 : LINK_MAX_TTL_MS)}.${nonce}`;
+  if (singleUse) {
+    // Single-use links require an admission record. A replaced/lost state file must fail closed, never reset uses.
+    linkUses.set(nonce, { n: 0, exp: Number(body.split('.')[1]) });
+    fs.writeFileSync(linkUsesFile(), JSON.stringify(Object.fromEntries(linkUses)), { mode: 0o600 });
+  }
   return `${body}.${linkMac(body)}`;
 }
 
@@ -76,11 +82,13 @@ function useLoginLink(code, now = Date.now()) {
   if (!m || !cfg.sessionSecret() || !safeEqual(m[4], linkMac(m[1]))) return false;
   const exp = Number(m[2]);
   if (exp <= now || exp - now > LINK_MAX_TTL_MS) return false;
+  if (code.startsWith('L2.') && !linkUses.has(m[3])) return false;
   const used = linkUses.get(m[3])?.n ?? 0;
   if (used >= (code.startsWith('L2.') ? 1 : LINK_MAX_USES)) return false;
   linkUses.set(m[3], { n: used + 1, exp });
   for (const [k, v] of linkUses) if (v.exp <= now) linkUses.delete(k);
-  try { fs.writeFileSync(linkUsesFile(), JSON.stringify(Object.fromEntries(linkUses)), { mode: 0o600 }); } catch { /* memory only */ }
+  try { fs.writeFileSync(linkUsesFile(), JSON.stringify(Object.fromEntries(linkUses)), { mode: 0o600 }); }
+  catch { if (code.startsWith('L2.')) return false; /* L1 keeps its legacy memory-only fallback. */ }
   return true;
 }
 const linkUsesFile = () => process.env.DESK_LINK_USES_FILE || '/tmp/agent-desk-link-uses.json';

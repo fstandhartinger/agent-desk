@@ -57,6 +57,13 @@ describe('POST /api/auth/request-link', () => {
     assert.equal((await use()).status, 401);
   });
 
+  it('a single-use pairing login cannot reset to unused when its admission state is lost', async () => {
+    const code = auth.mintLoginLink(300000, Date.now(), true);
+    auth.resetLoginLimitsForTests(); // replacement container has no admission/use records
+    const res = await fetch(gw.base+'/api/auth/login', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code})});
+    assert.equal(res.status,401);
+  });
+
   it('next defaults to the start page', async () => {
     assert.equal((await request({})).status, 202);
     assert.equal(sent[0].url.startsWith(`${DESK_ORIGIN}/#k=L1.`), true);
