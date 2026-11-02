@@ -9,11 +9,15 @@ import { titleOf } from '../lib/explainer';
 import { newConversation } from '../lib/conversation';
 import { fmtUsd } from '../lib/format';
 import { auth } from '../lib/api';
+import { copyText } from '../lib/clipboard';
 import CardChip from './ui/CardChip';
 import Logo from './Logo';
 import Popover from './ui/Popover';
 import Kbd from './ui/Kbd';
 import HealthDot from './ui/HealthDot';
+
+/** Artifact ID of the Desk app itself (artifacts.manifest.json, item "app"). */
+export const APP_AID = '27f51f';
 
 const PROVIDER_LABEL: Record<ProviderId, string> = { xai: 'Grok', openai: 'GPT-Live', gemini: 'Gemini' };
 
@@ -46,6 +50,10 @@ export default function Header({ compact, onLoggedOut }: { compact: boolean; onL
         )}
       </div>
       <div className="flex-1" />
+      <button type="button" onClick={() => void copyText(`a#${APP_AID}`)} title="App-ID kopieren" aria-label={`App-ID a#${APP_AID} kopieren`}
+        className="absolute right-2 font-mono text-[11px] lowercase leading-none text-mute/80 transition-colors hover:text-fg-2" style={{ top: 'calc(var(--sat) + 2px)' }}>
+        a#{APP_AID}
+      </button>
 
       <div
         className={`flex h-8 items-center gap-2 rounded-full border px-2.5 text-xs font-medium ${online ? 'border-moss/20 bg-moss/[0.07] text-moss' : 'border-white/[0.08] bg-white/[0.03] text-dim'}`}

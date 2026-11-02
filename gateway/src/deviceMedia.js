@@ -52,7 +52,21 @@ export function applyCorrections(text, dictionary) {
   }
   return text;
 }
-export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budgetMs = 4000 } = {}) {
+// Whisper-style "prompt": the top dictionary terms (corrected spellings only, never replace_from), at most 800 chars.
+export function vocabularyPrompt(dictionary, max = 800) {
+  const entries = dictionary?.terms ?? dictionary?.items ?? (Array.isArray(dictionary) ? dictionary : []);
+  if (!Array.isArray(entries)) return '';
+  const seen = new Set(); let out = '';
+  for (const item of entries) {
+    const term = typeof item?.term === 'string' ? item.term.replace(/\s+/g, ' ').trim() : '';
+    if (!term || term.length > 100 || seen.has(term)) continue;
+    const next = out ? `${out}, ${term}` : term;
+    if (next.length > max) break;
+    seen.add(term); out = next;
+  }
+  return out;
+}
+export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budgetMs = 4000, promptWaitMs = 300 } = {}) {
   const googleKey = () => env.GOOGLE_API_KEY || env.GEMINI_API_KEY;
   async function google(parts, signal) {
     if (!googleKey()) throw deviceError('Google Vision ist nicht eingerichtet.', 503);
@@ -79,7 +93,14 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     const soft = new Promise(resolve => { softTimer = setTimeout(resolve, Math.min(2300, budgetMs * 0.575)); });
     const deadline = new Promise(resolve => { timer = setTimeout(() => { expired = true; controller.abort(); resolve(); }, budgetMs); });
     const transcript = async (url, key, model) => {
-      const body = new FormData(); body.set('model', model); body.set('language', 'de'); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
+      // The STT call waits for the dictionary at most promptWaitMs; without it the request goes out without a prompt.
+      if (!dictionarySettled) {
+        let waitTimer;
+        await Promise.race([dictionaryJob, new Promise(resolve => { waitTimer = setTimeout(resolve, promptWaitMs); })]);
+        clearTimeout(waitTimer);
+      }
+      const prompt = vocabularyPrompt(resolvedDictionary);
+      const body = new FormData(); body.set('model', model); body.set('language', 'de'); if (prompt) body.set('prompt', prompt); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
       if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
       limits.addCost(duration / 60 * 0.03);
       const res = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}` }, redirect: 'error', body, signal: controller.signal });
@@ -88,7 +109,8 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     };
     let resolvedDictionary = {}, resolvedContext = {};
     const contextJob = Promise.resolve(context).then(value => { if (!expired) resolvedContext = value; }).catch(() => {});
-    const dictionaryJob = Promise.resolve(dictionary).then(value => { if (!expired) resolvedDictionary = value; }).catch(() => {});
+    let dictionarySettled = false;
+    const dictionaryJob = Promise.resolve(dictionary).then(value => { dictionarySettled = true; if (!expired) resolvedDictionary = value; }, () => { dictionarySettled = true; });
     const jobs = [];
     const add = (name, fn) => jobs.push(Promise.resolve().then(fn).then(text => { if (!expired && plausible(text)) { sources[name] = text.trim(); first ||= text.trim(); } }).catch(() => {}));
     if (env.GROQ_API_KEY) add('groq', () => transcript(`${env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}/audio/transcriptions`, env.GROQ_API_KEY, 'whisper-large-v3'));

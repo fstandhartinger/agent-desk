@@ -182,8 +182,15 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       wavDuration(buffer);
       sendJson(res, 200, await limited(record, 'dictate', async () => {
         const context = artifacts.visibleTitles(ctx.visibleIds).then(items => {
+          // Titles first (all of them that fit), then a one-line summary excerpt per artifact while the 2500-char total holds.
           const bounded = items.map(({ id, title }) => ({ id, title: title.slice(0, 60) }));
-          while (artifactData(bounded).length > 1500) bounded.pop();
+          while (artifactData(bounded).length > 2500) bounded.pop();
+          items.slice(0, bounded.length).forEach(({ summary }, i) => {
+            const line = String(summary ?? '').split(/\r?\n/).find(l => l.trim())?.replace(/\s+/g, ' ').trim().slice(0, 160);
+            if (!line) return;
+            bounded[i].summary = line;
+            if (artifactData(bounded).length > 2500) delete bounded[i].summary;
+          });
           return { ...ctx, visibleArtifacts: artifactData(bounded) };
         }).catch(() => ({ ...ctx, visibleArtifacts: artifactData([]) }));
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })));

@@ -3,6 +3,7 @@ import { useStore } from '../../lib/store';
 import { convStore, newConversation, textOf } from '../../lib/conversation';
 import { stopChat } from '../../lib/chat';
 import SessionBadge from '../voice/SessionBadge';
+import { voiceStore } from '../../lib/voice';
 import { kinoStore, setKinoChat } from '../../lib/layout';
 
 /** Slim bar above the thread: history, current conversation title, new conversation (and hide in Kino). */
@@ -13,6 +14,8 @@ export default function ChatBar({ onHistory }: { onHistory: () => void }) {
   });
   const empty = useStore(convStore, (c) => c.messages.length === 0);
   const kino = useStore(kinoStore, (s) => s.kino);
+  // The dock shows the session id while a voice session runs; the bar only when no dock is visible.
+  const dockVisible = useStore(voiceStore, (s) => s.state !== 'idle');
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-white/[0.04] px-2 lg:px-3">
       <button type="button" onClick={onHistory} aria-label="Verlauf öffnen" title="Verlauf"
@@ -21,7 +24,7 @@ export default function ChatBar({ onHistory }: { onHistory: () => void }) {
         <span>Verlauf</span>
       </button>
       <p className="min-w-0 flex-1 truncate px-1 text-center text-[13px] text-mute" title={title || undefined}>{title || 'Neues Gespräch'}</p>
-      <SessionBadge className="shrink-0 px-1" />
+      {!dockVisible && <SessionBadge className="shrink-0 px-1" />}
       <button type="button" disabled={empty} onClick={() => { stopChat(); newConversation(); }} aria-label="Neues Gespräch" title="Neues Gespräch"
         className="flex h-11 w-11 items-center justify-center rounded-full text-dim transition-colors hover:bg-white/[0.06] hover:text-fg disabled:opacity-35 disabled:hover:bg-transparent lg:h-9 lg:w-9">
         <SquarePen className="h-4 w-4" />

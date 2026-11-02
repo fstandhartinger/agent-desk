@@ -1,0 +1,40 @@
+{
+  "surface": "app:agent-desk",
+  "items": {
+    "app": {
+      "id": "27f51f",
+      "kind": "app",
+      "title": "Agent Desk",
+      "summary": "Die Agent-Desk-Oberfläche: Sprach-Dock, Chat, Claude-Sitzungen und Erklärseiten an einem Ort. Hier steuert Florian Agenten per Sprache oder Text und sieht deren Ergebnisse.",
+      "parent": null,
+      "access": "private",
+      "refs": [
+        {"kind": "code", "target": "github:fstandhartinger/agent-desk@HEAD:web/src/components/Header.tsx", "label": "Kopfzeile mit App-ID"},
+        {"kind": "code", "target": "github:fstandhartinger/agent-desk@HEAD:web/src/components/Desk.tsx", "label": "Gesamtlayout"}
+      ]
+    },
+    "voice-dock": {
+      "id": "4db2ba",
+      "kind": "panel",
+      "title": "Sprach-Dock",
+      "summary": "Zeigt, solange eine Sprachsitzung läuft, deren Zustand (hört zu, denkt, spricht, stumm) und bietet Stumm, Unterbrechen und Beenden. Oben rechts steht die ID der Sitzung.",
+      "parent": "27f51f",
+      "access": "private",
+      "refs": [
+        {"kind": "code", "target": "github:fstandhartinger/agent-desk@HEAD:web/src/components/voice/VoiceDock.tsx", "label": "Darstellung"},
+        {"kind": "code", "target": "github:fstandhartinger/agent-desk@HEAD:web/src/lib/voiceController.ts", "label": "Steuerung"}
+      ]
+    },
+    "chat": {
+      "id": "8f96b9",
+      "kind": "panel",
+      "title": "Chat",
+      "summary": "Der Chat-Verlauf mit Verlaufsliste, Titel des Gesprächs und Eingabe. Hier erscheinen Antworten der Agenten und Texteingaben neben der Sprache.",
+      "parent": "27f51f",
+      "access": "private",
+      "refs": [
+        {"kind": "code", "target": "github:fstandhartinger/agent-desk@HEAD:web/src/components/chat/ChatBar.tsx", "label": "Leiste über dem Verlauf"}
+      ]
+    }
+  }
+}
