@@ -35,7 +35,7 @@ export const MAX_RECOVERIES = 2;
 const RECOVERY_FACT_CHARS = 1500;
 const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
 
-export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() }) {
+export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
   let adapter = null;
@@ -232,7 +232,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function restartNoAnswer() {
     clearTimeout(pending.timer);
     if (!pending.active || closed) return;
-    pending.timer = setTimeout(fireNoAnswer, noAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0));
+    pending.timer = setTimeout(fireNoAnswer, noAnswerMs());
     pending.timer.unref?.();
   }
 
