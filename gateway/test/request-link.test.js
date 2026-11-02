@@ -26,8 +26,8 @@ const request = (body, headers = {}) => fetch(`${gw.base}/api/auth/request-link`
 describe('POST /api/auth/request-link', () => {
   it('needs no cookie, sends a login link through the bridge, and the link logs in and keeps next', async () => {
     const res = await request({ next: '/?x=video-send&t=42' });
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(res.status, 202);
+    assert.deepEqual(await res.json(), { ok: true, status: 'queued' });
     assert.equal(sent.length, 1);
     const url = new URL(sent[0].url);
     assert.equal(`${url.origin}${url.pathname}${url.search}`, `${DESK_ORIGIN}/?x=video-send&t=42`);
@@ -38,8 +38,27 @@ describe('POST /api/auth/request-link', () => {
     assert.match(login.headers.get('set-cookie'), /^desk_s=/);
   });
 
+  it('accepts durable queue admission before slow delivery', async () => {
+    handler = () => ({ queued: true });
+    const res = await request({ next: '/device?pair=' + 'a'.repeat(43) });
+    assert.equal(res.status, 202);
+    assert.deepEqual(await res.json(), { ok: true, status: 'queued' });
+    assert.equal((await request({ next: '/device?pair=' + 'a'.repeat(43) })).status, 429);
+  });
+
+  it('pairing login links have one use, five-minute expiry and never log the nonce', async () => {
+    const pair = 'p'.repeat(43);
+    await request({ next: '/device?pair=' + pair });
+    const code = new URL(sent[0].url).hash.slice(3);
+    assert.match(code, /^L2\./);
+    assert(Number(code.split('.')[1]) <= Date.now()+300000);
+    const use = () => fetch(gw.base + '/api/auth/login', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code})});
+    assert.equal((await use()).status, 200);
+    assert.equal((await use()).status, 401);
+  });
+
   it('next defaults to the start page', async () => {
-    assert.equal((await request({})).status, 200);
+    assert.equal((await request({})).status, 202);
     assert.equal(sent[0].url.startsWith(`${DESK_ORIGIN}/#k=L1.`), true);
   });
 
@@ -50,14 +69,14 @@ describe('POST /api/auth/request-link', () => {
       assert.match((await res.json()).error, /Ungültiges Ziel/);
     }
     assert.equal(sent.length, 0);
-    assert.equal((await request({ next: '/' })).status, 200);
+    assert.equal((await request({ next: '/' })).status, 202);
   });
 
   it('is limited globally: 1 per 10 minutes and 4 per day, with a German message and retryAfter', async () => {
     let now = Date.now();
     const clock = mock.method(Date, 'now', () => now);
     try {
-      assert.equal((await request({})).status, 200);
+      assert.equal((await request({})).status, 202);
       const blocked = await request({});
       assert.equal(blocked.status, 429);
       const body = await blocked.json();
@@ -66,7 +85,7 @@ describe('POST /api/auth/request-link', () => {
       assert.equal(blocked.headers.get('retry-after'), String(body.retryAfter));
       for (let i = 0; i < 3; i += 1) {
         now += 11 * 60_000;
-        assert.equal((await request({})).status, 200, `request ${i + 2}`);
+        assert.equal((await request({})).status, 202, `request ${i + 2}`);
       }
       now += 11 * 60_000;
       const day = await request({});
@@ -74,19 +93,19 @@ describe('POST /api/auth/request-link', () => {
       assert.ok((await day.json()).retryAfter > 3600, 'the day limit waits for hours');
       assert.equal(sent.length, 4);
       now += 24 * 3600_000;
-      assert.equal((await request({})).status, 200);
+      assert.equal((await request({})).status, 202);
     } finally {
       clock.mock.restore();
     }
   });
 
-  it('a delivery failure answers 502 and does not use up the allowance', async () => {
+  it('an uncertain bridge failure answers truthfully and retains cooldown against duplicates', async () => {
     handler = () => ({ sent: false, detail: 'notify exit 75' });
     const failed = await request({});
     assert.equal(failed.status, 502);
-    assert.match((await failed.json()).error, /nicht per Telegram geschickt/);
+    assert.match((await failed.json()).error, /Versandstatus unbekannt/);
     handler = (params) => { sent.push(params); return { sent: true }; };
-    assert.equal((await request({})).status, 200);
+    assert.equal((await request({})).status, 429);
   });
 
   it('refuses cross-site posts', async () => {
@@ -126,7 +145,7 @@ describe('request-link dry run (test hook for critics)', () => {
   it('x-desk-dry-run: 1 is ignored unless DESK_TEST_DRYRUN=1 (a real link goes out)', async () => {
     delete process.env.DESK_TEST_DRYRUN;
     const res = await request({ next: '/' }, { 'x-desk-dry-run': '1' });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 202);
     assert.equal(sent.length, 1);
   });
 
@@ -139,13 +158,13 @@ describe('request-link dry run (test hook for critics)', () => {
     }
     assert.equal(sent.length, 0);
     assert.equal((await request({ next: '//evil.example' }, { 'x-desk-dry-run': '1' })).status, 400); // validation still runs
-    assert.equal((await request({})).status, 200); // the allowance is untouched
+    assert.equal((await request({})).status, 202); // the allowance is untouched
     assert.equal(sent.length, 1);
   });
 
   it('without the header the env var alone changes nothing', async () => {
     process.env.DESK_TEST_DRYRUN = '1';
-    assert.equal((await request({})).status, 200);
+    assert.equal((await request({})).status, 202);
     assert.equal(sent.length, 1);
   });
 });

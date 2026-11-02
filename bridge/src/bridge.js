@@ -11,7 +11,8 @@ import * as ops from './ops.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
-import { cardLink, cardRead, loginLink } from './notify.js';
+import { cardLink, cardRead } from './notify.js';
+import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
@@ -88,7 +89,7 @@ export function buildMethods(claude, host = 'lechonk') {
     'claude.stop': claude.stop,
     'claude.list': claude.list,
     'claude.get': claude.get,
-    'notify.loginLink': loginLink,
+    'notify.loginLink': queueLoginLink,
     'audit.append': audit.append,
   };
 }
@@ -101,6 +102,7 @@ function withTimeout(promise, ms) {
 
 /** Dials the gateway, serves requests, reconnects forever. Returns {close()}. */
 export function startBridge({ url, token, host = 'lechonk' }) {
+  if (host === 'lechonk') void resumeLoginQueue().catch(() => {});
   let ws = null;
   let closed = false;
   let attempt = 0;

@@ -129,3 +129,13 @@ and `OPENAI_API_KEY` for the other transcribers. For test endpoints the existing
 Processors: Google receives highlighted images and enabled dictation audio; Groq and OpenAI
 receive dictation audio when configured. Field context/dictionary reach Google reconciliation.
 No real provider calls are needed for the device route/media tests.
+
+### Screen Agent v0.1.3 first run
+
+Open **Screen Agent tray → Desk öffnen → Im Browser verbinden**. Confirm **Dieses Gerät verbinden** in the normal browser on the same computer. If needed, first open the requested Telegram login link there. The browser passes a short-lived approval to the waiting local app; the app opens Desk signed in. No access code or device token needs copying. A link opened on a phone cannot pair a different computer.
+
+Pairing uses separate 256-bit browser and polling nonces, a 5-minute transaction lifetime, and a browser-only approval proof returned to a random-path `127.0.0.1` listener on that computer. Confirmation shortens the remaining lifetime to at most 2 minutes. Issuance is single-use and reserved before registry I/O. Start is limited to five requests per IP/minute and sixty globally; proof guesses consume the transaction after three failures. A gateway restart cancels unfinished pairings. Login links for this flow expire after five minutes and one use.
+
+Native device credentials stay in Windows DPAPI. `/api/device/web-session` signs a cookie bound to the device hash; HTTP and new voice connections verify it against the registry. Device sessions cannot pair or manage devices. Revocation clears the native cache immediately through Desk's management endpoint (otherwise native cache TTL is at most sixty seconds). Existing voice sockets may finish until closed. Registry outages return 503 and preserve saved native credentials.
+
+Login-link delivery is acknowledged after the bridge writes its private durable queue, independently of the slow central notifier. Repeated requests retain a ten-minute cooldown even when an acknowledgement is lost. The notifier's `QUEUED: outbox` response is queue admission, not delivery failure. After an ambiguous notifier outcome the bridge never repeats automatically. Queue files are private (directory0700/files0600), and raw links are removed after notifier ownership; claimed sends are never replayed after a crash. This deliberately chooses no duplicate send over automatic retry of an ambiguous send.

@@ -13,6 +13,7 @@ process.env.DESK_SESSIONS_DIR = path.join(home, 'desk-sessions');
 const fixture = fs.readFileSync(new URL('./fixtures/tax-lines.txt', import.meta.url), 'utf8');
 const bin = path.join(home, 'agent-board');
 fs.writeFileSync(bin, `#!/bin/sh\ncat '${new URL('./fixtures/tax-lines.txt', import.meta.url).pathname}'\n`, { mode: 0o755 });
+process.env.BRIDGE_LOGIN_QUEUE_DIR = path.join(home, 'login-queue');
 const notifyLog = path.join(home, 'notify.log');
 const notifyBin = path.join(home, 'notify-fake');
 fs.writeFileSync(notifyBin, `#!/bin/sh\nprintf '%s|' "$@" > '${notifyLog}'\necho sent\n`, { mode: 0o755 });
@@ -62,9 +63,10 @@ test('code.outline over the wire; a path outside the read roots is refused', asy
 test('notify.loginLink over the wire sends the card once; a foreign url is an error and sends nothing', async () => {
   const url = 'https://desk.app.mintapis.com/?login=zzz';
   const r = await gw.call('notify.loginLink', { url });
-  assert.deepEqual(r, { sent: true, detail: 'sent' });
+  assert.deepEqual(r, { queued: true });
+  for (let i=0; i<100 && !fs.existsSync(notifyLog); i++) await new Promise(r=>setTimeout(r,20));
   assert.match(fs.readFileSync(notifyLog, 'utf8'), /^now\|--requested\|✅ ERLEDIGT\nWorum geht's: Your Agent Desk login link/);
   fs.rmSync(notifyLog);
-  await assert.rejects(gw.call('notify.loginLink', { url: 'https://evil.example/' }), /desk\.app\.mintapis\.com/);
+  await assert.rejects(gw.call('notify.loginLink', { url: 'https://evil.example/' }), /invalid Desk login link/);
   assert.ok(!fs.existsSync(notifyLog));
 });

@@ -96,7 +96,7 @@ export function createApp({ deviceOptions = {} } = {}) {
     if (pathname === '/api/auth/request-link' && req.method === 'POST') return requestLoginLink(req, res, { hub });
 
     const session = readSession(req);
-    if (!session) return sendJson(res, 401, { error: TEXT.loginRequired });
+    if (!session || !await devices.authorizeSession(session)) return sendJson(res, 401, { error: TEXT.loginRequired });
     const { sid } = session;
 
     if (pathname === '/api/auth/me') return sendJson(res, 200, { ok: true, sid });
@@ -149,10 +149,10 @@ export function createApp({ deviceOptions = {} } = {}) {
     });
   }
 
-  function upgradeVoice(req, socket, head) {
+  async function upgradeVoice(req, socket, head) {
     const ip = clientIp(req);
     const session = readSession(req);
-    if (!session || !originOk(req)) return reject(socket, 401, 'Unauthorized');
+    if (!session || !originOk(req) || !await devices.authorizeSession(session)) return reject(socket, 401, 'Unauthorized');
     const { sid } = session;
     const gate = limits.check(sid, 'voice');
     const spend = limits.check(sid, 'spend');
@@ -181,7 +181,7 @@ export function createApp({ deviceOptions = {} } = {}) {
     const url = new URL(req.url, 'http://desk.local');
     socket.on('error', () => socket.destroy());
     if (url.pathname === '/bridge') return upgradeBridge(req, socket, head, url);
-    if (url.pathname === '/api/voice') return upgradeVoice(req, socket, head);
+    if (url.pathname === '/api/voice') return upgradeVoice(req, socket, head).catch(() => reject(socket, 503, 'Service Unavailable'));
     return reject(socket, 404, 'Not Found');
   });
 

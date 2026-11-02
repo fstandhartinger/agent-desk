@@ -65,19 +65,19 @@ const LINK_MAX_TTL_MS = 7 * 24 * 3600_000;
 const linkUses = new Map();
 const linkMac = (body) => crypto.createHmac('sha256', crypto.createHmac('sha256', cfg.sessionSecret()).update('login-link-v1').digest()).update(body).digest('base64url');
 
-export function mintLoginLink(ttlMs = 24 * 3600_000, now = Date.now()) {
-  const body = `L1.${now + Math.min(ttlMs, LINK_MAX_TTL_MS)}.${crypto.randomBytes(9).toString('base64url')}`;
+export function mintLoginLink(ttlMs = 24 * 3600_000, now = Date.now(), singleUse = false) {
+  const body = `${singleUse ? "L2" : "L1"}.${now + Math.min(ttlMs, singleUse ? 5 * 60_000 : LINK_MAX_TTL_MS)}.${crypto.randomBytes(9).toString('base64url')}`;
   return `${body}.${linkMac(body)}`;
 }
 
 /** True (and one use consumed) for a valid, unexpired, not used-up login link. */
 function useLoginLink(code, now = Date.now()) {
-  const m = /^(L1\.(\d{13})\.([A-Za-z0-9_-]{12}))\.([A-Za-z0-9_-]{43})$/.exec(code);
+  const m = /^(L[12]\.(\d{13})\.([A-Za-z0-9_-]{12}))\.([A-Za-z0-9_-]{43})$/.exec(code);
   if (!m || !cfg.sessionSecret() || !safeEqual(m[4], linkMac(m[1]))) return false;
   const exp = Number(m[2]);
   if (exp <= now || exp - now > LINK_MAX_TTL_MS) return false;
   const used = linkUses.get(m[3])?.n ?? 0;
-  if (used >= LINK_MAX_USES) return false;
+  if (used >= (code.startsWith('L2.') ? 1 : LINK_MAX_USES)) return false;
   linkUses.set(m[3], { n: used + 1, exp });
   for (const [k, v] of linkUses) if (v.exp <= now) linkUses.delete(k);
   try { fs.writeFileSync(linkUsesFile(), JSON.stringify(Object.fromEntries(linkUses)), { mode: 0o600 }); } catch { /* memory only */ }
@@ -97,8 +97,8 @@ export function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-export function issueCookie(now = Date.now()) {
-  const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + MAX_AGE_S * 1000, sid: crypto.randomBytes(9).toString('base64url') })).toString('base64url');
+export function issueCookie(now = Date.now(), extra = {}) {
+  const payload = Buffer.from(JSON.stringify({ ...extra, iat: now, exp: now + MAX_AGE_S * 1000, sid: crypto.randomBytes(9).toString('base64url') })).toString('base64url');
   rememberSession(payload);
   return `${COOKIE_NAME}=${payload}.${hmac(payload)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${MAX_AGE_S}`;
 }
@@ -162,7 +162,7 @@ export async function login(req, res) {
   if (wait) return sendJson(res, 429, { error: tooManyAttempts(wait), retryAfter: wait }, { 'retry-after': String(wait) });
   if (!cfg.accessCode() || !cfg.sessionSecret()) return sendJson(res, 503, { error: TEXT.loginNotConfigured });
   const body = await readJson(req, 4096);
-  const viaLink = typeof body.code === 'string' && body.code.startsWith('L1.') && useLoginLink(body.code);
+  const viaLink = typeof body.code === 'string' && /^L[12]\./.test(body.code) && useLoginLink(body.code);
   if (!viaLink && (typeof body.code !== 'string' || !safeEqual(body.code, cfg.accessCode()))) {
     perIp.fail(ip);
     overall.fail('all');
@@ -183,7 +183,7 @@ const NEXT_PATH = /^\/(\?[^#\s\\]*)?$/;
 /** Same-origin target the login link opens: "/" or "/?x=…"; anything else is refused. */
 export function safeNext(value) {
   if (value === undefined || value === null || value === '') return '/';
-  if (value === '/device') return value;
+  if (value === '/device' || (typeof value === 'string' && /^\/device\?pair=[A-Za-z0-9_-]{43}$/.test(value))) return value;
   if (typeof value === 'string' && value.length <= 500 && /^\/a\/[^?#\s\\]+(?:\?[^#\s\\]*)?$/.test(value)) {
     try {
       const u = new URL(value, 'https://desk.local');
@@ -220,20 +220,20 @@ export async function requestLoginLink(req, res, { hub }) {
   if (process.env.DESK_TEST_DRYRUN === '1' && req.headers['x-desk-dry-run'] === '1') {
     linkRequests.splice(linkRequests.lastIndexOf(now), 1); // a dry run uses no allowance
     mintLoginLink();
-    audit({ action: 'login.request_link.dryrun', ip, actor: 'anonymous', detail: next });
+    audit({ action: 'login.request_link.dryrun', ip, actor: 'anonymous', detail: next.startsWith('/device') ? '/device' : next });
     return sendJson(res, 200, { ok: true, dryRun: true });
   }
   try {
-    const url = `${cfg.deskOrigin()}${next}#k=${mintLoginLink()}`;
+    const url = `${cfg.deskOrigin()}${next}#k=${mintLoginLink(next.startsWith('/device?pair=') ? 5 * 60_000 : undefined, now, next.startsWith('/device?pair='))}`;
     const result = await hub.call('notify.loginLink', { url });
-    if (result?.sent !== true) throw new Error('not sent');
+    if (result?.sent !== true && result?.queued !== true) throw new Error('not queued');
   } catch {
-    linkRequests.splice(linkRequests.lastIndexOf(now), 1); // nothing was sent: do not burn the allowance
+    // Delivery may have been admitted before the acknowledgement was lost. Keep the cooldown to prevent duplicates.
     audit({ action: 'login.request_link.fail', ip, actor: 'anonymous' });
-    return sendJson(res, 502, { error: TEXT.linkNotSent });
+    return sendJson(res, 502, { error: 'Versandstatus unbekannt. Bitte Telegram prüfen und vor einer neuen Anfrage zehn Minuten warten.' });
   }
-  audit({ action: 'login.request_link', ip, actor: 'anonymous', detail: next });
-  return sendJson(res, 200, { ok: true });
+  audit({ action: 'login.request_link', ip, actor: 'anonymous', detail: next.startsWith('/device') ? '/device' : next });
+  return sendJson(res, 202, { ok: true, status: 'queued' });
 }
 
 export function logout(req, res) {
