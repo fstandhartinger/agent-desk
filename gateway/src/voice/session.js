@@ -661,11 +661,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (!text || !adapter || closed) return false;
     flushTranscript();
     commitUser();
+    const spoken = lastFinal;
     beginUserTurn(true, 'marker');
     userOpen = false;
     contentOpen = false;
     interrupted = false;
-    lastFinal = null;
+    lastFinal = spoken && !spoken.answered ? { ...spoken, turn: turnId } : null; // he often goes on talking while he draws: the sentence still grows across the marking
     lastUserText = text;
     armNoAnswer(text);
     trace.event('transcript.user.final', { turn: turnId, text, marker: true });

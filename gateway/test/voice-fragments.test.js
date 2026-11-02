@@ -150,3 +150,17 @@ test('"Item not found" of the screen context is benign: screen.context.gone, nev
   h.vendor({ type: 'error', event_id: 'screen-add-4', error: { message: 'Invalid item' } });
   assert(h.traced.some((e) => e.type === 'screen.context.error'), 'a real refusal is still an error');
 });
+
+test('he goes on talking while he draws: the marking does not split the growing sentence', async (t) => {
+  const h = harness(t);
+  await sleep(1);
+  h.vendor({ type: 'session.updated' });
+  h.vendor(final('i5', T5));
+  await sleep(5);
+  h.registered[0]('[Markierung vom Desk] x', { marker: true });
+  await sleep(1);
+  h.vendor(final('i6', T6));
+  await sleep(5);
+  assert.equal(h.traced.filter((e) => e.type === 'turn.user.grown').length, 1);
+  assert.equal(users(h).at(-1).text, T6); assert.equal(users(h).at(-1).replace, true);
+});
