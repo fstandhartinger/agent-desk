@@ -1,14 +1,15 @@
 import { createStore } from './store';
 import { load, save } from './storage';
 import { uid } from './format';
-import type { ClaudeProposalEvent, HandoffEvent, ToolEvent } from './types';
+import type { ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, ToolEvent } from './types';
 
 export type Via = 'text' | 'dictation' | 'voice' | 'typed';
 export type HandoffState = 'pending' | 'sending' | 'done' | 'error' | 'discarded';
 export interface HandoffCard extends Omit<HandoffEvent, 'type'> { state: HandoffState; entryId?: string | number; error?: string }
 export type ClaudeCardState = 'pending' | 'sending' | 'done' | 'error' | 'discarded';
 export interface ClaudeCard extends Omit<ClaudeProposalEvent, 'type'> { state: ClaudeCardState; startedSid?: string; error?: string }
-export type Part = { kind: 'text'; text: string } | { kind: 'tool'; tool: ToolEvent } | { kind: 'handoff'; card: HandoffCard } | { kind: 'claude'; card: ClaudeCard };
+export interface MainPromptCard { id: string; text: string; state: 'open' | 'dismissed' }
+export type Part = { kind: 'text'; text: string } | { kind: 'tool'; tool: ToolEvent } | { kind: 'handoff'; card: HandoffCard } | { kind: 'claude'; card: ClaudeCard } | { kind: 'mainPrompt'; card: MainPromptCard };
 export interface Msg {
   id: string;
   role: 'user' | 'assistant';
@@ -250,6 +251,26 @@ export function patchClaudeProposal(proposalId: string, change: Partial<ClaudeCa
     messages: c.messages.map((m) =>
       m.parts.some((p) => p.kind === 'claude' && p.card.id === proposalId)
         ? { ...m, parts: m.parts.map((p) => (p.kind === 'claude' && p.card.id === proposalId ? { ...p, card: { ...p.card, ...change } } : p)) }
+        : m),
+  }));
+}
+
+const MAIN_PROMPT_MAX = 20_000;
+
+/** Adds the "not typed" card of a `main_agent_prompt` event. The text is kept as plain text; nothing is copied or sent. */
+export function upsertMainAgentPrompt(id: string, ev: MainAgentPromptEvent): string | null {
+  if (typeof ev.text !== 'string' || !ev.text.trim()) return null;
+  const cardId = uid('mp_');
+  patch(id, (m) => ({ ...m, parts: [...m.parts, { kind: 'mainPrompt', card: { id: cardId, text: ev.text.slice(0, MAIN_PROMPT_MAX), state: 'open' } }] }));
+  return cardId;
+}
+
+export function dismissMainAgentPrompt(cardId: string) {
+  convStore.set((c) => ({
+    ...c,
+    messages: c.messages.map((m) =>
+      m.parts.some((p) => p.kind === 'mainPrompt' && p.card.id === cardId)
+        ? { ...m, parts: m.parts.map((p) => (p.kind === 'mainPrompt' && p.card.id === cardId ? { ...p, card: { ...p.card, state: 'dismissed' as const } } : p)) }
         : m),
   }));
 }

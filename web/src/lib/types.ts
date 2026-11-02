@@ -17,6 +17,8 @@ export type ChatEvent =
   | ToolEvent
   | HandoffEvent
   | ClaudeProposalEvent
+  | MainAgentPromptEvent
+  | MainAgentPromptEvent
   | { type: 'viz'; spec: VizSpec }
   | { type: 'session'; aid: string }
   | { type: 'done'; usage?: { in: number; out: number }; costUsd?: number; model?: string }
@@ -34,6 +36,9 @@ export type ClaudeEvent = { seq: number; ts: string } & (
   | { kind: 'result'; durationMs?: number; costUsd?: number; turns?: number; agentSteps?: number; subscription?: boolean }
   | { kind: 'error'; message: string });
 
+/** The voice agent's prompt for the main agent could not be typed (no app connected): shown as a copyable card. Plain text. */
+export interface MainAgentPromptEvent { type: 'main_agent_prompt'; text: string }
+
 export type VoiceServerMsg =
   | { type: 'ready'; provider: string; model: string }
   | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean }
@@ -41,6 +46,7 @@ export type VoiceServerMsg =
   | ToolEvent
   | HandoffEvent
   | ClaudeProposalEvent
+  | MainAgentPromptEvent
   | { type: 'viz'; spec: VizSpec }
   | { type: 'usage'; seconds: number; costUsd: number }
   | { type: 'error'; message: string; fallback?: string }

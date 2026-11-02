@@ -3,7 +3,7 @@ import { MuteGate } from './muteGate';
 import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
-import type { ClaudeProposalEvent, HandoffEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
+import type { ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
 import type { ProviderId } from './status';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error';
@@ -23,6 +23,7 @@ export interface VoiceHandlers {
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
   onClaudeProposal(p: ClaudeProposalEvent): void;
+  onMainAgentPrompt?(p: MainAgentPromptEvent): void;
   onFallback(provider: string, message: string, muted: boolean): void;
   onError(message: string): void;
   onUsage(seconds: number, costUsd: number): void;
@@ -197,6 +198,9 @@ export class VoiceSession {
         break;
       case 'claude_proposal':
         this.h.onClaudeProposal(m);
+        break;
+      case 'main_agent_prompt':
+        this.h.onMainAgentPrompt?.(m);
         break;
       case 'usage':
         this.h.onUsage(m.seconds, m.costUsd);

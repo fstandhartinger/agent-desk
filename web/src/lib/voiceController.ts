@@ -1,5 +1,5 @@
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertTool } from './conversation';
+import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -88,6 +88,11 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
       if (!id) id = open.assistant = addMessage('assistant', 'voice');
       upsertClaudeProposal(id, p);
       logActivity('voice', 'Claude-Auftrag vorgeschlagen', p.title, 'violet');
+    },
+    onMainAgentPrompt(p) {
+      let id = open.assistant;
+      if (!id) id = open.assistant = addMessage('assistant', 'voice');
+      if (upsertMainAgentPrompt(id, p)) logActivity('voice', 'Prompt für den Main Agent nicht eingetippt', undefined, 'amber');
     },
     onViz: noteViz,
     onNotice: (message) => toast(message, 'info', 8000),

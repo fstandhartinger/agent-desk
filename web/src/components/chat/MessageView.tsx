@@ -6,6 +6,7 @@ import { fmtUsd, modelLabel } from '../../lib/format';
 import Markdown from './Markdown';
 import ToolChip from './ToolChip';
 import ClaudeProposalCard from './ClaudeProposalCard';
+import MainAgentPromptCard from './MainAgentPromptCard';
 import HandoffCard from './HandoffCard';
 import CopyButton from './CopyButton';
 
@@ -69,7 +70,7 @@ function AssistantMessage({ m, streaming, onRetry, onHandoff }: Props) {
             {m.statusText}
           </p>
         )}
-        {m.parts.map((p, i) => (p.kind === 'tool' ? <ToolChip key={p.tool.id} tool={p.tool} /> : p.kind === 'handoff' ? <HandoffCard key={p.card.id} card={p.card} /> : p.kind === 'claude' ? <ClaudeProposalCard key={p.card.id} card={p.card} /> : <Markdown key={i} text={p.text} />))}
+        {m.parts.map((p, i) => (p.kind === 'tool' ? <ToolChip key={p.tool.id} tool={p.tool} /> : p.kind === 'handoff' ? <HandoffCard key={p.card.id} card={p.card} /> : p.kind === 'claude' ? <ClaudeProposalCard key={p.card.id} card={p.card} /> : p.kind === 'mainPrompt' ? <MainAgentPromptCard key={p.card.id} card={p.card} /> : <Markdown key={i} text={p.text} />))}
         {streaming && m.parts.length > 0 && <span className="caret" aria-hidden />}
         {m.status === 'error' && (
           <div role="alert" className="mt-2 flex items-start gap-2.5 rounded-xl border border-danger/20 bg-danger/[0.05] px-3.5 py-3 text-sm">
