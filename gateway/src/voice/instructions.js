@@ -1,5 +1,5 @@
 // System prompt for the voice agents: same persona and tools as the text agent, tuned for speech.
-import { canvasLines, groundingLines, readToolLines } from '../prompt.js';
+import { canvasLines, groundingLines, readToolLines, screenLines } from '../prompt.js';
 import { knowledgeLines } from '../knowledge.js';
 import { pagePackLines } from '../pack.js';
 
@@ -25,7 +25,7 @@ export const GEMINI_LINES = [
   'Stehen "DESK-FAKTEN" in einem Werkzeugergebnis, antworte SOFORT daraus (Florians Wörter stehen dort oft nicht wörtlich) und schlage höchstens noch einmal nach, was darin fehlt.',
 ];
 
-export function buildInstructions(page, now, { provider } = {}) {
+export function buildInstructions(page, now, { provider, screen = false } = {}) {
   const lines = [
     'Du bist der Desk-Agent von Florian: ein sprachgesteuerter Assistent für seine Agenten-Werkstatt und die gerade geöffnete Erklärseite.',
     'Antworte standardmäßig auf Deutsch, in kurzen gesprochenen Sätzen (meist 1–3), ohne Markdown, ohne Aufzählungszeichen.',
@@ -37,6 +37,7 @@ export function buildInstructions(page, now, { provider } = {}) {
     ...groundingLines(now),
     'Lies niemals Geheimnisse, Schlüssel oder lange Dateipfade vor; nenne nur den Dateinamen oder den Jobnamen.',
     ...readToolLines(),
+    ...screenLines(screen),
   ];
   if (provider === 'openai') lines.push(...OPENAI_LINES);
   if (provider === 'gemini') lines.push(...GEMINI_LINES);

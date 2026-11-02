@@ -92,6 +92,12 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
 - `POST /api/device/session/:sid/screen/clear` (empty body) clears context on pause/stop. An
   already pending resolution cannot restore the cleared context.
   Chat and every voice provider share the fenced `screen_context` tool.
+- `POST /api/device/session/:sid/frame` (scope `screen`): one downscaled jpeg (<= 300 KB, <= 1600 px wide, base64) with
+  `{deviceId,frameVersion,process,title,url?,masked,ids,reason:"start|interval|foreground|fresh",commandId?}`; only while a voice
+  or chat session of the sid runs (else 409 `no-session`, client stops). Gemini 3.8 Flash turns it into a German description
+  (6 s timeout, in memory only, never logged) that reaches the voice model as passive context (no reply) and the `look_at_screen`
+  tool. `GET .../commands` is the 25 s long-poll that delivers `{fresh:true,id}` when the agent calls `look_at_screen`.
+  Cost cap: `DESK_VISION_CAP_USD_HOUR` (default 0.60 per sid hour). Full contract: the vision worker's CONTRACT.md.
 - `POST /api/device/session/:sid/highlight`: `{crop,context?,bbox:{x,y,w,h},ids}`. Crop is
   base64 PNG up to 2 MiB, optional context base64 JPEG up to 1 MiB; coordinates are physical
   integers (negative monitor origins supported). Google Gemini 3.8 Flash supplies a German

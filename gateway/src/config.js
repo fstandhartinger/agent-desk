@@ -23,6 +23,11 @@ export const cfg = {
   openaiDelegateEffort: () => env('DESK_OPENAI_DELEGATE_EFFORT', 'low'),
   voiceWatchdogMs: () => Number(env('DESK_VOICE_WATCHDOG_MS', '6000')), // no assistant audio this long after a tool result -> ask again
   voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '9000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)
+  visionCapUsdHour: () => Number(env('DESK_VISION_CAP_USD_HOUR', '0.6')), // screen vision cost per session hour (sliding window)
+  visionPriceIn: () => Number(env('DESK_VISION_PRICE_IN', '0.75')), // USD per 1M tokens, gemini-3.8-flash (2 Nov 2026; doubles 1 Jan 2027)
+  visionPriceOut: () => Number(env('DESK_VISION_PRICE_OUT', '3.75')),
+  visionTimeoutMs: () => Number(env('DESK_VISION_TIMEOUT_MS', '6000')),
+  visionFreshWaitMs: () => Number(env('DESK_VISION_FRESH_WAIT_MS', '3000')),
   allowedModels: () => [cfg.textModel(), ...env('DESK_ALLOWED_MODELS').split(',').map((m) => m.trim()).filter(Boolean)],
   reasoningEffort: () => env('DESK_TEXT_REASONING', 'low'),
   dailyCapUsd: () => Number(env('DESK_DAILY_USD_CAP', '15')),

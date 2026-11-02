@@ -92,6 +92,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
   const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false };
   let runningTools = 0;
+  let detachVision = null;
+  let screenHeld = null; // screen context that arrived before the vendor was ready
   let muted = false;
   let mutedAt = 0;
   let mutedMs = 0;
@@ -389,6 +391,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         readyAt = now();
         sendJson({ type: 'ready', provider, model: e.model });
         trace.event('session.ready', { provider, model: e.model });
+        if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
@@ -421,6 +424,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         responseOpen = true;
         if (e.id != null) openResponses.add(e.id);
         trace.event('response.created', { turn: turnId, id: e.id });
+        break;
+      case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
+        trace.event('screen.context.error', { message: String(e.message ?? '').slice(0, 200) });
         break;
       case 'watchdog': // the model stayed silent after its tool results: the adapter asked for the answer again
         audit({ action: 'voice.watchdog', detail: `${provider} #${e.n}` });
@@ -484,7 +490,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
+    detachVision = deps.vision?.attach(sid, { kind: 'voice', trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
+      return adapter?.setScreenContext?.(text) ?? 'unsupported';
+    } });
     unregisterText = deps.registerText?.((text) => readyAt !== null && deliverText(text));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -513,7 +524,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider }) + artifactBlock });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
@@ -534,6 +545,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.event('session.stop', { reason, seconds: billedSeconds, costUsd: estimateCost(provider, billedSeconds), mutedSeconds: Math.round(mutedMs / 1000), framesWhileMuted });
     trace.close();
     unregisterText?.();
+    detachVision?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus

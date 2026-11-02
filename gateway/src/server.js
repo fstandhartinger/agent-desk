@@ -106,7 +106,7 @@ export function createApp({ deviceOptions = {} } = {}) {
     }
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -166,8 +166,9 @@ export function createApp({ deviceOptions = {} } = {}) {
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
+      vision: devices.vision,
       registerText: (send) => artifacts.registerVoice(sid, send),
-      makeCtx: (page) => ({ artifacts, hub, page, limits, sid, ip, maxChars: 2500, audit: (entry) => audit({ ip, ...entry }) }),
+      makeCtx: (page) => ({ artifacts, vision: devices.vision, hub, page, limits, sid, ip, maxChars: 2500, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
