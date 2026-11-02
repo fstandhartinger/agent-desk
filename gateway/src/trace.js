@@ -324,7 +324,7 @@ function detail(e) {
 
 /** The last `n` events as readable lines: "+12.3s t3 gateway tool.done search_files 340ms". */
 export function timelineLines(events, n = 40) {
-  const list = events.slice().sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
+  const list = events.filter((e) => e.type !== 'screen.context.gone').sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
   const t0 = Date.parse(list[0]?.ts);
   return list.slice(-n).map((e) => {
     const dt = Number.isFinite(t0) && Number.isFinite(Date.parse(e.ts)) ? `+${((Date.parse(e.ts) - t0) / 1000).toFixed(1)}s` : '';
@@ -339,7 +339,9 @@ export function localDiagnosis(events) {
   const unanswered = events.filter((e) => e.type === 'turn.unanswered');
   if (unanswered.length) notes.push(`${unanswered.length} Frage(n) ohne Antwort (${unanswered.map((e) => `Zug ${e.turn ?? '?'}: ${brief(e.data?.reason, 40)}`).slice(0, 3).join('; ')})`);
   if (count(/^watchdog\.no_answer$/)) notes.push(`${count(/^watchdog\.no_answer$/)}x Keine-Antwort-Wächter`);
-  if (count(/^tool\.stale$/)) notes.push(`${count(/^tool\.stale$/)} veraltete(s) Werkzeugergebnis(se)`);
+  // a tool call of a fragment that grew into the next sentence is stale by design (turn.user.grown), no finding
+  const stale = events.filter((e) => e.type === 'tool.stale' && e.data?.reason !== 'fragment superseded').length;
+  if (stale) notes.push(`${stale} veraltete(s) Werkzeugergebnis(se)`);
   if (count(/^tool\.error$/)) notes.push(`${count(/^tool\.error$/)} Werkzeugfehler`);
   if (count(/^provider\.error$/)) notes.push(`${count(/^provider\.error$/)} Anbieterfehler`);
   if (count(/^mic\.mute$/)) notes.push(`Mikrofon ${count(/^mic\.mute$/)}x stummgeschaltet`);

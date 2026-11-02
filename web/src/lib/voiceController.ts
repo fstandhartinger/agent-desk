@@ -1,5 +1,5 @@
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, finish, setText, upsertClaudeProposal, upsertHandoff, upsertTool } from './conversation';
+import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertTool } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -24,6 +24,7 @@ pageStore.subscribe(() => {
   if (now) session?.updatePage(currentContext());
 });
 const open: { user: string | null; assistant: string | null } = { user: null, assistant: null };
+let lastUser: string | null = null; // the finished user message, so a grown fragment (`replace`) can overwrite it in place
 
 function closeTurn(role: 'user' | 'assistant') {
   const id = open[role];
@@ -31,7 +32,12 @@ function closeTurn(role: 'user' | 'assistant') {
   open[role] = null;
 }
 
-export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed = false) {
+export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed = false, replace = false) {
+  if (replace && role === 'user' && final && lastUser && convStore.get().messages.some((m) => m.id === lastUser)) {
+    // the gateway merged a growing fragment into the previous turn: same message, whole sentence
+    setText(lastUser, text);
+    return;
+  }
   closeTurn(role === 'user' ? 'assistant' : 'user');
   let id = open[role];
   if (!id) {
@@ -41,6 +47,7 @@ export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string,
   if (isDelta) appendText(id, text);
   else if (text) setText(id, text);
   if (final) {
+    if (role === 'user') lastUser = id;
     closeTurn(role);
     if (role === 'user') logActivity('voice', typed ? 'Getippt' : 'Gesprochen', text.slice(0, 120), 'violet');
   }

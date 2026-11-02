@@ -5,6 +5,7 @@
 //   architecture/structure of X -> knowledge_read X
 //   any other question         -> knowledge_read + search_files for its content words
 import { knowledgeIndex } from './knowledge.js';
+import { askKind } from './ask.js';
 
 const MONEY_RE = /geld|ausgab|ausgeg|kosten|bezahl|zahlung|ledger|euro|€|budget|teuer|rechnung|buchung|überweis|einnahm|spend/i;
 const ARCH_RE = /architektur|aufbau|struktur|komponenten|bausteine|zusammenspiel/i;
@@ -92,8 +93,9 @@ export function knowledgeTopicOf(question, index = knowledgeIndex()) {
 }
 
 /** [{name, args}] the illustrator runs before its first model call; [] when the question has no obvious source. */
-export function fastCalls(question, { now = new Date(), index } = {}) {
+export function fastCalls(question, { now = new Date(), index, utterance = false } = {}) {
   const text = String(question ?? '');
+  if (['screen', 'session'].includes(askKind(text))) return []; // look_at_screen / session_trace answer these, never a knowledge search on the raw sentence
   const featureFiles = deskFeatureFiles(text);
   if (featureFiles.length) return featureFiles.map((path) => ({ name: 'read_file', args: { path } }));
   if (isArchitectureQuestion(text)) {
@@ -115,6 +117,7 @@ export function fastCalls(question, { now = new Date(), index } = {}) {
   }
   // Any other explanatory question: the desk knowledge and a file search for its words, in parallel (what the agent would call first anyway).
   // A question about a topic of the knowledge index reads that topic (round 11), so the early drawing starts from its facts.
+  if (utterance && askKind(text) !== 'topic') return []; // chatter ("lass uns lieber was anderes ausprobieren") is no search query
   const words = keywordsOf(text);
   const topic = knowledgeTopicOf(text, index);
   if (topic) return [{ name: 'knowledge_read', args: { topic } }, ...(words ? [{ name: 'search_files', args: { query: words, scope: 'all', maxHits: 8 } }] : [])];

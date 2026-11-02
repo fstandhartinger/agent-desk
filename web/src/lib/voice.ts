@@ -18,7 +18,7 @@ export const VOICE_OPTIONS: VoiceOption[] = [
 export const optionByKey = (k: string) => VOICE_OPTIONS.find((o) => o.key === k) ?? VOICE_OPTIONS[0];
 
 export interface VoiceHandlers {
-  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean): void;
+  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean, replace?: boolean): void;
   onTool(t: ToolEvent): void;
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
@@ -176,7 +176,7 @@ export class VoiceSession {
         break;
       case 'transcript': {
         const text = m.delta ?? m.text ?? '';
-        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, (m as VoiceServerMsg & { typed?: boolean }).typed);
+        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace);
         if (m.role === 'user' && m.final) this.set('thinking');
         break;
       }

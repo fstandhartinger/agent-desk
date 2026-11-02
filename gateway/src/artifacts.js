@@ -212,9 +212,9 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     record.value.highlights = [...record.value.highlights, { summary, ids }].slice(-5);
     record.expires = now() + CONTEXT_TTL; screens.set(sid, record);
   }
-  function contextTurn(sid, text, { screen = false } = {}) {
+  function contextTurn(sid, text, { screen = false, marker = false } = {}) {
     if (typeof text !== 'string' || !text.trim() || text.length > (screen ? 12000 : 2000)) throw fail('Text hat ungültige Länge.');
-    const delivered = [...(voices.get(sid) ?? [])].filter(send => send(text)).length;
+    const delivered = [...(voices.get(sid) ?? [])].filter(send => send(text, { marker })).length;
     if (!delivered) throw fail('Keine verbundene Sprachsitzung.', 409);
     return { ok: true, delivered };
   }

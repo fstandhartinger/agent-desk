@@ -86,7 +86,7 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
 - `GET /api/device/exists?ids=abcdef,123abc`: up to 20 hex IDs, returns `{known:[sixHex,...]}`.
 - `POST /api/device/session/:sid/screen`: `{ids,window:{process,blocked},frameVersion}`.
   Returns `{ok:true,newIds}`. IDs resolve with depth-one links in a separate screen context;
-  blocked windows clear IDs/process. Use Unix milliseconds for frameVersion. Older timestamps
+  a lock screen or a window on the user's own list clears IDs/process. Use Unix milliseconds for frameVersion. Older timestamps
   return 409 per sid/device; equal timestamps are accepted. A restarted client uses current time.
   Every accepted frame renews the 30-minute TTL, even for unchanged IDs.
 - `POST /api/device/session/:sid/screen/clear` (empty body) clears context on pause/stop. An
