@@ -25,6 +25,7 @@ const idOf = (key, value) => (value == null ? {} : { [key]: value });
 
 /** Pure translation of one server frame into normalised events (see adapter.js). */
 export function translate(msg, state = {}) {
+  if (msg.type === 'error' && /^screen-/.test(msg.error?.event_id ?? msg.event_id ?? '')) return [{ t: 'screen_error', message: msg.error?.message ?? 'xAI-Fehler' }]; // passive screen context: never shown to Florian
   switch (msg.type) {
     case 'session.updated':
       return state.ready ? [] : ((state.ready = true), [{ t: 'ready', model: MODEL }]);
@@ -54,6 +55,7 @@ export function translate(msg, state = {}) {
 
 export function createXai(opts, emit) {
   const state = {};
+  let screenId = null, screenSeq = 0;
   const output = (r) => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: r.id, output: r.output } });
   const watchdog = createWatchdog(opts.watchdogMs ?? (() => cfg.voiceWatchdogMs()), (n) => { send({ type: 'response.create' }); emit({ t: 'watchdog', n }); });
   const batch = new ToolBatch((results) => {
@@ -89,6 +91,17 @@ export function createXai(opts, emit) {
     },
     /** Florian clicked another element: the instructions are replaced by the ones rebuilt for the new page (partial session.update; not live-verified, a vendor error is soft). */
     updatePage: (_text, { instructions }) => { send({ type: 'session.update', session: { instructions: instructions() } }); return 'sent'; },
+    /**
+     * Passive screen description: ONE conversation item (replaced by id), never response.create, so it does not trigger a reply. Not in the instructions:
+     * screen text is untrusted data and must not gain system authority. Not live-verified against xAI (a vendor error is tagged screen-* and only traced).
+     */
+    setScreenContext: (text) => {
+      const prev = screenId;
+      screenId = `screen_ctx_${++screenSeq}`;
+      send({ type: 'conversation.item.create', event_id: `screen-add-${screenSeq}`, item: { id: screenId, type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-${screenSeq}`, item_id: prev });
+      return 'sent';
+    },
     interrupt: () => { watchdog.clear(); send({ type: 'response.cancel' }); }, // a new question while the old answer is still running (the server VAD also cuts audio itself)
     sendToolResult: (id, _name, output, opts) => batch.result({ id, output, stale: opts?.stale }),
     close: () => { watchdog.clear(); ws.close(); },

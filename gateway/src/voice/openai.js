@@ -48,6 +48,7 @@ function endTypedTurn(state) {
 }
 
 export function translate(msg, state = {}) {
+  if (msg.type === 'error' && /^screen-/.test(msg.error?.event_id ?? msg.event_id ?? '')) return [{ t: 'screen_error', message: msg.error?.message ?? 'OpenAI-Fehler' }]; // passive screen context: never shown to Florian
   switch (msg.type) {
     case 'session.started':
       return [{ t: 'ready', model: msg.session?.model ?? MODEL }];
@@ -113,6 +114,7 @@ export function createOpenAI(opts, emit) {
   const state = {};
   endTypedTurn(state);
   let context = null; // the early illustrator's facts for the current question, handed over with the next tool output
+  let screenSeq = 0;
   let handed = false; // they went out with a tool output already (this question)
   const output = (r) => send({ type: 'response.item.create', item: { type: 'function_call_output', call_id: r.id, output: r.output } });
   // critic r9 run 1: after desk_status the model never resumed; a silent model after its tool results is asked again
@@ -162,6 +164,8 @@ export function createOpenAI(opts, emit) {
     updatePage: (text) => { send({ type: 'session.instructions.append', delegation_id: null, content: text }); return 'sent'; },
     // The Live API has no response.cancel (live-verified 24 Oct: "Supported values are ..."), and barge-in leaves the backend running (docs: live-delegation).
     // So: steer the live model to the new question; the session marks the old chain's tool results stale, which ends the chain.
+    /** Passive screen description: instructions.append (the only context channel without a reply; no response.create). It only grows, so the session rate-limits it. */
+    setScreenContext: (text) => { send({ type: 'session.instructions.append', event_id: `screen-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
     interrupt: () => { watchdog.clear(); send({ type: 'session.instructions.append', delegation_id: null, content: 'Florian hat gerade eine neue Frage gestellt. Die Frage davor ist abgebrochen: antworte nur auf die neueste Frage und recherchiere dafür neu.' }); },
     sendToolResult: (id, _name, output, opts) => {
       let out = output;

@@ -42,7 +42,7 @@ export function clean(value, key = '', depth = 0) {
     for (const [k, v] of Object.entries(value).slice(0, 40)) {
       if (BINARY_KEYS.test(k)) out[k] = `[ausgelassen${typeof v === 'string' ? `, ${v.length} Zeichen` : ''}]`;
       else if (RESULT_KEYS.test(k)) out[`${k}Chars`] = typeof v === 'string' ? v.length : JSON.stringify(v ?? null).length;
-      else out[k.slice(0, 60)] = clean(v, k, depth + 1);
+      else out[redact(k).slice(0, 60)] = clean(v, k, depth + 1);
     }
     return out;
   }
@@ -64,10 +64,16 @@ function metaOf(data, kind) {
   return {
     kind,
     provider: data.provider ?? null, model: data.model ?? null, slug: data.slug ?? null, title: data.title ?? null,
-    page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null, entry: entry.path ?? null,
+    page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null, entry: { path: entry.path ?? null, page_aid: entry.page_aid ?? null, card: entry.card ?? null, element: entry.element ?? null },
     device: client.device ?? null, client: { app: client.app ?? null, version: client.version ?? null, commit: client.commit ?? null },
-    screen_ids: Array.isArray(entry.screen_ids) ? entry.screen_ids.slice(0, 50) : [],
+    screen_ids: Array.isArray(entry.screen_ids) ? entry.screen_ids.slice(0, 20) : [],
   };
+}
+
+/** A foreign clock must not decide retention: client timestamps count only within a few minutes of the receive time. */
+export function clampTs(ts, at, slackMs = 5 * 60_000) {
+  const t = typeof ts === 'number' ? ts : Date.parse(ts);
+  return new Date(Number.isFinite(t) && Math.abs(t - at) <= slackMs ? t : at).toISOString();
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -207,8 +213,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
           if (!type.startsWith('client.')) type = `client.${type}`;
           if (!TYPE_RE.test(type)) return;
           foreign += 1;
-          const ts = Number.isFinite(Date.parse(event.ts)) ? new Date(event.ts).toISOString() : Number.isFinite(event.ts) ? iso(event.ts) : undefined;
-          push(stamp('client', type, event.data, event.data?.turn, ts));
+          push(stamp('client', type, event.data, event.data?.turn, clampTs(event.ts, now())));
         } catch { /* ignore */ }
       },
       /** Events from the Screen Agent (device route): already validated by the caller. */
@@ -342,7 +347,7 @@ export function localDiagnosis(events) {
   return notes.length ? notes.join('. ') : 'Keine Auffälligkeiten im Verlauf.';
 }
 
-const diagnosisText = (d) => (typeof d === 'string' ? d : Array.isArray(d) ? d.map(diagnosisText).join('\n') : d && typeof d === 'object' ? (typeof d.text === 'string' ? d.text : typeof d.summary === 'string' ? d.summary : JSON.stringify(d)) : '');
+const diagnosisText = (d) => (typeof d === 'string' ? d : Array.isArray(d) ? d.map(diagnosisText).join('\n') : d && typeof d === 'object' ? (typeof d.what_happened === 'string' ? d.what_happened : typeof d.text === 'string' ? d.text : typeof d.summary === 'string' ? d.summary : JSON.stringify(d)) : '');
 
 /**
  * The text of the session_trace tool / the lookup route for one session: diagnosis + the last 40 timeline lines.

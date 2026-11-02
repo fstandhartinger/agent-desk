@@ -33,6 +33,7 @@ function isSilent(pcm) {
 
 export const MAX_RECOVERIES = 2;
 const RECOVERY_FACT_CHARS = 1500;
+const HALF_SENTENCE_MS = 1500; // a mute this soon after the last word cut a sentence (GPT-Live transcripts often have no punctuation)
 const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
 
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
@@ -93,6 +94,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
   const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false, overlap: false };
   let runningTools = 0;
+  let detachVision = null;
+  let screenHeld = null; // screen context that arrived before the vendor was ready
   let muted = false;
   let mutedAt = 0;
   let mutedMs = 0;
@@ -225,6 +228,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     pending.active = needsAnswer(text);
     pending.text = text;
     pending.promised = false;
+    pending.at = now();
     if (pending.active) restartNoAnswer();
     else clearTimeout(pending.timer);
   }
@@ -262,9 +266,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   /** Assistant text since the question: real content settles it; a promise ("Ich schaue sofort") keeps waiting for a tool or an answer. */
   function noteAnswer(delta) {
     if (!pending.active) return;
-    if (pending.overlap && !fitsQuestion(delta, pending.text)) { restartNoAnswer(); return; }
-    pending.overlap = false;
     pending.answer += delta;
+    // deltas are single words: only the text collected since the question can name something of it
+    if (pending.overlap && !fitsQuestion(pending.answer, pending.text)) { restartNoAnswer(); return; }
+    pending.overlap = false;
     if (isPromiseOnly(pending.answer)) { pending.promised = true; restartNoAnswer(); return; }
     pending.active = false;
     clearTimeout(pending.timer);
@@ -394,6 +399,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         readyAt = now();
         sendJson({ type: 'ready', provider, model: e.model });
         trace.event('session.ready', { provider, model: e.model });
+        if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
@@ -416,6 +422,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         responding = false;
         staleChain = false;
         if (e.id != null) { openResponses.delete(e.id); overtaken.delete(e.id); } else { openResponses = new Set(); overtaken.clear(); }
+        if (pending.overlap) { pending.overlap = false; pending.answer = ''; } // the overtaken response is over: what follows is the answer
         responseOpen = openResponses.size > 0;
         trace.event('response.done', { turn: turnId, id: e.id });
         flushTranscript();
@@ -428,6 +435,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         pending.overlap = false; // a response that started after the question: what it says belongs to the question
         restartNoAnswer();
         trace.event('response.created', { turn: turnId, id: e.id });
+        break;
+      case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
+        trace.event('screen.context.error', { message: String(e.message ?? '').slice(0, 200) });
         break;
       case 'watchdog': // the model stayed silent after its tool results: the adapter asked for the answer again
         audit({ action: 'voice.watchdog', detail: `${provider} #${e.n}` });
@@ -491,7 +501,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
+    detachVision = deps.vision?.attach(sid, { kind: 'voice', trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
+      return adapter?.setScreenContext?.(text) ?? 'unsupported';
+    } });
     unregisterText = deps.registerText?.((text) => readyAt !== null && deliverText(text));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -520,7 +535,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider }) + artifactBlock });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
@@ -541,6 +556,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.event('session.stop', { reason, seconds: billedSeconds, costUsd: estimateCost(provider, billedSeconds), mutedSeconds: Math.round(mutedMs / 1000), framesWhileMuted });
     trace.close();
     unregisterText?.();
+    detachVision?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus
@@ -555,7 +571,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (muted) {
       mutedAt = now();
       // a half sentence cut by the mute is no question to recover; a complete one still gets its answer
-      if (pending.active && !/[?.!]["”)]*\s*$/.test(pending.text)) { pending.active = false; clearTimeout(pending.timer); }
+      if (pending.active && now() - pending.at < HALF_SENTENCE_MS && !/[?.!]["”)]*\s*$/.test(pending.text)) { pending.active = false; clearTimeout(pending.timer); }
     } else mutedMs += now() - mutedAt;
     audit({ action: muted ? 'voice.mute' : 'voice.unmute', detail: `${provider} ${String(source ?? 'dock').slice(0, 20)}` });
     trace.event(muted ? 'mic.mute' : 'mic.unmute', { turn: turnId, source: String(source ?? 'dock').slice(0, 20), mutedSeconds: Math.round(mutedMs / 1000) });

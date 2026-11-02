@@ -79,14 +79,17 @@ describe('trace service', () => {
     const reg = fakeRegistry(); reg.logs = [];
     const t = svc(reg).open({ provider: 'openai' });
     start(t);
-    t.client({ ts: 1_700_000_000_000, type: 'ws.close', data: { code: 1006 } });
+    const sent = Date.now() - 60_000;
+    t.client({ ts: sent, type: 'ws.close', data: { code: 1006 } });
+    t.client({ ts: 4_000_000_000_000, type: 'client.clock', data: {} }); // a wrong clock must not decide retention
     t.event('barge_in', { turn: 1 });
     t.client({ type: 'client.audio_device', data: { name: 'Mikro' } });
     await t.close();
     const by = (src) => reg.events.filter((e) => e.source === src);
     assert.deepEqual(by('gateway').map((e) => e.seq), [1, 2]);
-    assert.deepEqual(by('client').map((e) => [e.seq, e.type]), [[1, 'client.ws.close'], [2, 'client.audio_device']]);
-    assert.equal(by('client')[0].ts, '2023-11-14T22:13:20.000Z');
+    assert.deepEqual(by('client').map((e) => [e.seq, e.type]), [[1, 'client.ws.close'], [2, 'client.clock'], [3, 'client.audio_device']]);
+    assert.equal(by('client')[0].ts, new Date(sent).toISOString());
+    assert.ok(Date.parse(by('client')[1].ts) < Date.now() + 1000);
   });
 
   it('redacts secrets, caps sizes, stores no tool results, audio, images or base64', async () => {

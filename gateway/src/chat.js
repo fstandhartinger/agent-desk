@@ -5,7 +5,7 @@ import { openSse, readJson, sendJson } from './http.js';
 import { streamChat } from './llm.js';
 import { loadPageContext } from './page.js';
 import { formatChatContext } from './claudeSessions.js';
-import { buildInstructions } from './prompt.js';
+import { buildInstructions, screenLines } from './prompt.js';
 import { TEXT } from './messages.js';
 import { short } from './redact.js';
 import { ToolMarkupFilter } from './toolMarkup.js';
@@ -75,7 +75,7 @@ function parseArgs(raw) {
 }
 
 /** POST /api/chat → SSE. `session` = {sid, ip, hub, limits}. */
-export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, traces, canvasRegistry = conversationCanvases }) {
+export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, traces, canvasRegistry = conversationCanvases }) {
   const body = await readJson(req);
   const messages = cleanMessages(body.messages);
   if (!messages) return sendJson(res, 400, { error: TEXT.badMessages });
@@ -98,6 +98,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
   const viz = createActivityViz({ emit, model: cfg.vizModel() });
   let canvas = null;
   const lastUser = messages.at(-1).content;
+  vision?.touchChat(sid);
   audit({ action: 'chat', ip, detail: lastUser });
   viz.noteTurn({ role: 'user', text: lastUser });
 
@@ -131,7 +132,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     canvas?.startTurn();
     canvas?.userTurn(lastUser);
     const ctx = {
-      artifacts, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
+      artifacts, vision, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
       trace: () => trace, traces, turn,
       chatContext: formatChatContext(messages),
@@ -140,7 +141,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
       moneyQuestion: isMoneyQuestion(lastUser),
       results: [], // every tool result of this turn: what names and amounts in the prose may come from
     };
-    const convo = [{ role: 'system', content: buildInstructions(page) + artifactInstructions(artifacts?.get(sid)) }, ...messages];
+    const convo = [{ role: 'system', content: buildInstructions(page) + artifactInstructions(artifacts?.get(sid)) + (vision ? vision.chatBlock(sid) : screenLines(false).join('\n')) }, ...messages];
     const paths = userPaths(lastUser);
     if (paths.length) convo.push({ role: 'system', content: pathHint(paths) });
     const givenBase = convo.map((m) => m.content).join('\n');

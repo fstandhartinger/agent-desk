@@ -23,7 +23,7 @@ export interface VoiceHandlers {
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
   onClaudeProposal(p: ClaudeProposalEvent): void;
-  onFallback(provider: string, message: string): void;
+  onFallback(provider: string, message: string, muted: boolean): void;
   onError(message: string): void;
   onUsage(seconds: number, costUsd: number): void;
   onNotice?(message: string): void;
@@ -62,7 +62,7 @@ export class VoiceSession {
     this.event(muted ? 'mute' : 'unmute', { source });
   });
 
-  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers) {}
+  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers, private startMuted = false) {}
 
   private set(state: VoiceState, model?: string) {
     voiceStore.set((s) => ({ ...s, state, active: this.opt.key, model: model ?? s.model, error: state === 'error' ? s.error : null }));
@@ -70,10 +70,12 @@ export class VoiceSession {
 
   async start() {
     this.gate.reset();
-    voiceStore.set((s) => ({ ...s, muted: false, aid: null, serverNotice: null }));
+    this.gate.muted = this.startMuted;
+    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null }));
     this.set('connecting', '');
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
+      this.gate.applyTracks();
       this.event('mic.permission', { state: 'granted' });
     } catch (err) {
       this.event('mic.permission', { state: 'denied', name: (err as Error)?.name ?? 'Error' });
@@ -202,8 +204,9 @@ export class VoiceSession {
       case 'error':
         if (m.fallback) {
           this.closed = true;
+          const wasMuted = this.gate.muted; // a provider change must not open the mic he closed
           this.cleanup();
-          this.h.onFallback(m.fallback, m.message);
+          this.h.onFallback(m.fallback, m.message, wasMuted);
         } else this.fail(m.message);
         break;
       case 'closed':

@@ -126,6 +126,20 @@ test('a real answer, a running tool and plain acknowledgements do not fire the w
   assert.equal(b.recovered.length, 0);
 });
 
+test('after a barge-in into the greeting a direct answer in word deltas settles the question: no recovery, no false notice (critic M2)', async (t) => {
+  const h = harness(t, { noAnswerMs: 15 });
+  await sleep(1);
+  h.emit({ t: 'ready', model: 'm' });
+  h.emit({ t: 'response_started', id: 'greeting' });
+  h.emit({ t: 'transcript', role: 'assistant', delta: 'Hallo Florian. ', final: false });
+  ask(h, 'Wie spät ist es eigentlich');
+  h.emit({ t: 'turn_done', id: 'greeting' });
+  for (const w of ['Es ', 'ist ', 'halb ', 'drei ', 'am ', 'Nachmittag, ', 'also ', 'noch ', 'genug ', 'Zeit ', 'für ', 'den ', 'Rest ', 'von ', 'heute.']) h.emit({ t: 'transcript', role: 'assistant', delta: w, final: false });
+  await sleep(50);
+  assert.equal(h.recovered.length, 0);
+  assert.ok(!h.ws.sent.some((m) => m.type === 'notice'));
+});
+
 test('recovery carries the facts already found, and a knowledge_read for a mail question is pointed at mail_search', async (t) => {
   const h = harness(t, { noAnswerMs: 20 });
   await sleep(1);

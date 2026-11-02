@@ -123,7 +123,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, traces });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, traces });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -184,9 +184,10 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
+      vision: devices.vision,
       registerText: (send) => artifacts.registerVoice(sid, send),
       openTrace: ({ provider }) => (currentTrace = traces.open({ provider, kind: 'voice', sid })),
-      makeCtx: (page) => ({ artifacts, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
+      makeCtx: (page) => ({ artifacts, vision: devices.vision, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
@@ -218,7 +219,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   server.listen(cfg.port(), () => console.log(`agent-desk gateway listening on :${cfg.port()}`));
   process.on('unhandledRejection', (err) => console.error(`unhandledRejection: ${short(String(err?.stack || err), 500)}`));
   process.on('SIGTERM', () => {
-    server.close(() => process.exit(0));
-    traces.flushAll(5000).finally(() => setTimeout(() => process.exit(0), 500).unref()); // a redeploy must not lose open traces; open sockets no longer hold the exit
+    server.close();
+    traces.flushAll(5000).finally(() => process.exit(0)); // a redeploy must not lose open traces; open sockets no longer hold the exit
   });
 }

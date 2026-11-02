@@ -4,9 +4,16 @@ declare const __DESK_VERSION__: string;
 declare const __DESK_COMMIT__: string;
 
 export type VoiceEntry = { path: string; card?: string; page_aid?: string; element?: string };
-export type ClientInfo = { app: 'web'; version: string; commit: string; device: 'phone' | 'desktop' };
+export type ClientInfo = { app: 'web' | 'screen-agent'; version: string; commit: string; device: 'phone' | 'desktop' | 'windows' };
 
-export const clientInfo = (desktop: boolean): ClientInfo => ({
+/** The Screen Agent opens the Desk with ?client=screen-agent&cv=<version>&cc=<commit>&device=windows. */
+export function clientInfo(desktop: boolean, search = globalThis.location?.search ?? ''): ClientInfo {
+  const q = new URLSearchParams(search);
+  if (q.get('client') === 'screen-agent') return { app: 'screen-agent', version: (q.get('cv') ?? 'dev').slice(0, 30), commit: (q.get('cc') ?? 'dev').slice(0, 40), device: 'windows' };
+  return webInfo(desktop);
+}
+
+const webInfo = (desktop: boolean): ClientInfo => ({
   app: 'web',
   version: typeof __DESK_VERSION__ === 'string' ? __DESK_VERSION__ : 'dev',
   commit: typeof __DESK_COMMIT__ === 'string' ? __DESK_COMMIT__ : 'dev',

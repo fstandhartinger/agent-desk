@@ -59,7 +59,7 @@ export function startVoice() {
 }
 
 /** Starts a session. `viaFallback` is the option the user actually picked when this is an automatic fallback. */
-function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
+function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) {
   session?.stop();
   logActivity('voice', 'Sprachsitzung startet', opt.label, 'violet');
   const s = new VoiceSession(opt, currentContext(), {
@@ -87,13 +87,13 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
     onUsage(seconds, cost) {
       logActivity('voice', 'Sprachnutzung', `${Math.round(seconds)} s · ${fmtUsd(cost)}`);
     },
-    onFallback(provider, message) {
+    onFallback(provider, message, wasMuted) {
       const next = optionByKey(provider);
       const picked = viaFallback ?? opt;
       toast(`${opt.label} nicht verfügbar – wechsle zu ${next.label}.`, 'info');
       logActivity('voice', 'Fallback', `${opt.label} → ${next.label}: ${message}`, 'amber');
       session = null;
-      begin(next, picked);
+      begin(next, picked, wasMuted);
       voiceStore.set((s) => ({ ...s, notice: voiceUnavailableNotice(picked, next) }));
     },
     onError(message) {
@@ -104,7 +104,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
       closeTurn('user');
       closeTurn('assistant');
     },
-  });
+  }, startMuted);
   session = s;
   void s.start();
 }
