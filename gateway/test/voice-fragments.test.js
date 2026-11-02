@@ -94,6 +94,23 @@ test('a fragment that is still collecting (no commit yet) is replaced, not glued
   assert(!h.recovered.some((x) => x.includes(`${T5} ${T5}`) || x.includes(`${T6} ${T6}`)));
 });
 
+test('an answer came in between: "Ja genau" after "Ja" is a new turn, not a longer fragment', async (t) => {
+  const h = harness(t);
+  await sleep(1);
+  h.vendor({ type: 'session.updated' });
+  h.vendor(final('i1', 'Ja.'));
+  await sleep(5);
+  h.vendor({ type: 'response.created', response: { id: 'r1' } });
+  h.vendor({ type: 'response.output_audio_transcript.delta', delta: 'Gut, dann so.', response_id: 'r1' });
+  h.vendor({ type: 'response.done', response: { id: 'r1' } });
+  await sleep(5);
+  h.vendor(final('i2', 'Ja genau.'));
+  await sleep(5);
+  assert.equal(h.traced.filter((e) => e.type === 'turn.user.grown').length, 0);
+  assert.equal(h.traced.filter((e) => e.type === 'turn.user.start').length, 2);
+  assert.deepEqual(users(h).map((m) => !!m.replace), [false, false]);
+});
+
 test('an unrelated next final is a new turn, also an equal sentence from another item', async (t) => {
   const h = harness(t);
   await sleep(1);

@@ -147,7 +147,7 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       await registry('/v1/dictionary', { term: to, replace_from: [from], source: 'learned' }); dict = null;
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen/clear' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => ({}))).why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => null))?.why);
       sendJson(res, 200, artifacts.clearScreen(target[1], record.deviceId));
     } else if (target && target[2] === 'frame' && req.method === 'POST') {
       rate(`frame:${record.deviceId}`, 30);
@@ -162,7 +162,7 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
         else if (!abort.signal.aborted) sendJson(res, 200, answer);
       } catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, stop: true }); }
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => ({}))).why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => null))?.why);
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);

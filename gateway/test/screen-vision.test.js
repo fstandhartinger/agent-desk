@@ -189,6 +189,7 @@ it('cap: per-session-hour cost stops vision, ids stay, look_at_screen says so', 
     assert.deepEqual(app.artifacts.screen(sid).ids, ['123abc'], 'ids still count');
     const note = traces.filter(t => t.type === 'screen.vision').at(-1);
     assert.equal(note.capped, true);
+    process.env.DESK_VISION_CAP_USD_HOUR = '0.001'; // well over the cap: not even a direct question gets a new picture
     const out = await runTool('look_at_screen', {}, { vision: app.devices.vision, sid });
     assert.match(out.content, /pausiert/); assert.equal(data(out).frisch, false);
     clock += 3600_000 + 1000; // the hour window frees
@@ -230,8 +231,8 @@ it('no picture (locked / paused): the agent is told once, plainly, never "gesch√
   const sent = [];
   v.attach('s', { kind: 'voice', announced: true, trace() {}, setContext: (t) => { sent.push(t); return 'sent'; } });
   assert.equal(v.attached('s'), false, 'a voice session without polls or frames has no Screen Agent');
-  v.clear('s');
-  v.clear('s');
+  v.clear('s', 'locked');
+  v.clear('s', 'locked');
   assert.equal(sent.length, 1, 'said once');
   assert.match(sent[0], /gesperrt oder zeigt einen Windows-Sicherheitsdialog/);
   assert.match(sent[0], /Fr√ºhere Bildschirm-Updates gelten nicht mehr/);

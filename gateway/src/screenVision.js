@@ -50,8 +50,9 @@ const dataBlock = obj => artifactData(obj).replace('<artifact_data>', '<artifact
 const NO_PICTURE = {
   paused: 'Florian hat die Bilderfassung pausiert.',
   locked: 'Der Bildschirm ist gesperrt oder zeigt einen Windows-Sicherheitsdialog: gerade gibt es kein Bild.',
+  excluded: 'Dieses Fenster steht auf Florians eigener Ausnahmeliste im Screen Agent: davon gibt es kein Bild.',
 };
-const noPictureText = why => NO_PICTURE[why] ?? NO_PICTURE.locked;
+const noPictureText = why => NO_PICTURE[why] ?? 'Gerade kommt kein Bild vom Bildschirm an.';
 const BG_CHARS = 1500, BG_SUMMARY = 220;
 const firstLine = t => String(t ?? '').split(/\r?\n/).find(l => l.trim())?.replace(/\s+/g, ' ').trim() ?? '';
 
@@ -109,7 +110,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function clear(sid, why) {
     const S = states.get(sid);
     if (!S) return;
-    why = ['locked', 'paused', 'stop', 'error'].includes(why) ? why : 'locked';
+    why = ['locked', 'paused', 'stop', 'error', 'excluded'].includes(why) ? why : 'none';
     S.desc = null; S.pendingFrame = null; S.sent = { text: '', at: 0, n: S.sent.n, ids: '' };
     const told = S.noPicture?.why === why;
     S.noPicture = { why, at: now() };
@@ -119,7 +120,8 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
 
   // --- cost: a sliding hour per sid ---
   const hourUsd = S => { const cut = now() - HOUR; S.spend = S.spend.filter(e => e.t > cut); return S.spend.reduce((a, e) => a + e.usd, 0); };
-  const capped = S => hourUsd(S) >= cfg.visionCapUsdHour();
+  // A direct question may go a little over the hourly cap: a video on screen must not leave the agent blind for the rest of the hour.
+  const capped = (S, fresh = false) => hourUsd(S) >= cfg.visionCapUsdHour() * (fresh ? 1.5 : 1);
 
   function snapshot(sid) {
     const S = states.get(sid), d = S?.desc;
@@ -183,7 +185,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     const out = { ok: true, frameVersion, changed: false, vision: 'ok', ids: [] };
     const cmd = S.queue[0]; if (cmd && cmd.expires > now() && reason !== 'fresh') out.fresh = { id: cmd.id };
     const job = { sid, deviceId: key, frameVersion, proc, title, url, masked, reason, ids, jpeg, commandId: body.commandId };
-    if (capped(S)) {
+    if (capped(S, reason === 'fresh')) {
       if (!S.capNoted) { S.capNoted = true; tr('screen.vision', { capped: true, capUsdHour: cfg.visionCapUsdHour(), usdHour: Number(hourUsd(S).toFixed(4)) }); }
       settle(S, job); return { ...out, vision: 'capped' };
     }
@@ -209,7 +211,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
       const usd = r.usage.inputTokens / 1e6 * cfg.visionPriceIn() + r.usage.outputTokens / 1e6 * cfg.visionPriceOut();
       S.frames++; S.usd += usd; S.spend.push({ t: now(), usd }); limits.addCost(usd);
       // ids read by the vision model count only after the registry knows them (setScreen keeps just the existing ones)
-      const extra = deviceIds(r.ids ?? []).filter(id => !ids.includes(id));
+      const read = deviceIds(r.ids ?? []), extra = read.filter(id => !ids.includes(id));
       let verified = [];
       if (extra.length && active(sid)) {
         const merged = await artifacts?.setScreen(sid, { deviceId: job.deviceId, ids: [...ids, ...extra].slice(0, 20), window: { process: proc, blocked: false }, frameVersion }).catch(() => null);
@@ -218,10 +220,12 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
       }
       const keyNow = idsKey(sid);
       const text = redact(r.text).slice(0, 1500), changed = !prev || !similar(prev, text, r.change) || keyNow !== S.sent.ids;
+      // Everything the model read that the registry knows, also what the app already sent: otherwise the app would drop the id on every second frame.
+      const readByModel = extra.length ? [...read.filter(id => ids.includes(id)), ...verified] : read;
       if (frameVersion >= (S.desc?.version ?? -1) && active(sid)) S.desc = { seq: ++S.seq, text, change: redact(r.change).slice(0, 300), at: now(), version: frameVersion, process: redact(proc), title: redact(title).slice(0, 200), url: url ? redact(url).slice(0, 300) : undefined, ids: [...ids, ...verified], masked, old: false };
-      tr('screen.vision', { ms: r.ms, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costUsd: Number(usd.toFixed(5)), changed, text: text.slice(0, 200), frameVersion, ...(extra.length ? { visionIds: extra.length, verified: verified.length } : {}) });
+      tr('screen.vision', { ms: r.ms, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costUsd: Number(usd.toFixed(5)), changed, text: text.slice(0, 200).replace(/\d/g, '#'), frameVersion, ...(extra.length ? { visionIds: extra.length, verified: verified.length } : {}) });
       if (changed) push(sid);
-      Object.assign(out, { changed, vision: changed ? 'ok' : 'unchanged', ids: verified.map(id => `a#${id}`) });
+      Object.assign(out, { changed, vision: changed ? 'ok' : 'unchanged', ids: readByModel.map(id => `a#${id}`) });
     } catch (err) {
       if (S.desc) S.desc.old = true;
       const cappedByDay = err.status === 429;
@@ -262,7 +266,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     if (!attached(sid)) return { attached: false, hinweis: 'kein aktiver Screen Agent: ich sehe den Bildschirm nicht und habe keine Beschreibung davon.' };
     const S = states.get(sid);
     let fresh = false;
-    if (capped(S)) fresh = null;
+    if (capped(S, true)) fresh = null;
     else {
       const id = crypto.randomBytes(4).toString('hex'), q = typeof question === 'string' && question.trim() ? redact(question).slice(0, 300) : undefined;
       const arrived = new Promise(resolve => S.waiters.set(id, () => resolve(true)));
@@ -279,7 +283,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return {
       attached: true, frisch: fresh === true,
       ...(fresh === null ? { hinweis: 'Bild-Auswertung pausiert (Kostenlimit pro Stunde erreicht): nur IDs und die letzte Beschreibung, keine neuen Bilder.' } : {}),
-      ...(fresh === false ? { hinweis: S.noPicture && !d ? noPictureText(S.noPicture.why === 'paused' ? 'paused' : 'locked') : d ? 'Kein frisches Bild rechtzeitig: das ist die zuletzt bekannte Beschreibung, achte auf ihr Alter.' : 'Kein Bild erhalten und noch keine Beschreibung vorhanden.' } : {}),
+      ...(fresh === false ? { hinweis: S.noPicture && !d ? noPictureText(S.noPicture.why) : d ? 'Kein frisches Bild rechtzeitig: das ist die zuletzt bekannte Beschreibung, achte auf ihr Alter.' : 'Kein Bild erhalten und noch keine Beschreibung vorhanden.' } : {}),
       ...(d ?? { ids: snap.ids, hintergrund: background(sid) }),
       ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}),
     };

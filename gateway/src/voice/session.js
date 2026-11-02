@@ -306,6 +306,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const prev = lastFinal;
     if (!prev || e.role !== 'user' || !e.final || typeof e.text !== 'string' || prev.turn !== turnId || now() - prev.at > GROW_WINDOW_MS) return false;
     const norm = normText(e.text);
+    if (prev.answered && (e.itemId == null || e.itemId !== prev.itemId)) return false; // he heard an answer: "Ja genau" after "Ja" is a new turn, not a longer fragment
     if (!norm || norm === prev.norm) return Boolean(norm) && (e.itemId ?? null) === prev.itemId && prev.itemId !== null; // a repeated item is dropped, an equal sentence by another item is a new turn
     return (e.itemId != null && e.itemId === prev.itemId) || `${norm} `.startsWith(`${prev.norm} `);
   }
@@ -342,6 +343,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       // GPT-Live sends user deltas without a final: the watchdog also has to run for a question that was never committed
       armNoAnswer(`${userBuf} ${turn.role === 'user' ? turn.text : ''} ${e.delta ?? e.text ?? ''}`.replace(/\s+/g, ' ').trim());
     } else {
+      if (lastFinal) lastFinal.answered = true;
       assistantStarted();
       noteAnswer(e.delta ?? e.text ?? '');
     }

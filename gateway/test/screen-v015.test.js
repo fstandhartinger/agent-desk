@@ -41,6 +41,39 @@ it('ids read by the vision model count only after the registry knows them; the r
   assert.equal(traces.find(t => t.type === 'screen.vision').verified, 1);
 });
 
+it('the same id read on the next frame stays in the reply, so the app does not drop it on every second frame', async () => {
+  answer = () => ({ text: 'Seite', change: 'x', ids: ['aaaaaa'], usage, ms: 5 });
+  assert.deepEqual((await vision.frame('s', record, frame({ ids: ['bbbbbb'] }))).ids, ['a#aaaaaa']);
+  assert.deepEqual((await vision.frame('s', record, frame({ ids: ['bbbbbb', 'aaaaaa'] }))).ids, ['a#aaaaaa']);
+});
+
+it('a lock screen is called that, a stop or an error is not, a window on his own list is', async () => {
+  vision.seen('s');
+  for (const [why, text] of [['locked', /gesperrt/], ['excluded', /Ausnahmeliste/], [undefined, /kein Bild vom Bildschirm/]]) {
+    vision.clear('s', why);
+    assert.match(sent.at(-1), text);
+    assert.doesNotMatch(sent.at(-1), /geschützt/);
+  }
+});
+
+it('numbers on the screen stay out of the durable trace', async () => {
+  answer = () => ({ text: 'Fehlbetrag 13.000 Euro', change: 'x', ids: [], usage, ms: 5 });
+  await vision.frame('s', record, frame());
+  const t = traces.find(e => e.type === 'screen.vision');
+  assert.equal(t.text, 'Fehlbetrag ##.### Euro');
+});
+
+it('a direct question still gets a picture a little over the hourly cap, the passive frames do not', async () => {
+  const old = process.env.DESK_VISION_CAP_USD_HOUR; process.env.DESK_VISION_CAP_USD_HOUR = '0.000001';
+  try {
+    await vision.frame('s', record, frame());
+    assert.equal((await vision.frame('s', record, frame())).vision, 'capped');
+    process.env.DESK_VISION_CAP_USD_HOUR = String(vision._states.get('s').usd / 1.2);
+    assert.equal((await vision.frame('s', record, frame())).vision, 'capped');
+    assert.notEqual((await vision.frame('s', record, frame({ reason: 'fresh' }))).vision, 'capped');
+  } finally { if (old === undefined) delete process.env.DESK_VISION_CAP_USD_HOUR; else process.env.DESK_VISION_CAP_USD_HOUR = old; }
+});
+
 it('visible ids bring their background by themselves: title + short summary, newest id first, as data', async () => {
   answer = () => ({ text: 'Seite mit Reserve', change: 'x', ids: ['aaaaaa'], usage, ms: 5 });
   await vision.frame('s', record, frame({ ids: ['bbbbbb'] }));
