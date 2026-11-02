@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ApiError, auth, errorMessage } from './lib/api';
 import { takeHashCode } from './lib/hashLogin';
 import Device from './components/Device';
@@ -8,6 +8,9 @@ import Logo from './components/Logo';
 import { resetArtifactEntry } from './components/ArtifactContext';
 import CompanionPairing from './components/CompanionPairing';
 import { companionEntry } from './lib/deviceEntry';
+
+const CanvasPanelPage = lazy(() => import('./canvas/CanvasPanelPage'));
+const canvasPanel = () => new URLSearchParams(location.search).get('panel') === 'canvas';
 
 type Phase = 'checking' | 'gate' | 'desk';
 type GateError = { text: string; retryAfter?: number };
@@ -83,6 +86,11 @@ function AuthenticatedApp() {
         </div>
       </div>
     );
+  }
+  if (canvasPanel()) {
+    // The drawing window never shows the login gate (no loop): signed out is one calm line.
+    if (phase === 'gate') return <p className="flex h-full items-center justify-center px-4 text-center text-[14px] text-dim" role="status">Desk nicht angemeldet</p>;
+    return <Suspense fallback={null}><CanvasPanelPage /></Suspense>;
   }
   if (phase === 'gate') return <Gate initialError={gateError} onUnlocked={() => setPhase('desk')} />;
   if (location.pathname === '/device') return <Device />;

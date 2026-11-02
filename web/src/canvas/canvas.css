@@ -123,3 +123,16 @@
   .cv-p { animation: none; stroke-dashoffset: 0; opacity: 0.7; }
   .cv-progress::after { animation: none; width: 100%; opacity: 0.5; }
 }
+
+/* Drawing window of the Windows app (`/?panel=canvas`, CanvasPanelPage): small windows give the drawing the space. */
+@media (max-height: 440px), (max-width: 520px) {
+  .cv-panel .cv-head { padding: 8px 10px 2px; column-gap: 8px; align-items: center; }
+  .cv-panel .cv-kind, .cv-panel .cv-caption, .cv-panel .cv-by, .cv-panel .cv-sources { display: none; }
+  .cv-panel .cv-title { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; }
+  .cv-panel .cv-head { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "text actions"; }
+  .cv-panel .cv-detail { height: 32px; padding: 0 10px; }
+  .cv-panel .cv-btn { height: 32px; width: 32px; }
+  .cv-panel .cv-controls { height: 36px; }
+  .cv-panel .cv-history { padding: 4px 10px 6px; }
+  .cv-panel .cv-hist { height: 30px; }
+}

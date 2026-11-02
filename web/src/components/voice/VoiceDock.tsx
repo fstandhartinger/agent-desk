@@ -1,6 +1,7 @@
-import { Hand, Mic, MicOff, PhoneOff, RotateCcw, X } from 'lucide-react';
+import { Hand, Mic, MicOff, PenTool, PhoneOff, RotateCcw, X } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { useMedia } from '../../lib/useMedia';
+import { nativeHost } from '../../lib/companion';
 import { optionByKey, voiceStore, type VoiceState } from '../../lib/voice';
 import { dismissVoiceError, interruptVoice, startVoice, stopVoice, toggleVoiceMuted } from '../../lib/voiceController';
 import LiveOrb from './LiveOrb';
@@ -58,6 +59,12 @@ export default function VoiceDock() {
               className={`flex h-12 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition-colors ${muted ? 'bg-danger text-white ring-2 ring-danger/50 hover:bg-danger/90' : 'border border-white/10 bg-white/[0.06] text-fg-2 hover:bg-white/[0.1] hover:text-fg'}`}>
               {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
               <span className={muted ? '' : 'hidden'}>{muted ? 'Stumm' : 'Mikrofon'}</span>
+            </button>
+          )}
+          {!failed && nativeHost() && (
+            <button type="button" onClick={() => nativeHost()?.postMessage({ type: 'canvas-panel-toggle' })} aria-label="Zeichnung" title="Zeichnung ein-/ausblenden"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-fg-2 transition-colors hover:bg-white/[0.1] hover:text-fg">
+              <PenTool className="h-4 w-4" />
             </button>
           )}
           {!failed && <button type="button" onClick={stopVoice} aria-label="Sprachsitzung beenden" title="Beenden (V)" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/90 text-white transition-colors hover:bg-danger">
