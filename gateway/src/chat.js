@@ -5,7 +5,7 @@ import { openSse, readJson, sendJson } from './http.js';
 import { streamChat } from './llm.js';
 import { loadPageContext } from './page.js';
 import { formatChatContext } from './claudeSessions.js';
-import { buildInstructions } from './prompt.js';
+import { buildInstructions, screenLines } from './prompt.js';
 import { TEXT } from './messages.js';
 import { short } from './redact.js';
 import { ToolMarkupFilter } from './toolMarkup.js';
@@ -75,7 +75,7 @@ function parseArgs(raw) {
 }
 
 /** POST /api/chat → SSE. `session` = {sid, ip, hub, limits}. */
-export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, canvasRegistry = conversationCanvases }) {
+export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, traces, canvasRegistry = conversationCanvases }) {
   const body = await readJson(req);
   const messages = cleanMessages(body.messages);
   if (!messages) return sendJson(res, 400, { error: TEXT.badMessages });
@@ -98,13 +98,32 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
   const viz = createActivityViz({ emit, model: cfg.vizModel() });
   let canvas = null;
   const lastUser = messages.at(-1).content;
+  vision?.touchChat(sid);
   audit({ action: 'chat', ip, detail: lastUser });
   viz.noteTurn({ role: 'user', text: lastUser });
 
   const totals = { in: 0, out: 0, costUsd: 0 };
+  // session trace (docs/TRACE.md): one per conversation; the id goes to the browser as {type:"session",aid}
+  const convKey = conversationKey(sid, body.conversationId);
+  const trace = traces?.chat(convKey, { provider: 'text', sid }) ?? null;
+  const turn = trace?.nextTurn() ?? 0;
+  const t0 = Date.now();
+  let streamOpen = true;
+  let announced = false;
+  const announce = () => {
+    if (!trace?.aid || announced || !streamOpen || abort.signal.aborted) return;
+    announced = true;
+    send({ type: 'session', aid: trace.aid });
+  };
   try {
     const page = await loadPageContext(body.page);
-    const convKey = conversationKey(sid, body.conversationId);
+    if (trace) {
+      if (!trace.started) trace.event('session.start', { provider: 'text', model, slug: page?.slug ?? null, title: page?.title ?? null, client: { app: 'web' }, entry: { path: 'chat' }, lang: isGermanText(lastUser) ? 'de' : 'en' });
+      trace.event('transcript.user.final', { turn, text: lastUser, typed: true });
+      trace.event('response.created', { turn });
+      announce();
+      if (!trace.aid) { void trace.flush(); trace.ready.then(announce); }
+    }
     // the canvas the browser shows (undefined: an older client that does not say) + this conversation's own earlier canvases
     const focusedId = Object.hasOwn(body, 'focusedCanvasId') ? (typeof body.focusedCanvasId === 'string' ? body.focusedCanvasId : null) : undefined;
     canvas = canvasBus && illustrator ? createCanvasSession({ bus: canvasBus, illustrator, by: 'text', emit: send, page, focusedId, owner: convKey ?? `text\u0000${sid ?? ''}`, owned: canvasRegistry.ids(convKey), onOwn: (id) => canvasRegistry.note(convKey, id), ctx: { sid, ip, limits } }) : null;
@@ -113,15 +132,16 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     canvas?.startTurn();
     canvas?.userTurn(lastUser);
     const ctx = {
-      artifacts, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
+      artifacts, vision, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
+      trace: () => trace, traces, turn,
       chatContext: formatChatContext(messages),
       // Round 10 (critic r9 F2): the deterministic money list replaces the model's money sentences only for a spending
       // question (the illustrator's classifier); ledger_spend as context (Florian's tax-reserve question) keeps the explanation.
       moneyQuestion: isMoneyQuestion(lastUser),
       results: [], // every tool result of this turn: what names and amounts in the prose may come from
     };
-    const convo = [{ role: 'system', content: buildInstructions(page) + artifactInstructions(artifacts?.get(sid)) }, ...messages];
+    const convo = [{ role: 'system', content: buildInstructions(page) + artifactInstructions(artifacts?.get(sid)) + (vision ? vision.chatBlock(sid) : screenLines(false).join('\n')) }, ...messages];
     const paths = userPaths(lastUser);
     if (paths.length) convo.push({ role: 'system', content: pathHint(paths) });
     const givenBase = convo.map((m) => m.content).join('\n');
@@ -136,6 +156,8 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     const vizArrived = new Promise((resolve) => { onViz = resolve; });
     viz.noteTurn({ role: 'assistant', text });
     canvas?.noteTurn({ role: 'assistant', text });
+    trace?.event('transcript.assistant.final', { turn, text });
+    trace?.event('response.done', { turn, ms: Date.now() - t0, in: totals.in, out: totals.out, costUsd: totals.costUsd });
     send({ type: 'done', usage: { in: totals.in, out: totals.out }, costUsd: totals.costUsd, model });
     audit({ action: 'chat.done', ip, cost_usd: totals.costUsd, detail: `${totals.in}/${totals.out} tokens` });
     // `done` is already out; keep the stream open briefly so the canvas update for this turn can still arrive.
@@ -143,9 +165,14 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     // Explanatory answer without a drawing (or a refusal to draw): the gateway draws it itself, then the stream ends.
     canvas?.autoTurn({ userText: lastUser, answerText: raw });
     await canvas?.idle();
+    if (trace && !trace.aid) await Promise.race([trace.ready, new Promise((resolve) => setTimeout(resolve, 1500))]); // the id still reaches the browser
+    announce();
   } catch (err) {
+    trace?.event(abort.signal.aborted ? 'client.abort' : 'provider.error', { turn, message: short(err.message, 200), ms: Date.now() - t0 });
     if (!abort.signal.aborted) send({ type: 'error', message: short(err.message, 200) });
   } finally {
+    streamOpen = false;
+    if (trace && !convKey) void trace.close(); // no conversation id: a one-request trace
     if (abort.signal.aborted) canvas?.cancelAll();
     canvas?.close();
     viz.close();
@@ -307,12 +334,16 @@ async function execute(call, ctx, send, viz) {
   const refused = pseudoPathRefusal(call.name, args); // r6 P2-7: no status line for a call that never reaches the bridge
   if (refused) { ctx.audit?.({ action: 'chat.tool.pseudo-path', detail: call.name }); return refused; }
   const base = { type: 'tool', id: call.id, name: call.name, args: args ?? {} };
+  const trace = ctx.trace?.();
+  trace?.event('tool.call', { turn: ctx.turn, id: call.id, name: call.name, args: args ?? {} });
   send({ ...base, status: 'start' });
   viz.noteEvent({ ...base, status: 'start' });
   ctx.canvas?.toolStarted(call.name);
   const result = args === null ? { ok: false, summary: 'invalid tool arguments', content: 'ERROR: tool arguments were not valid JSON' } : await runTool(call.name, args, ctx);
   const event = { ...base, status: result.ok ? 'done' : 'error', summary: result.summary, ms: Date.now() - started };
   send(event);
+  if (result.ok) trace?.event('tool.done', { turn: ctx.turn, id: call.id, name: call.name, ok: true, ms: event.ms, chars: String(result.content ?? '').length });
+  else trace?.event('tool.error', { turn: ctx.turn, id: call.id, name: call.name, ms: event.ms, error: result.summary });
   if (result.event?.type === 'handoff' || result.event?.type === 'claude_proposal') send(result.event); // handoff_propose / claude_task: the browser shows a confirm card; only Florian's click acts
   viz.noteEvent({ ...event, content: result.content }); // the activity canvas reads its facts from the full result
   ctx.canvas?.noteTool({ name: call.name, args: args ?? {}, ok: result.ok, content: result.content });

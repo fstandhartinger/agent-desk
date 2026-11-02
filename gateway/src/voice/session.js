@@ -9,6 +9,7 @@ import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
+import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
 export const USAGE_TICK_MS = 10_000;
@@ -24,7 +25,18 @@ const focusOf = (msg) => (Object.hasOwn(msg ?? {}, 'focusedCanvasId') ? { focuse
 const voiceCap = (name) => (name === 'artifact_ref_read' || name === 'artifact_resolve' ? 6000 : name === 'knowledge_read' ? 6000 : name === 'explainer_context' ? 4000 : VOICE_TOOL_CHARS);
 const PAGE_LOAD_MS = 4000; // the server-side page context may delay the vendor connect at most this long
 
-export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs() }) {
+/** Vendors also stream silent frames while Florian speaks: those say nothing about an answer. */
+function isSilent(pcm) {
+  for (let i = 0; i + 1 < pcm.length; i += 32) if (Math.abs(pcm.readInt16LE(i)) > 300) return false;
+  return true;
+}
+
+export const MAX_RECOVERIES = 2;
+const RECOVERY_FACT_CHARS = 1500;
+const HALF_SENTENCE_MS = 1500; // a mute this soon after the last word cut a sentence (GPT-Live transcripts often have no punctuation)
+const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
+
+export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
   let adapter = null;
@@ -75,6 +87,21 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let contentEpoch = 0; // counts spoken user turns: a tool result that comes back after the next question began is stale
   let contentOpen = false; // the current user turn has transcript content
   let interrupted = false; // the user turn began while an answer was still in flight (its transcript fragments interleave with the old answer)
+  // Incident 2 Nov (GPT-Live, 5 minutes of silence): a call is only "old" on positive evidence, see belongsToOldQuestion.
+  const overtaken = new Set(); // vendor response ids that were open when a new question began
+  let openResponses = new Set(); // vendor response ids that started and did not finish yet
+  let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
+  // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
+  const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false, overlap: false };
+  let runningTools = 0;
+  let detachVision = null;
+  let screenHeld = null; // screen context that arrived before the vendor was ready
+  let muted = false;
+  let mutedAt = 0;
+  let mutedMs = 0;
+  let framesWhileMuted = 0;
+  let turnId = 0;
+  const trace = deps.openTrace?.({ provider }) ?? { event() {}, close() {} };
 
   const startTimer = setTimeout(() => finish('start-timeout'), START_TIMEOUT_MS);
 
@@ -108,6 +135,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (!turn.role || !turn.text.trim()) { turn.role = null; turn.text = ''; return; }
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
+    trace.event(`transcript.${role}.final`, { turn: turnId, text });
     if (role === 'user') lastUserText = text;
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
@@ -127,18 +155,30 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
    * A new question begins. `content` = real speech (a transcript), not just a VAD event: only that stops the answer to the
    * previous question (barge-in), and makes the pending tool results of that answer stale.
    */
-  function beginUserTurn(content) {
+  function beginUserTurn(content, trigger = 'speech') {
     if (content && !contentOpen) {
       contentOpen = true;
       contentEpoch += 1;
+      turnId += 1;
+      previousQuestion = lastUserText;
+      lastUserText = '';
       turnProposals = new Map(); // proposals with the same title are deduped within one user turn (critic P2-6)
+      pending.recoveries = 0;
+      pending.answer = '';
+      pending.facts = [];
+      pending.promised = false;
+      pending.overlap = false;
+      trace.event('turn.user.start', { turn: turnId, epoch: contentEpoch, trigger });
       if (responding) {
         interrupted = true;
+        pending.overlap = tracksResponses; // GPT-Live keeps speaking the old answer for many seconds: that text answers nothing
         staleChain = tracksResponses ? responseOpen : true;
+        for (const id of openResponses) overtaken.add(id);
         responding = false;
         dropAudio = false;
         adapter?.interrupt(); // OpenAI/xAI: response.cancel; Gemini: the new input interrupts by itself
         audit({ action: 'voice.barge_in', detail: provider });
+        trace.event('barge_in', { turn: turnId, trigger, epoch: contentEpoch, staleChain, openResponses: [...openResponses] });
       }
     }
     if (userOpen && (content || userBuf || turn.role === 'user')) return;
@@ -176,10 +216,65 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     contentOpen = false;
     interrupted = false;
     if (!text || closed) return;
+    armNoAnswer(text);
     viz?.noteTurn({ role: 'user', text });
     canvas?.noteTurn({ role: 'user', text });
     // the question is complete: the early illustrator starts now, in parallel with the agent's answer
     expectFacts(canvas?.userTurn(text));
+  }
+
+  /** The question waits for an answer: `noAnswerMs` of silence with no running tool -> recovery. */
+  function armNoAnswer(text) {
+    if (pending.settled === turnId) return; // the fragments of this turn were committed after its answer had begun
+    pending.active = needsAnswer(text);
+    pending.text = text;
+    pending.promised = false;
+    pending.at = now();
+    if (pending.active) restartNoAnswer();
+    else clearTimeout(pending.timer);
+  }
+
+  function restartNoAnswer() {
+    clearTimeout(pending.timer);
+    if (!pending.active || closed) return;
+    pending.timer = setTimeout(fireNoAnswer, noAnswerMs());
+    pending.timer.unref?.();
+  }
+
+  function fireNoAnswer() {
+    if (!pending.active || closed || !adapter) return;
+    if (runningTools > 0) { restartNoAnswer(); return; } // a tool still works: the same timer checks again
+    const reason = pending.answer.trim() ? 'promise' : 'silent';
+    if (pending.recoveries >= MAX_RECOVERIES) {
+      pending.active = false;
+      audit({ action: 'voice.unanswered', detail: `${provider} turn=${turnId}` });
+      trace.event('turn.unanswered', { turn: turnId, reason, question: pending.text, recoveries: pending.recoveries });
+      sendJson({ type: 'notice', code: 'no-answer', message: 'Das Modell antwortet gerade nicht. Stell die Frage bitte noch einmal oder wechsle die Stimme.' });
+      return;
+    }
+    pending.recoveries += 1;
+    pending.answer = '';
+    const facts = pending.facts.join('\n\n').slice(0, RECOVERY_FACT_CHARS);
+    const hint = routingHint(pending.text);
+    const text = `${RECOVERY_LEAD}\nFrage: ${pending.text}${hint ? `\n${hint}` : ''}${facts ? `\nSchon gefunden:\n${facts}` : ''}`;
+    audit({ action: 'voice.no_answer', detail: `${provider} ${reason} #${pending.recoveries} turn=${turnId}` });
+    trace.event('watchdog.no_answer', { turn: turnId, reason, n: pending.recoveries, question: pending.text, factsChars: facts.length });
+    if (adapter.recover) adapter.recover(text);
+    else adapter.sendText?.(text);
+    restartNoAnswer();
+  }
+
+  /** Assistant text since the question: real content settles it; a promise ("Ich schaue sofort") keeps waiting for a tool or an answer. */
+  function noteAnswer(delta) {
+    if (!pending.active) return;
+    pending.answer += delta;
+    // deltas are single words: only the text collected since the question can name something of it
+    if (pending.overlap && !fitsQuestion(pending.answer, pending.text)) { restartNoAnswer(); return; }
+    pending.overlap = false;
+    if (isPromiseOnly(pending.answer)) { pending.promised = true; restartNoAnswer(); return; }
+    pending.active = false;
+    pending.settled = turnId;
+    clearTimeout(pending.timer);
   }
 
   function expectFacts(decision) {
@@ -197,9 +292,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function onTranscript(e) {
     if (e.role !== turn.role) flushTranscript();
     if (e.role === 'user') {
-      beginUserTurn(true);
+      beginUserTurn(true, 'transcript');
       if (e.delta != null || e.text != null) { clearTimeout(mergeTimer); mergeTimer = null; } // still speaking: commit after the last fragment
-    } else assistantStarted();
+      // GPT-Live sends user deltas without a final: the watchdog also has to run for a question that was never committed
+      armNoAnswer(`${userBuf} ${turn.role === 'user' ? turn.text : ''} ${e.delta ?? e.text ?? ''}`.replace(/\s+/g, ' ').trim());
+    } else {
+      assistantStarted();
+      noteAnswer(e.delta ?? e.text ?? '');
+    }
     if (e.delta != null) {
       turn.role = e.role;
       const piece = e.role === 'assistant' ? assistantPiece(e.delta) : e.delta;
@@ -214,12 +314,16 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (e.final) flushTranscript();
   }
 
-  async function onToolCall({ id, name, args }) {
+  async function onToolCall({ id, name, args, responseId }) {
     const requestedName = name;
     name = resolveToolName(name);
     const t0 = now();
     assistantStarted();
-    const myEpoch = staleChain ? contentEpoch - 1 : contentEpoch;
+    const question = `${userBuf} ${lastUserText} ${pending.text}`;
+    // A call of a response that started after the barge-in is current; an older one is stale only if its arguments demonstrably fit the previous question.
+    const oldChain = staleChain && (responseId == null || overtaken.has(responseId)) && belongsToOldQuestion(args, previousQuestion, question);
+    const myEpoch = oldChain ? contentEpoch - 1 : contentEpoch;
+    trace.event('tool.call', { turn: turnId, id, name, args, responseId, epoch: contentEpoch, myEpoch, staleChain, oldChain });
     const evt = { type: 'tool', id, name, args };
     // round 12: once the early facts went out with a tool result, Gemini may research once more, then it answers
     if (factsAt === null && adapter?.factsDelivered?.()) factsAt = researchTools;
@@ -235,6 +339,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       if (!closed) adapter.sendToolResult(id, requestedName, JSON.stringify({ error: pseudo.content }));
       return;
     }
+    if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
+    runningTools += 1;
     sendJson({ ...evt, status: 'start' });
     viz?.noteEvent({ ...evt, status: 'start' });
     canvas?.toolStarted(name);
@@ -243,6 +349,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     try {
       const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name) });
       output = String(res.content ?? '').slice(0, voiceCap(name));
+      trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
       for (const w of knownWords(res.content)) known.add(w);
       for (const r of cjkRuns(res.content)) if (cjkKnown.size < 500) cjkKnown.add(r);
@@ -252,21 +359,25 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       viz?.noteEvent({ ...done, content: output });
     } catch (err) {
       output = JSON.stringify({ error: String(err.message ?? err).slice(0, 300) });
+      trace.event('tool.error', { turn: turnId, id, name, ms: now() - t0, error: String(err.message ?? err).slice(0, 300) });
       canvas?.noteTool({ name, args, ok: false, content: '' }); // the drawing stops waiting for this tool
       const failed = { ...evt, status: 'error', summary: String(err.message ?? err).slice(0, 200), ms: now() - t0 };
       sendJson(failed);
       viz?.noteEvent(failed);
     }
+    runningTools = Math.max(0, runningTools - 1);
     if (closed) return;
     // the user asked something new meanwhile: the result belongs to a question that is no longer being answered
     if (cancelledCalls.delete(id)) {
       audit({ action: 'voice.tool.cancelled', detail: `${provider}:${name}` });
+      trace.event('tool.cancelled', { turn: turnId, id, name, reason: 'vendor-voided' });
       return;
     }
     await waitForFacts(name);
     if (closed) return;
     if (myEpoch !== contentEpoch) {
       audit({ action: 'voice.tool.stale', detail: `${provider}:${name}` });
+      trace.event('tool.stale', { turn: turnId, id, name, myEpoch, epoch: contentEpoch, reachedModel: true, responseRequested: provider === 'gemini', reason: oldChain ? 'args fit the previous question' : 'result arrived after a new question began' });
       if (provider === 'gemini') { // the model waits for every call it made: answer it, but say the result is old (dropping it made Gemini report "ich bearbeite noch deine vorherige Anfrage")
         adapter.sendToolResult(id, requestedName, JSON.stringify({ hinweis: 'Ergebnis zu einer früheren Frage. Florian hat inzwischen eine neue Frage gestellt: beantworte nur die neueste Frage, nutze dieses Ergebnis nur wenn es dazu passt.', ergebnis: output.slice(0, 2000) }));
         return;
@@ -274,7 +385,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       adapter.sendToolResult(id, requestedName, output, { stale: true }); // OpenAI/xAI: keep the call/output pairing, no new response
       return;
     }
-    adapter.sendToolResult(id, requestedName, output);
+    if (pending.active) {
+      pending.facts.push(`${name}: ${output.slice(0, RECOVERY_FACT_CHARS)}`);
+      restartNoAnswer(); // the model now has the results: same clock for its answer (the adapter nudge runs first, this is the last resort)
+    }
+    const route = name === 'knowledge_read' ? routingHint(question) : '';
+    adapter.sendToolResult(id, requestedName, route ? `${output}\n\n${route}` : output);
+    trace.event('tool.result_sent', { turn: turnId, id, name, reachedModel: true, responseRequested: true, routed: Boolean(route) });
   }
 
   function onEvent(e) {
@@ -283,10 +400,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       case 'ready':
         readyAt = now();
         sendJson({ type: 'ready', provider, model: e.model });
+        trace.event('session.ready', { provider, model: e.model });
+        if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
         if (!dropAudio && ws.readyState === ws.OPEN) ws.send(e.pcm, { binary: true });
+        if (pending.active && !isSilent(e.pcm)) restartNoAnswer(); // still speaking (its transcript may lag): the clock starts when the sound stops
         break;
       case 'transcript':
         onTranscript(e);
@@ -295,24 +415,38 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         flushTranscript();
         beginUserTurn(false);
         dropAudio = false;
+        restartNoAnswer(); // Florian is talking again: no recovery into his speech
+        trace.event('vad.speech_started', { turn: turnId });
         sendJson({ type: 'speech_started' });
         break;
       case 'turn_done':
         dropAudio = false;
         responding = false;
         staleChain = false;
-        responseOpen = false;
+        if (e.id != null) { openResponses.delete(e.id); overtaken.delete(e.id); } else { openResponses = new Set(); overtaken.clear(); }
+        if (pending.overlap) { pending.overlap = false; pending.answer = ''; } // the overtaken response is over: what follows is the answer
+        responseOpen = openResponses.size > 0;
+        trace.event('response.done', { turn: turnId, id: e.id });
         flushTranscript();
         if (!userOpen) canvas?.turnDone();
         break;
       case 'response_started':
         tracksResponses = true;
         responseOpen = true;
+        if (e.id != null) openResponses.add(e.id);
+        pending.overlap = false; // a response that started after the question: what it says belongs to the question
+        restartNoAnswer();
+        trace.event('response.created', { turn: turnId, id: e.id });
+        break;
+      case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
+        trace.event('screen.context.error', { message: String(e.message ?? '').slice(0, 200) });
         break;
       case 'watchdog': // the model stayed silent after its tool results: the adapter asked for the answer again
         audit({ action: 'voice.watchdog', detail: `${provider} #${e.n}` });
+        trace.event('watchdog.adapter', { turn: turnId, n: e.n });
         break;
       case 'tool_cancelled': // Gemini: the interruption voided these calls; their results would make the model answer the old question
+        trace.event('tool.cancel_request', { turn: turnId, ids: e.ids });
         for (const id of e.ids) cancelledCalls.add(id);
         break;
       case 'tool_call':
@@ -320,6 +454,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         onToolCall(e);
         break;
       case 'error':
+        trace.event('provider.error', { turn: turnId, message: String(e.message ?? '').slice(0, 300), code: e.code, soft: Boolean(e.soft), status: e.status });
         if (e.soft && /cancel|no active response|not active/i.test(`${e.code ?? ''} ${e.message ?? ''}`)) break; // response.cancel with nothing to cancel
         if (e.soft) { sendJson({ type: 'error', message: e.message }); break; }
         sendJson({ type: 'error', message: e.message, fallback: e.fallback });
@@ -368,7 +503,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
+    detachVision = deps.vision?.attach(sid, { kind: 'voice', trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
+      return adapter?.setScreenContext?.(text) ?? 'unsupported';
+    } });
     unregisterText = deps.registerText?.((text) => readyAt !== null && deliverText(text));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -379,6 +519,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       finish('hard-cap');
     }, HARD_CAP_MS);
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
+    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
+    Promise.resolve(trace.ready).then((info) => { if (info?.aid) sendJson({ type: 'session', aid: info.aid }); }).catch(() => {});
   }
 
   /**
@@ -395,7 +537,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider }) + artifactBlock });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
@@ -407,16 +549,35 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(startTimer);
     clearInterval(tickTimer);
     clearTimeout(capTimer);
+    clearTimeout(pending.timer);
+    if (muted) { mutedMs += now() - mutedAt; muted = false; }
     if (startedAt) {
       tick();
       audit({ action: 'voice.stop', detail: `${provider} ${reason} ${billedSeconds}s`, cost_usd: estimateCost(provider, billedSeconds) });
     }
+    trace.event('session.stop', { reason, seconds: billedSeconds, costUsd: estimateCost(provider, billedSeconds), mutedSeconds: Math.round(mutedMs / 1000), framesWhileMuted });
+    trace.close();
     unregisterText?.();
+    detachVision?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus
     sendJson({ type: 'closed' });
     if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close();
+  }
+
+  /** Mic mute: the vendor hears nothing and learns nothing about it, so no turn, no barge-in and no remark. Billing clock: see prices.js. */
+  function setMuted(next, source) {
+    if (next === muted) return;
+    muted = next;
+    if (muted) {
+      mutedAt = now();
+      // a half sentence cut by the mute is no question to recover; a complete one still gets its answer
+      if (pending.active && now() - pending.at < HALF_SENTENCE_MS && !/[?.!]["”)]*\s*$/.test(pending.text)) { pending.active = false; clearTimeout(pending.timer); }
+    } else mutedMs += now() - mutedAt;
+    audit({ action: muted ? 'voice.mute' : 'voice.unmute', detail: `${provider} ${String(source ?? 'dock').slice(0, 20)}` });
+    trace.event(muted ? 'mic.mute' : 'mic.unmute', { turn: turnId, source: String(source ?? 'dock').slice(0, 20), mutedSeconds: Math.round(mutedMs / 1000) });
+    sendJson({ type: 'mute', muted });
   }
 
   // Both browser WS text and authenticated context-turn use this exact user-turn path.
@@ -426,7 +587,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (Object.hasOwn(msg, 'focusedCanvasId')) canvas?.setFocus?.(focusOf(msg).focusedId);
     flushTranscript();
     commitUser();
-    beginUserTurn(true);
+    beginUserTurn(true, 'typed');
     userOpen = false;
     contentOpen = false;
     interrupted = false;
@@ -434,6 +595,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     canvas?.noteTurn({ role: 'user', text });
     expectFacts(canvas?.userTurn(text));
     sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
+    lastUserText = text;
+    armNoAnswer(text);
+    trace.event('transcript.user.final', { turn: turnId, text, typed: true });
     adapter.sendText(text);
     return true;
   }
@@ -441,6 +605,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   ws.on('message', (data, isBinary) => {
     if (closed) return;
     if (isBinary) {
+      if (muted) { framesWhileMuted += 1; return; } // the client stops sending; a frame still in flight never reaches the vendor
       if (adapter) adapter.sendAudio(Buffer.from(data));
       return;
     }
@@ -452,7 +617,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {
       deliverText(msg.text, msg);
     }
-    else if (msg.type === 'interrupt' && adapter) { dropAudio = true; adapter.interrupt(); }
+    else if (msg.type === 'interrupt' && adapter) { dropAudio = true; adapter.interrupt(); trace.event('client.interrupt', { turn: turnId }); }
+    else if (msg.type === 'mute') setMuted(msg.muted === true, msg.source);
+    else if (msg.type === 'client_event' && msg.event && typeof msg.event === 'object') trace.client?.(msg.event);
     else if (msg.type === 'stop') finish('client-stop');
   });
   ws.on('close', () => finish('client-closed'));

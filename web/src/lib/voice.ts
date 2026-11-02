@@ -1,4 +1,6 @@
 import { companionMuted } from './companion';
+import { MuteGate } from './muteGate';
+import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
 import type { ClaudeProposalEvent, HandoffEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
@@ -21,13 +23,14 @@ export interface VoiceHandlers {
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
   onClaudeProposal(p: ClaudeProposalEvent): void;
-  onFallback(provider: string, message: string): void;
+  onFallback(provider: string, message: string, muted: boolean): void;
   onError(message: string): void;
   onUsage(seconds: number, costUsd: number): void;
+  onNotice?(message: string): void;
 }
 
 /** `option` is the user's picker choice and never changes by itself; `active` is the provider of the running session. */
-export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null });
+export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null; muted: boolean; aid: string | null; serverNotice: string | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null, muted: false, aid: null, serverNotice: null });
 
 /** Mic/speaker RMS (0..1). Read at animation rate, never pushed through React state. */
 export const levels = { mic: 0, speaker: 0 };
@@ -50,18 +53,32 @@ export class VoiceSession {
   private decay = 0;
   private readyTimer = 0;
   private unwatchFocus: (() => void) | null = null;
+  private pending: { ts: number; type: string; data: unknown }[] = [];
+  private offDevice: (() => void) | null = null;
+  private gate = new MuteGate(() => this.stream?.getAudioTracks() ?? [], (muted, source) => {
+    voiceStore.set((s) => ({ ...s, muted }));
+    levels.mic = 0;
+    this.sendJson({ type: 'mute', muted, source });
+    this.event(muted ? 'mute' : 'unmute', { source });
+  });
 
-  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers) {}
+  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers, private startMuted = false) {}
 
   private set(state: VoiceState, model?: string) {
     voiceStore.set((s) => ({ ...s, state, active: this.opt.key, model: model ?? s.model, error: state === 'error' ? s.error : null }));
   }
 
   async start() {
+    this.gate.reset();
+    this.gate.muted = this.startMuted;
+    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null }));
     this.set('connecting', '');
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
-    } catch {
+      this.gate.applyTracks();
+      this.event('mic.permission', { state: 'granted' });
+    } catch (err) {
+      this.event('mic.permission', { state: 'denied', name: (err as Error)?.name ?? 'Error' });
       this.fail('Kein Mikrofonzugriff – bitte im Browser erlauben.');
       return;
     }
@@ -80,12 +97,15 @@ export class VoiceSession {
       this.ctx = new AudioContext({ latencyHint: 'interactive' });
     }
     const ctx = this.ctx;
+    ctx.onstatechange = () => this.event('audio.ctx_state', { state: ctx.state });
+    this.watchDevices();
     await Promise.all([ctx.audioWorklet.addModule('/worklets/mic-capture.js'), ctx.audioWorklet.addModule('/worklets/pcm-player.js')]);
     const src = ctx.createMediaStreamSource(this.stream!);
     this.mic = new AudioWorkletNode(ctx, 'mic-capture', { processorOptions: { targetRate: 24000 } });
     this.mic.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
-      levels.mic = Math.min(1, e.data.rms * 4);
-      if (!companionMuted() && this.ready && this.ws?.readyState === WebSocket.OPEN) this.ws.send(e.data.pcm);
+      levels.mic = this.gate.muted ? 0 : Math.min(1, e.data.rms * 4);
+      const ws = this.ws;
+      this.gate.frame(e.data.pcm, !companionMuted() && this.ready && ws?.readyState === WebSocket.OPEN, (pcm) => ws!.send(pcm));
     };
     src.connect(this.mic);
     this.player = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [1], processorOptions: { sourceRate: 24000 } });
@@ -110,8 +130,11 @@ export class VoiceSession {
     this.ws = ws;
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}) }));
+      const desktop = Boolean(globalThis.matchMedia?.('(min-width: 1024px)').matches);
+      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', client: clientInfo(desktop), entry: buildEntry(location, this.page?.pointId), focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}) }));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
+      this.event('ws.open', {});
+      this.flushEvents();
       this.unwatchFocus?.();
       this.unwatchFocus = watchFocusedCanvas((id) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'focus', focusedCanvasId: id })); });
     };
@@ -129,9 +152,10 @@ export class VoiceSession {
       this.handle(m);
     };
     ws.onerror = () => {
+      this.event('ws.error', {});
       if (!this.ready && !this.closed) this.fail('Sprachverbindung fehlgeschlagen.');
     };
-    ws.onclose = () => this.onGone();
+    ws.onclose = (e) => { this.event('ws.close', { code: e.code }); this.onGone(); };
   }
 
   private handle(m: VoiceServerMsg) {
@@ -139,6 +163,16 @@ export class VoiceSession {
       case 'ready':
         this.ready = true;
         this.set('listening', m.model);
+        if (this.gate.muted) this.sendJson({ type: 'mute', muted: true, source: 'dock' });
+        break;
+      case 'session':
+        voiceStore.set((s) => ({ ...s, aid: typeof m.aid === 'string' ? m.aid.replace(/^a#/i, '').toLowerCase() : null }));
+        break;
+      case 'notice':
+        voiceStore.set((s) => ({ ...s, serverNotice: m.message }));
+        this.h.onNotice?.(m.message);
+        break;
+      case 'mute':
         break;
       case 'transcript': {
         const text = m.delta ?? m.text ?? '';
@@ -147,6 +181,7 @@ export class VoiceSession {
         break;
       }
       case 'speech_started':
+        if (!this.gate.allowBargeIn()) break;
         this.player?.port.postMessage('flush');
         levels.speaker = 0;
         this.set('listening');
@@ -169,8 +204,9 @@ export class VoiceSession {
       case 'error':
         if (m.fallback) {
           this.closed = true;
+          const wasMuted = this.gate.muted; // a provider change must not open the mic he closed
           this.cleanup();
-          this.h.onFallback(m.fallback, m.message);
+          this.h.onFallback(m.fallback, m.message, wasMuted);
         } else this.fail(m.message);
         break;
       case 'closed':
@@ -199,6 +235,34 @@ export class VoiceSession {
     this.ws?.send(JSON.stringify({ type: 'text', text, focusedCanvasId: focusedCanvasId() }));
   }
 
+  get muted() { return this.gate.muted; }
+  setMuted(on: boolean, source: 'dock' | 'hotkey' = 'dock') { return this.gate.set(on, source); }
+
+  private sendJson(o: unknown) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(o));
+  }
+
+  /** Client-side diagnostics for the session trace: type + small data only, never audio or text. Queued until the socket is open. */
+  event(type: string, data: unknown) {
+    const e = { ts: Date.now(), type, data };
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'client_event', event: e }));
+    else if (this.pending.length < 50) this.pending.push(e);
+  }
+
+  private flushEvents() {
+    for (const event of this.pending.splice(0)) this.sendJson({ type: 'client_event', event });
+  }
+
+  private watchDevices() {
+    const md = navigator.mediaDevices;
+    const onChange = () => { this.gate.applyTracks(); this.event('audio.devicechange', {}); };
+    md?.addEventListener?.('devicechange', onChange);
+    let perm: PermissionStatus | null = null;
+    const onPerm = () => { this.gate.applyTracks(); this.event('mic.permission', { state: perm?.state }); };
+    navigator.permissions?.query({ name: 'microphone' as PermissionName }).then((p) => { perm = p; p.addEventListener('change', onPerm); }, () => {});
+    this.offDevice = () => { md?.removeEventListener?.('devicechange', onChange); perm?.removeEventListener('change', onPerm); };
+  }
+
   interrupt() {
     this.player?.port.postMessage('flush');
     levels.speaker = 0;
@@ -223,6 +287,10 @@ export class VoiceSession {
 
   private cleanup() {
     this.ready = false;
+    this.gate.reset();
+    voiceStore.set((s) => ({ ...s, muted: false }));
+    this.offDevice?.();
+    this.offDevice = null;
     this.unwatchFocus?.();
     this.unwatchFocus = null;
     clearTimeout(this.readyTimer);

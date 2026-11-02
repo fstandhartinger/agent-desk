@@ -108,9 +108,11 @@ test('the tool result of the overtaken question is stale: OpenAI/xAI get it with
 
 test('tool calls the overtaken answer still issues (until its turn_done) are stale; the next answer is current again', async (t) => {
   const h = harness(t, 'openai');
+  userFrag(h, 'Was kostet Sandy?');
+  await sleep(40);
   h.emit({ t: 'transcript', role: 'assistant', delta: 'Moment', final: false }); // old answer in flight
   userFrag(h, 'Neue Frage?');
-  h.emit({ t: 'tool_call', id: 'old1', name: 'read_file', args: {} }); // the old backend chain keeps calling
+  h.emit({ t: 'tool_call', id: 'old1', name: 'read_file', args: { path: 'sandy.md', query: 'Sandy' } }); // the old backend chain keeps calling
   await sleep(10);
   h.emit({ t: 'turn_done' });
   h.emit({ t: 'tool_call', id: 'new1', name: 'read_file', args: {} });

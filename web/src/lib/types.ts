@@ -18,6 +18,7 @@ export type ChatEvent =
   | HandoffEvent
   | ClaudeProposalEvent
   | { type: 'viz'; spec: VizSpec }
+  | { type: 'session'; aid: string }
   | { type: 'done'; usage?: { in: number; out: number }; costUsd?: number; model?: string }
   | { type: 'error'; message: string };
 
@@ -43,6 +44,9 @@ export type VoiceServerMsg =
   | { type: 'viz'; spec: VizSpec }
   | { type: 'usage'; seconds: number; costUsd: number }
   | { type: 'error'; message: string; fallback?: string }
+  | { type: 'session'; aid: string }
+  | { type: 'notice'; code?: string; message: string }
+  | { type: 'mute'; muted: boolean }
   | { type: 'closed' };
 
 export interface PageContext { slug: string; title?: string; t: number; sceneId?: string; pointId?: string; point?: { title: string; short?: string; more?: string }; transcriptNear?: string }

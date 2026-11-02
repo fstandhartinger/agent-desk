@@ -59,7 +59,7 @@ export function startVoice() {
 }
 
 /** Starts a session. `viaFallback` is the option the user actually picked when this is an automatic fallback. */
-function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
+function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) {
   session?.stop();
   logActivity('voice', 'Sprachsitzung startet', opt.label, 'violet');
   const s = new VoiceSession(opt, currentContext(), {
@@ -83,16 +83,17 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
       logActivity('voice', 'Claude-Auftrag vorgeschlagen', p.title, 'violet');
     },
     onViz: noteViz,
+    onNotice: (message) => toast(message, 'info', 8000),
     onUsage(seconds, cost) {
       logActivity('voice', 'Sprachnutzung', `${Math.round(seconds)} s · ${fmtUsd(cost)}`);
     },
-    onFallback(provider, message) {
+    onFallback(provider, message, wasMuted) {
       const next = optionByKey(provider);
       const picked = viaFallback ?? opt;
       toast(`${opt.label} nicht verfügbar – wechsle zu ${next.label}.`, 'info');
       logActivity('voice', 'Fallback', `${opt.label} → ${next.label}: ${message}`, 'amber');
       session = null;
-      begin(next, picked);
+      begin(next, picked, wasMuted);
       voiceStore.set((s) => ({ ...s, notice: voiceUnavailableNotice(picked, next) }));
     },
     onError(message) {
@@ -103,7 +104,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
       closeTurn('user');
       closeTurn('assistant');
     },
-  });
+  }, startMuted);
   session = s;
   void s.start();
 }
@@ -132,3 +133,15 @@ export function sendVoiceText(text: string) {
   session.sendText(text);
   return true;
 }
+
+export const voiceMuted = () => voiceStore.get().muted;
+/** Mute the mic of the running session (no session = nothing to mute). Same session, same context; the model is told nothing. */
+export function setVoiceMuted(on: boolean, source: 'dock' | 'hotkey' = 'dock') {
+  if (!session || !voiceActive()) return false;
+  session.setMuted(on, source);
+  return true;
+}
+export const toggleVoiceMuted = (source: 'dock' | 'hotkey' = 'dock') => setVoiceMuted(!voiceMuted(), source);
+
+// Screen Agent's global hotkey reaches the page through WebView2 (companion 'mute' message); this is the same switch for anything that can run script.
+(window as Window & { __deskVoice?: unknown }).__deskVoice = { setMuted: (on: boolean) => setVoiceMuted(Boolean(on), 'hotkey'), toggleMuted: () => toggleVoiceMuted('hotkey'), muted: voiceMuted };

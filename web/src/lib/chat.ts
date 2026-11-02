@@ -1,7 +1,7 @@
 import { errorFrom, errorMessage } from './api';
 import { readSSE, parseJSON } from './sse';
 import { createStore } from './store';
-import { addMessage, appendText, convStore, fail, finish, history, setStatusText, truncateFrom, upsertClaudeProposal, upsertHandoff, upsertTool, type Via } from './conversation';
+import { addMessage, appendText, convStore, fail, finish, history, setAid, setStatusText, truncateFrom, upsertClaudeProposal, upsertHandoff, upsertTool, type Via } from './conversation';
 import { currentContext, selectedPoint, pageStore } from './page';
 import { logActivity, noteTool, noteViz } from './activity';
 import { fmtUsd } from './format';
@@ -65,6 +65,7 @@ async function stream() {
       const ev = parseJSON<ChatEvent>(m.data);
       if (!ev) continue;
       if (ev.type === 'delta') appendText(id, ev.text);
+      else if (ev.type === 'session') setAid(id, ev.aid);
       else if (ev.type === 'status') setStatusText(id, ev.text);
       else if (ev.type === 'tool') {
         upsertTool(id, ev);

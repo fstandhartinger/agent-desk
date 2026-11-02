@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { createDeviceService } from './devices.js';
+import { createTraceService, describeSession } from './trace.js';
 import { createArtifactService, artifactInstructions } from './artifacts.js';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -45,6 +46,20 @@ function securityHeaders() {
   };
 }
 
+/** GET /api/session-lookup?q=<a#id|hex|slug|last>[&full=1]: the registry's session lookup for humans; full=1 adds diagnosis + timeline. */
+async function sessionLookup(res, url, traces) {
+  const q = (url.searchParams.get('q') ?? '').trim();
+  if (!q || q.length > 80 || !/^[\w#:. -]+$/.test(q)) return sendJson(res, 400, { error: 'Ungültige Suche.' });
+  if (!traces.configured()) return sendJson(res, 503, { error: 'Registry ist nicht eingerichtet.' });
+  try {
+    const found = await traces.lookup(q);
+    if (url.searchParams.get('full') === '1' && found?.id) return sendJson(res, 200, { ...found, summary: await describeSession({ which: `a#${String(found.id).replace(/^a#/, '')}`, service: traces }) });
+    return sendJson(res, 200, found);
+  } catch (err) {
+    return sendJson(res, err.status === 404 ? 404 : 502, { error: err.status === 404 ? TEXT.notFound : 'Registry ist nicht erreichbar.' });
+  }
+}
+
 /** SSE of the canvas bus: replay of the ring after Last-Event-ID (or ?since=), then live. */
 function streamCanvas(req, res, url, bus) {
   let last = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
@@ -60,10 +75,11 @@ function streamCanvas(req, res, url, bus) {
   res.on('close', unsubscribe);
 }
 
-export function createApp({ deviceOptions = {} } = {}) {
+export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const hub = new BridgeHub();
   const artifacts = createArtifactService({ hub });
-  const devices = createDeviceService({ artifacts, ...deviceOptions });
+  const traces = createTraceService(traceOptions);
+  const devices = createDeviceService({ artifacts, traces, ...deviceOptions });
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));
   const canvasBus = createCanvasBus();
@@ -104,9 +120,10 @@ export function createApp({ deviceOptions = {} } = {}) {
     if (pathname === '/api/status') {
       return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });
     }
+    if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, traces });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -160,14 +177,17 @@ export function createApp({ deviceOptions = {} } = {}) {
     const startedAt = Date.now();
     limits.voiceOpen(sid);
     socket.once('close', () => limits.voiceClose(sid, (Date.now() - startedAt) / 1000));
+    let currentTrace = null;
     handleVoiceUpgrade(req, socket, head, {
       wss: voiceWss,
       toolDefs: TOOL_DEFS,
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
+      vision: devices.vision,
       registerText: (send) => artifacts.registerVoice(sid, send),
-      makeCtx: (page) => ({ artifacts, hub, page, limits, sid, ip, maxChars: 2500, audit: (entry) => audit({ ip, ...entry }) }),
+      openTrace: ({ provider }) => (currentTrace = traces.open({ provider, kind: 'voice', sid })),
+      makeCtx: (page) => ({ artifacts, vision: devices.vision, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
@@ -185,18 +205,21 @@ export function createApp({ deviceOptions = {} } = {}) {
     return reject(socket, 404, 'Not Found');
   });
 
-  return { server, hub, canvasBus, illustrator, artifacts, devices };
+  return { server, hub, canvasBus, illustrator, artifacts, devices, traces };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   for (const name of ['DESK_ACCESS_CODE', 'DESK_SESSION_SECRET', 'BRIDGE_TOKEN', 'OPENROUTER_API_KEY']) {
     if (!process.env[name]) console.warn(`warning: ${name} is not set`);
   }
-  const { server } = createApp();
+  const { server, traces } = createApp();
   startProviderProbes();
   warmRedact(); // critic r7: the redact / page workers start now, not on the first big tool result (~40-70 ms)
   warmWebRead();
   server.listen(cfg.port(), () => console.log(`agent-desk gateway listening on :${cfg.port()}`));
   process.on('unhandledRejection', (err) => console.error(`unhandledRejection: ${short(String(err?.stack || err), 500)}`));
-  process.on('SIGTERM', () => server.close(() => process.exit(0)));
+  process.on('SIGTERM', () => {
+    server.close();
+    traces.flushAll(5000).finally(() => process.exit(0)); // a redeploy must not lose open traces; open sockets no longer hold the exit
+  });
 }

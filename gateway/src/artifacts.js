@@ -204,7 +204,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
   async function visibleTitles(ids) {
     const items = [];
     for (let pos = 0; pos < ids.length; pos += 8) items.push(...(await registry(`/v1/resolve?ids=${ids.slice(pos, pos + 8).join(',')}&depth=1`)).items);
-    return items.filter(item => ids.includes(item.id)).map(({ id, title }) => ({ id, title: title.slice(0, 60) }));
+    return items.filter(item => ids.includes(item.id)).map(({ id, title, summary }) => ({ id, title: title.slice(0, 60), summary: String(summary ?? '') }));
   }
   function addHighlight(sid, summary, ids) {
     sweep();

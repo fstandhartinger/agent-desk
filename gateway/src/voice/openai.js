@@ -48,6 +48,7 @@ function endTypedTurn(state) {
 }
 
 export function translate(msg, state = {}) {
+  if (msg.type === 'error' && /^screen-/.test(msg.error?.event_id ?? msg.event_id ?? '')) return [{ t: 'screen_error', message: msg.error?.message ?? 'OpenAI-Fehler' }]; // passive screen context: never shown to Florian
   switch (msg.type) {
     case 'session.started':
       return [{ t: 'ready', model: msg.session?.model ?? MODEL }];
@@ -77,6 +78,8 @@ export function translate(msg, state = {}) {
   }
 }
 
+const idOf = (key, value) => (value == null ? {} : { [key]: value });
+
 function translateBackend(ev, state) {
   if (ev.type === 'response.output_text.done') {
     // collected until the backend is finished: a turn with several backend responses still gets one message
@@ -85,9 +88,9 @@ function translateBackend(ev, state) {
   }
   if (ev.type === 'response.output_item.done' && ev.item?.type === 'function_call') {
     state.called = true;
-    return [{ t: 'tool_call', id: ev.item.call_id, name: ev.item.name, args: parseArgs(ev.item.arguments) }];
+    return [{ t: 'tool_call', id: ev.item.call_id, name: ev.item.name, args: parseArgs(ev.item.arguments), ...idOf('responseId', ev.response_id ?? state.lastResponseId) }];
   }
-  if (ev.type === 'response.created') { state.called = false; return [{ t: 'response_started' }]; }
+  if (ev.type === 'response.created') { state.called = false; state.lastResponseId = ev.response?.id ?? null; return [{ t: 'response_started', ...idOf('id', ev.response?.id) }]; }
   if (ev.type === 'response.completed' || ev.type === 'response.failed' || ev.type === 'response.cancelled') {
     const out = [];
     // a response without a function call ends the backend's work on this typed turn
@@ -100,9 +103,9 @@ function translateBackend(ev, state) {
       const held = state.spoken ? state.held ?? [] : [];
       state.held = [];
       state.text = '';
-      return [...out, { t: 'turn_done' }, ...held];
+      return [...out, { t: 'turn_done', ...idOf('id', ev.response?.id) }, ...held];
     }
-    return [{ t: 'turn_done' }];
+    return [{ t: 'turn_done', ...idOf('id', ev.response?.id) }];
   }
   return [];
 }
@@ -111,6 +114,7 @@ export function createOpenAI(opts, emit) {
   const state = {};
   endTypedTurn(state);
   let context = null; // the early illustrator's facts for the current question, handed over with the next tool output
+  let screenSeq = 0;
   let handed = false; // they went out with a tool output already (this question)
   const output = (r) => send({ type: 'response.item.create', item: { type: 'function_call_output', call_id: r.id, output: r.output } });
   // critic r9 run 1: after desk_status the model never resumed; a silent model after its tool results is asked again
@@ -142,6 +146,12 @@ export function createOpenAI(opts, emit) {
       send({ type: 'response.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
       send({ type: 'response.create' });
     },
+    /** Last resort of the no-answer watchdog: held results go out, the backend gets the question again with what is known. */
+    recover: (text) => {
+      batch.force();
+      send({ type: 'response.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      send({ type: 'response.create' });
+    },
     /** Desk facts the early illustrator read for the current question: added as context without asking for a response (the answer is the model's own turn). */
     /**
      * Desk facts the early illustrator read for the current question. Round 10 (live r10): a separate user message sent while the
@@ -154,6 +164,8 @@ export function createOpenAI(opts, emit) {
     updatePage: (text) => { send({ type: 'session.instructions.append', delegation_id: null, content: text }); return 'sent'; },
     // The Live API has no response.cancel (live-verified 24 Oct: "Supported values are ..."), and barge-in leaves the backend running (docs: live-delegation).
     // So: steer the live model to the new question; the session marks the old chain's tool results stale, which ends the chain.
+    /** Passive screen description: instructions.append (the only context channel without a reply; no response.create). It only grows, so the session rate-limits it. */
+    setScreenContext: (text) => { send({ type: 'session.instructions.append', event_id: `screen-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
     interrupt: () => { watchdog.clear(); send({ type: 'session.instructions.append', delegation_id: null, content: 'Florian hat gerade eine neue Frage gestellt. Die Frage davor ist abgebrochen: antworte nur auf die neueste Frage und recherchiere dafür neu.' }); },
     sendToolResult: (id, _name, output, opts) => {
       let out = output;

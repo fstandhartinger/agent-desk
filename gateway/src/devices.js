@@ -5,11 +5,22 @@ import { artifactId, artifactData } from './artifacts.js';
 import { cfg } from './config.js';
 import { originOk, readSession, validSessionId, issueCookie } from './auth.js';
 import { readBody, readJson, sendJson, clientIp } from './http.js';
+import { createScreenVision } from './screenVision.js';
+import { clampTs } from './trace.js';
 import { createDeviceMedia, deviceError as fail, deviceIds, imageBytes, dictateContext, correctionPair, wavDuration } from './deviceMedia.js';
 
+const TRACE_TYPE = /^(?:screen|hotkey|client)\.[a-z][a-z0-9_.]{0,40}$/;
+/** Screen Agent trace events: [{ts?, type: "screen.*"|"hotkey.*"|"client.*", data?: object, turn?}], at most 100; anything else is a 400. */
+function traceEvents(raw) {
+  if (!Array.isArray(raw) || raw.length > 100) throw fail('Ungültige Trace-Ereignisse.');
+  return raw.map(e => {
+    if (!e || typeof e !== 'object' || typeof e.type !== 'string' || !TRACE_TYPE.test(e.type) || (e.data !== undefined && (!e.data || typeof e.data !== 'object' || Array.isArray(e.data)))) throw fail('Ungültige Trace-Ereignisse.');
+    return { type: e.type, data: e.data ?? {}, ts: clampTs(e.ts, Date.now()), ...(Number.isInteger(e.turn) ? { turn: e.turn } : {}) };
+  });
+}
 const SCOPES = ['dictate', 'dictionary', 'screen', 'exists'];
 const TTL = 90 * 24 * 3600_000;
-export function createDeviceService({ artifacts, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }) } = {}) {
+export function createDeviceService({ artifacts, traces, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
   function rate(key, max) {
@@ -120,7 +131,7 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
       sendJson(res, 200, { cookie, expiresAt: Math.min(record.expiresAt, now() + 30 * 86400000) });
       return true;
     }
-    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|highlight)$/.exec(path);
+    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|highlight|trace|frame|commands)$/.exec(path);
     const scope = target ? 'screen' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
     if (target && !validSessionId(target[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
@@ -134,11 +145,29 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
       await registry('/v1/dictionary', { term: to, replace_from: [from], source: 'learned' }); dict = null;
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen/clear' && req.method === 'POST') {
+      vision.clear(target[1]);
       sendJson(res, 200, artifacts.clearScreen(target[1], record.deviceId));
+    } else if (target && target[2] === 'frame' && req.method === 'POST') {
+      rate(`frame:${record.deviceId}`, 30);
+      const body = await readJson(req, 420_000 + 8192);
+      try { sendJson(res, 200, await vision.frame(target[1], record, body)); }
+      catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, ...(err.stop ? { stop: true } : {}) }); }
+    } else if (target && target[2] === 'commands' && req.method === 'GET') {
+      const abort = new AbortController(); res.on('close', () => abort.abort());
+      try {
+        const answer = await vision.poll(target[1], record, abort.signal);
+        if (answer.stop) sendJson(res, 409, { error: 'Keine aktive Sprach- oder Chat-Sitzung.', code: 'no-session', stop: true });
+        else if (!abort.signal.aborted) sendJson(res, 200, answer);
+      } catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, stop: true }); }
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
+      vision.seen(target[1]);
       if (!Number.isSafeInteger(body.frameVersion) || body.frameVersion < 0 || !body.window || typeof body.window.blocked !== 'boolean' || typeof body.window.process !== 'string' || body.window.process.length > 100) throw fail('Ungültiger Bildschirm-Kontext.');
       sendJson(res, 200, await artifacts.setScreen(target[1], { deviceId: record.deviceId, ids: body.window.blocked ? [] : ids, window: { process: body.window.blocked ? '' : body.window.process, blocked: body.window.blocked }, frameVersion: body.frameVersion }));
+    } else if (target && target[2] === 'trace' && req.method === 'POST') {
+      rate(`trace:${record.deviceId}`, 60);
+      const events = traceEvents((await readJson(req, 256 * 1024)).events);
+      sendJson(res, 200, { ok: true, accepted: events.length, attached: traces?.attach(target[1], events) ?? false });
     } else if (target && target[2] === 'highlight' && req.method === 'POST') {
       rate(`media:${record.deviceId}`, 12);
       const body = await readJson(req, 4 * 1024 * 1024 + 8192), ids = deviceIds(body.ids);
@@ -168,8 +197,15 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
       wavDuration(buffer);
       sendJson(res, 200, await limited(record, 'dictate', async () => {
         const context = artifacts.visibleTitles(ctx.visibleIds).then(items => {
+          // Titles first (all of them that fit), then a one-line summary excerpt per artifact while the 2500-char total holds.
           const bounded = items.map(({ id, title }) => ({ id, title: title.slice(0, 60) }));
-          while (artifactData(bounded).length > 1500) bounded.pop();
+          while (artifactData(bounded).length > 2500) bounded.pop();
+          items.slice(0, bounded.length).forEach(({ summary }, i) => {
+            const line = String(summary ?? '').split(/\r?\n/).find(l => l.trim())?.replace(/\s+/g, ' ').trim().slice(0, 160);
+            if (!line) return;
+            bounded[i].summary = line;
+            if (artifactData(bounded).length > 2500) delete bounded[i].summary;
+          });
           return { ...ctx, visibleArtifacts: artifactData(bounded) };
         }).catch(() => ({ ...ctx, visibleArtifacts: artifactData([]) }));
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })));
@@ -177,5 +213,5 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary, authorizeSession };
+  return { route, dictionary, authorizeSession, vision };
 }
