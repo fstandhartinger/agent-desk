@@ -1,9 +1,10 @@
-import { Hand, PhoneOff, RotateCcw, X } from 'lucide-react';
+import { Hand, Mic, MicOff, PhoneOff, RotateCcw, X } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { useMedia } from '../../lib/useMedia';
 import { optionByKey, voiceStore, type VoiceState } from '../../lib/voice';
-import { dismissVoiceError, interruptVoice, startVoice, stopVoice } from '../../lib/voiceController';
+import { dismissVoiceError, interruptVoice, startVoice, stopVoice, toggleVoiceMuted } from '../../lib/voiceController';
 import LiveOrb from './LiveOrb';
+import SessionBadge from './SessionBadge';
 
 export const STATE_LABEL: Record<VoiceState, string> = {
   idle: 'Bereit',
@@ -16,21 +17,23 @@ export const STATE_LABEL: Record<VoiceState, string> = {
 
 /** Live voice strip above the thread while a voice session runs. */
 export default function VoiceDock() {
-  const { state, active, model, error, notice } = useStore(voiceStore);
+  const { state, active, model, error, notice, muted, serverNotice } = useStore(voiceStore);
   const desktop = useMedia('(min-width: 1024px)');
   if (state === 'idle') return null;
   const opt = optionByKey(active);
   const failed = state === 'error';
+  const mute = muted && !failed;
   const modelLine = `${opt.label}${model ? ` · ${model}` : ''}`;
   return (
     <div className="mx-3 mb-2 mt-3 animate-rise lg:mx-5">
-      <div className={`mx-auto max-w-[760px] rounded-3xl border ${failed ? 'border-danger/40 bg-gradient-to-r from-danger/[0.14] via-ink-800/80 to-ink-800/60' : 'border-violet/25 bg-gradient-to-r from-violet/[0.12] via-ink-800/80 to-ink-800/60 shadow-[0_20px_50px_-24px_rgb(139_92_246/0.6)]'}`}>
-        <div className="flex items-center gap-3 p-3">
+      <div className={`mx-auto max-w-[760px] rounded-3xl border ${failed || mute ? 'border-danger/40 bg-gradient-to-r from-danger/[0.14] via-ink-800/80 to-ink-800/60' : 'border-violet/25 bg-gradient-to-r from-violet/[0.12] via-ink-800/80 to-ink-800/60 shadow-[0_20px_50px_-24px_rgb(139_92_246/0.6)]'}`}>
+        <div className="relative flex items-center gap-3 p-3">
+          <SessionBadge className="absolute right-4 top-0.5" />
           <div className={`shrink-0 ${failed ? 'self-start' : ''}`}>
-            <LiveOrb size={desktop ? 112 : 72} provider={opt.provider} />
+            <LiveOrb size={desktop ? 88 : 72} provider={opt.provider} />
           </div>
           <div className="min-w-0 flex-1" aria-live="polite">
-            <p className={`text-[17px] font-semibold tracking-[-0.01em] ${failed ? 'text-danger' : 'text-fg'}`}>{STATE_LABEL[state]}</p>
+            <p className={`text-[17px] font-semibold tracking-[-0.01em] ${failed || mute ? 'text-danger' : 'text-fg'}`}>{mute ? 'Stumm' : STATE_LABEL[state]}</p>
             {failed && (
               <>
                 <p role="alert" className="mt-0.5 text-xs leading-snug text-fg-2">{error}</p>
@@ -50,17 +53,30 @@ export default function VoiceDock() {
               <Hand className="h-4 w-4" /> <span className="hidden sm:inline">Unterbrechen</span>
             </button>
           )}
+          {!failed && (
+            <button type="button" onClick={() => toggleVoiceMuted('dock')} aria-pressed={muted} aria-label={muted ? 'Stummschaltung aufheben' : 'Mikrofon stummschalten'} title={muted ? 'Stumm – tippen zum Aufheben (M)' : 'Stummschalten (M)'}
+              className={`flex h-12 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition-colors ${muted ? 'bg-danger text-white ring-2 ring-danger/50 hover:bg-danger/90' : 'border border-white/10 bg-white/[0.06] text-fg-2 hover:bg-white/[0.1] hover:text-fg'}`}>
+              {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              <span className={muted ? '' : 'hidden'}>{muted ? 'Stumm' : 'Mikrofon'}</span>
+            </button>
+          )}
           {!failed && <button type="button" onClick={stopVoice} aria-label="Sprachsitzung beenden" title="Beenden (V)" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/90 text-white transition-colors hover:bg-danger">
             <PhoneOff className="h-4 w-4" />
           </button>}
         </div>
+        {mute && (
+          <button type="button" onClick={() => toggleVoiceMuted('dock')} role="status" className="flex w-full items-center justify-center gap-2 border-t border-danger/30 bg-danger/20 px-4 py-2 text-[13px] font-semibold text-white">
+            <MicOff className="h-4 w-4" /> Mikrofon stumm – der Agent hört nichts. Tippen zum Aufheben.
+          </button>
+        )}
         {!failed && (
-          <div className="px-4 pb-2.5 text-xs">
+          <div className="px-4 pb-2.5 pt-1 text-xs">
             {/* Full model label on its own row: it wraps instead of being cut, and the title carries it too. */}
             <p className="break-words text-dim" title={modelLine}>
               {modelLine} · <span className="text-mute">Unterbrechen jederzeit durch Sprechen</span>
             </p>
             {notice && <p className="mt-0.5 text-amber">{notice}</p>}
+            {serverNotice && <p className="mt-0.5 text-amber" role="status">{serverNotice}</p>}
           </div>
         )}
       </div>

@@ -83,6 +83,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption) {
       logActivity('voice', 'Claude-Auftrag vorgeschlagen', p.title, 'violet');
     },
     onViz: noteViz,
+    onNotice: (message) => toast(message, 'info', 8000),
     onUsage(seconds, cost) {
       logActivity('voice', 'Sprachnutzung', `${Math.round(seconds)} s · ${fmtUsd(cost)}`);
     },
@@ -132,3 +133,15 @@ export function sendVoiceText(text: string) {
   session.sendText(text);
   return true;
 }
+
+export const voiceMuted = () => voiceStore.get().muted;
+/** Mute the mic of the running session (no session = nothing to mute). Same session, same context; the model is told nothing. */
+export function setVoiceMuted(on: boolean, source: 'dock' | 'hotkey' = 'dock') {
+  if (!session || !voiceActive()) return false;
+  session.setMuted(on, source);
+  return true;
+}
+export const toggleVoiceMuted = (source: 'dock' | 'hotkey' = 'dock') => setVoiceMuted(!voiceMuted(), source);
+
+// Screen Agent's global hotkey reaches the page through WebView2 (companion 'mute' message); this is the same switch for anything that can run script.
+(window as Window & { __deskVoice?: unknown }).__deskVoice = { setMuted: (on: boolean) => setVoiceMuted(Boolean(on), 'hotkey'), toggleMuted: () => toggleVoiceMuted('hotkey'), muted: voiceMuted };

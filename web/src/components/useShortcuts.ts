@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { getPlayer, pageStore, selectPoint } from '../lib/page';
-import { toggleVoice } from '../lib/voiceController';
+import { toggleVoice, toggleVoiceMuted, voiceActive } from '../lib/voiceController';
 import { toggleKino } from '../lib/layout';
 
 const typing = (el: Element | null) =>
   !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el as HTMLElement).isContentEditable);
 
-/** Space play/pause, `/` focus composer, `V` voice, `K` Kino, arrows seek, Esc closes the point card. */
+/** Space play/pause, `/` focus composer, `V` voice, `M` mic mute (while a voice session runs), `K` Kino, arrows seek, Esc closes the point card. */
 export function useShortcuts(focusComposer: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -24,6 +24,9 @@ export function useShortcuts(focusComposer: () => void) {
       } else if (e.key === 'v' || e.key === 'V') {
         e.preventDefault();
         toggleVoice();
+      } else if ((e.key === 'm' || e.key === 'M') && voiceActive()) {
+        e.preventDefault();
+        toggleVoiceMuted();
       } else if ((e.key === 'k' || e.key === 'K') && matchMedia('(min-width: 1024px)').matches && pageStore.get().explainer) {
         e.preventDefault();
         toggleKino();
