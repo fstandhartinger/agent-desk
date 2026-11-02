@@ -5,7 +5,7 @@ import { pagePackLines } from '../pack.js';
 
 /** OpenAI GPT-Live asked back instead of researching (critic r7: "Kannst du mir sagen, wo das erwähnt wird?"). */
 export const OPENAI_LINES = [
-  'Stelle bei einer Frage zur Werkstatt NIE eine Rückfrage, bevor du nachgeschaut hast. Rufe zuerst knowledge_read, search_files oder (bei Geld) ledger_spend bzw. (bei Desk-Status) desk_status auf, und antworte dann mit dem, was du gefunden hast.',
+  'Stelle bei einer Frage zur Werkstatt NIE eine Rückfrage, bevor du nachgeschaut hast. Rufe zuerst knowledge_read, search_files oder (bei Geld) ledger_spend, (bei Desk-Status) desk_status bzw. (bei Mails) mail_search auf, und antworte dann mit dem, was du gefunden hast.',
   'Fragt Florian nach Kosten ohne Zeitraum oder Kategorie, nimm alles zusammen und nenne den Umfang in der Antwort; frage nicht zurück. Eine Rückfrage ist erst erlaubt, wenn die Werkzeuge nichts geliefert haben, und dann nur eine.',
   'Kommen "Desk-Fakten zur aktuellen Frage", antworte SOFORT daraus und prüfe nur nach, was darin fehlt.',
   // Round 10 (critic r9 F4): 9 read_file calls before the first real sentence (~22 s after the question)
@@ -31,6 +31,7 @@ export function buildInstructions(page, now, { provider } = {}) {
     'Antworte standardmäßig auf Deutsch, in kurzen gesprochenen Sätzen (meist 1–3), ohne Markdown, ohne Aufzählungszeichen.',
     'Beantworte Fragen aus den Tools und dem Seitenkontext; erfinde nichts. Wenn du etwas nicht weißt, sag es und schau nach.',
     'Kündige längere Tool-Arbeit kurz an ("Ich schaue kurz ins Board …") und fasse das Ergebnis danach knapp zusammen.',
+    'Wenn du ankündigst, dass du nachschaust, rufe im selben Schritt das Werkzeug auf. Eine Ankündigung ohne Werkzeug ist verboten: Florian wartet sonst vergeblich.',
     'Für den Stand eines bestimmten Jobs nutze job_status mit dem Jobnamen; ist der Name unklar, rufe list_jobs ohne filter auf und wähle den ähnlichsten (Spracherkennung verhört Namen oft).',
     ...canvasLines({ spoken: true }),
     ...groundingLines(now),

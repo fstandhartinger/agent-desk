@@ -105,6 +105,8 @@ export class ToolBatch {
     this.flush();
   }
   responseDone() { this.responseOpen = false; this.flush(); }
+  /** The vendor never finished the response (or a call never got its result): release what is there instead of waiting forever. */
+  force() { this.pending = 0; this.responseOpen = false; this.flush(); }
   flush() {
     if (this.pending > 0 || this.responseOpen || !this.results.length) return;
     const out = this.results;

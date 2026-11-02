@@ -102,7 +102,9 @@ export async function search({ account: acct, query, folder, limit } = {}) {
   if (acct && settled[0].status === 'rejected') throw settled[0].reason;
   const unavailable = settled.flatMap((r, i) => (r.status === 'rejected' ? [{ account: names[i], error: redact(String(r.reason?.message ?? r.reason)).slice(0, 160) }] : []));
   if (unavailable.length === names.length) throw new Error(`no mailbox readable: ${unavailable.map((u) => `${u.account}: ${u.error}`).join('; ')}`);
-  const messages = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])).map((m) => ({ ...m, from: redact(m.from), subject: redact(m.subject) }));
+  const stamp = (m) => Date.parse(m.date) || 0;
+  // newest first across all mailboxes: "the newest mail from X" is the first hit (incident 2 Nov)
+  const messages = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])).sort((a, b) => stamp(b) - stamp(a)).map((m) => ({ ...m, from: redact(m.from), subject: redact(m.subject) }));
   return { messages, ...(unavailable.length ? { unavailable } : {}), note: 'uid + account identify a message for mail_read; reading does not mark it seen' };
 }
 

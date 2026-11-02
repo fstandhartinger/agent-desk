@@ -113,7 +113,7 @@ test('the voice session audits the watchdog and tells the adapter about a new us
   ws.emit('message', Buffer.from(JSON.stringify({ type: 'stop' })), false);
 });
 
-test('r10 live: a barge-in while GPT-Live is still SPEAKING a finished answer does not make the next question\'s tool calls stale; an open response still does', async () => {
+test('r10 live: a barge-in while GPT-Live is still SPEAKING a finished answer does not make the next question\'s tool calls stale; an open response still does when its arguments fit the old question', async () => {
   const { runVoiceSession } = await import('../src/voice/session.js');
   const { EventEmitter } = await import('node:events');
   const run = () => {
@@ -140,13 +140,14 @@ test('r10 live: a barge-in while GPT-Live is still SPEAKING a finished answer do
   await tick(30);
   assert.deepEqual(a.results, [['q1', false], ['q3', false]]);
   a.stop();
-  // the old backend response is still open: its next call belongs to the old question
+  // the old backend response is still open and its next call demonstrably fits the old question (incident 2 Nov: without that evidence it counts as current)
   const b = run();
   b.emit({ t: 'ready', model: 'gpt-live-1' });
+  b.emit({ t: 'transcript', role: 'user', text: 'Was kostet Sandy im Oktober?', final: true });
   b.emit({ t: 'response_started' });
   b.emit({ t: 'transcript', role: 'assistant', delta: 'Moment', final: false });
   b.emit({ t: 'transcript', role: 'user', text: 'Neue Frage?', final: true });
-  b.emit({ t: 'tool_call', id: 'old', name: 'read_file', args: {} });
+  b.emit({ t: 'tool_call', id: 'old', name: 'read_file', args: { path: 'sandy-kosten.md', query: 'Sandy Oktober' } });
   await tick(30);
   assert.deepEqual(b.results, [['old', true]]);
   b.stop();

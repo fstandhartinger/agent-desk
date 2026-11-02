@@ -77,6 +77,8 @@ export function translate(msg, state = {}) {
   }
 }
 
+const idOf = (key, value) => (value == null ? {} : { [key]: value });
+
 function translateBackend(ev, state) {
   if (ev.type === 'response.output_text.done') {
     // collected until the backend is finished: a turn with several backend responses still gets one message
@@ -85,9 +87,9 @@ function translateBackend(ev, state) {
   }
   if (ev.type === 'response.output_item.done' && ev.item?.type === 'function_call') {
     state.called = true;
-    return [{ t: 'tool_call', id: ev.item.call_id, name: ev.item.name, args: parseArgs(ev.item.arguments) }];
+    return [{ t: 'tool_call', id: ev.item.call_id, name: ev.item.name, args: parseArgs(ev.item.arguments), ...idOf('responseId', ev.response_id ?? state.lastResponseId) }];
   }
-  if (ev.type === 'response.created') { state.called = false; return [{ t: 'response_started' }]; }
+  if (ev.type === 'response.created') { state.called = false; state.lastResponseId = ev.response?.id ?? null; return [{ t: 'response_started', ...idOf('id', ev.response?.id) }]; }
   if (ev.type === 'response.completed' || ev.type === 'response.failed' || ev.type === 'response.cancelled') {
     const out = [];
     // a response without a function call ends the backend's work on this typed turn
@@ -100,9 +102,9 @@ function translateBackend(ev, state) {
       const held = state.spoken ? state.held ?? [] : [];
       state.held = [];
       state.text = '';
-      return [...out, { t: 'turn_done' }, ...held];
+      return [...out, { t: 'turn_done', ...idOf('id', ev.response?.id) }, ...held];
     }
-    return [{ t: 'turn_done' }];
+    return [{ t: 'turn_done', ...idOf('id', ev.response?.id) }];
   }
   return [];
 }
@@ -139,6 +141,12 @@ export function createOpenAI(opts, emit) {
     sendText: (text) => {
       // 'session.instructions.append' needs a delegation_id (live-verified 24 Oct): a typed turn is a user message for the backend
       startTypedTurn(state);
+      send({ type: 'response.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      send({ type: 'response.create' });
+    },
+    /** Last resort of the no-answer watchdog: held results go out, the backend gets the question again with what is known. */
+    recover: (text) => {
+      batch.force();
       send({ type: 'response.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
       send({ type: 'response.create' });
     },

@@ -21,6 +21,8 @@ export function sessionUpdate({ instructions, tools, voice = 'eve', lang = 'de' 
   };
 }
 
+const idOf = (key, value) => (value == null ? {} : { [key]: value });
+
 /** Pure translation of one server frame into normalised events (see adapter.js). */
 export function translate(msg, state = {}) {
   switch (msg.type) {
@@ -38,11 +40,11 @@ export function translate(msg, state = {}) {
     case 'input_audio_buffer.speech_started':
       return [{ t: 'speech_started' }];
     case 'response.function_call_arguments.done':
-      return [{ t: 'tool_call', id: msg.call_id, name: msg.name, args: parseArgs(msg.arguments) }];
+      return [{ t: 'tool_call', id: msg.call_id, name: msg.name, args: parseArgs(msg.arguments), ...idOf('responseId', msg.response_id) }];
     case 'response.created':
-      return [{ t: 'response_started' }];
+      return [{ t: 'response_started', ...idOf('id', msg.response?.id) }];
     case 'response.done':
-      return [{ t: 'turn_done' }];
+      return [{ t: 'turn_done', ...idOf('id', msg.response?.id) }];
     case 'error':
       return [{ t: 'error', message: msg.error?.message ?? 'xAI-Fehler', code: msg.error?.code, soft: true }];
     default:
@@ -76,6 +78,12 @@ export function createXai(opts, emit) {
   return {
     sendAudio: (pcm24) => send({ type: 'input_audio_buffer.append', audio: pcm24.toString('base64') }),
     sendText: (text) => {
+      send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      send({ type: 'response.create' });
+    },
+    /** Last resort of the no-answer watchdog: held results go out, the question comes again with what is known. */
+    recover: (text) => {
+      batch.force();
       send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
       send({ type: 'response.create' });
     },

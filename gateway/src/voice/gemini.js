@@ -89,6 +89,8 @@ export function createGemini(opts, emit) {
       pagePending = null;
       send({ realtimeInput: { text: `${lead}${text}` } });
     },
+    /** Last resort of the no-answer watchdog (the desk's own input interrupts like the facts do, that is not Florian speaking). */
+    recover: (text) => { selfInterrupt = Date.now(); send({ realtimeInput: { text } }); },
     /**
      * Florian clicked another element. Gemini Live has no verified way to change context mid-session without risk: `clientContent` turns
      * are for seeding history (3.x may close the socket with 1007) and a `realtimeInput.text` would trigger a reply. So the update is HELD
