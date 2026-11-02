@@ -234,7 +234,7 @@ async function runLoop({ model, convo, ctx, send, viz, totals, signal, german = 
     let looped = false;
     const roundCtl = new AbortController();
     try {
-      for await (const part of streamChat({ model, messages: convo, tools: withTools ? TOOL_DEFS : undefined, signal: AbortSignal.any([signal, roundCtl.signal]) })) {
+      for await (const part of streamChat({ model, messages: convo, tools: withTools ? TOOL_DEFS.filter((t) => !t.voiceOnly) : undefined, signal: AbortSignal.any([signal, roundCtl.signal]) })) {
         if (part.delta) {
           const piece = filter.push(part.delta);
           if (loop.push(piece)) { looped = true; roundCtl.abort(); break; } // the unfinished sentence that repeats goes nowhere

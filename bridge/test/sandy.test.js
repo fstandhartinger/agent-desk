@@ -336,9 +336,10 @@ test('host method sets: Sandy serves its allowlist only, host-specific methods s
   for (const m of ['discord.list', 'discord.read', 'mail.search', 'mail.read', 'ops.run', 'board.handoff']) assert.ok(!lechonk.includes(m), `lechonk serves ${m}`);
   for (const m of ['chats.read', 'skills.list', 'skills.read', 'claude.start']) assert.ok(lechonk.includes(m), m);
   assert.ok(METHOD_TIMEOUT_MS['discord.read'] >= 70_000);
-  // the only write on any host
+  // the writes on any host (job.start: voice only, Sandy only, gated twice)
   const writers = [...sandy, ...lechonk].filter((m) => /handoff|send|post|delete|write|stop|start|append|loginLink/.test(m));
-  assert.deepEqual([...new Set(writers)].sort(), ['audit.append', 'board.handoff', 'claude.send', 'claude.start', 'claude.stop', 'notify.loginLink']);
+  assert.deepEqual([...new Set(writers)].sort(), ['audit.append', 'board.handoff', 'claude.send', 'claude.start', 'claude.stop', 'job.start', 'notify.loginLink']);
+  assert.ok(sandy.includes('job.start') && !lechonk.includes('job.start'));
 });
 
 test('Sandy unit file pins BRIDGE_HOST=sandy, a memory cap and restarts, and contains no secrets', () => {

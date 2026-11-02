@@ -7,6 +7,7 @@ const RATES = {
   chat: { max: 40, windowMs: 10 * MINUTE, message: 'Zu viele Nachrichten' },
   transcribe: { max: 60, windowMs: 10 * MINUTE, message: 'Zu viele Diktate' },
   claudeStart: { max: 25, windowMs: DAY, message: TEXT.claudeDaily },
+  agentJob: { max: 20, windowMs: DAY, message: 'Das Tageslimit für Agent-Jobs per Sprache ist erreicht' }, // start_agent_job; the bridge keeps its own caps
 };
 const VOICE_MAX_CONCURRENT = 2;
 const VOICE_MAX_SECONDS_PER_DAY = 90 * 60;
@@ -53,7 +54,7 @@ export class Limits {
   }
 
   /**
-   * kind: chat | transcribe | claudeStart (consume one slot of a sliding window), spend (daily USD cap, read-only),
+   * kind: chat | transcribe | claudeStart | agentJob (consume one slot of a sliding window), spend (daily USD cap, read-only),
    * voice (concurrency + daily minutes, read-only; bracket a session with voiceOpen/voiceClose).
    */
   check(sid, kind) {

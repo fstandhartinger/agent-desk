@@ -11,6 +11,11 @@ import { limits as defaultLimits } from './limits.js';
 import { screenLines } from './prompt.js';
 
 export const REASONS = ['start', 'interval', 'foreground', 'fresh'];
+// Action commands (main-agent-prompt) ride the same long poll as fresh-frame commands: `{fresh:false, prompt:{id, text}}` is ignored by apps
+// that only know fresh. The app reports back on POST .../commands/:id/result; only a state and a code come back, never text.
+export const COMMAND_STATES = ['received', 'done', 'failed'];
+export const COMMAND_CODES = ['typed', 'typed-unverified', 'no-window', 'no-foreground', 'no-field', 'wrong-focus', 'interrupted', 'busy', 'no-session'];
+export const COMMAND_TIMEOUTS = { received: 6000, done: 40_000, ttl: 8000, keep: 120_000 };
 const ATTACHED_MS = 45_000, CHAT_ACTIVE_MS = 10 * 60_000, COMMAND_TTL_MS = 10_000, POLL_MS = 25_000, HOUR = 3_600_000;
 const SEND_EARLY = 20, SEND_FAST_MS = 5000, SEND_SLOW_MS = 20_000; // context updates: one per 5 s, one per 20 s after 20 (OpenAI instructions only grow)
 const noSession = () => Object.assign(deviceError('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session', stop: true });
@@ -56,13 +61,14 @@ const noPictureText = why => NO_PICTURE[why] ?? 'Gerade kommt kein Bild vom Bild
 const BG_CHARS = 1500, BG_SUMMARY = 220;
 const firstLine = t => String(t ?? '').split(/\r?\n/).find(l => l.trim())?.replace(/\s+/g, ' ').trim() ?? '';
 
-export function createScreenVision({ media, artifacts, limits = defaultLimits, now = Date.now } = {}) {
+export function createScreenVision({ media, artifacts, limits = defaultLimits, now = Date.now, commandTimeouts = {} } = {}) {
+  const T = { ...COMMAND_TIMEOUTS, ...commandTimeouts };
   const states = new Map();
   let sweeper = null;
   function state(sid) {
     let S = states.get(sid);
     if (!S) {
-      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null };
+      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map() };
       states.set(sid, S);
       sweeper ??= setInterval(sweep, 15_000).unref();
     }
@@ -252,13 +258,72 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     seen(sid);
     return new Promise(resolve => {
       const cmd = S.queue.find(c => c.expires > now());
+      const prompt = takePrompt(S, key);
       const done = value => { clearTimeout(timer); if (S.polls.get(key) === entry) S.polls.delete(key); seen(sid); resolve(value); };
       const entry = { resolve: done };
       const timer = setTimeout(() => done({ fresh: false }), ms);
       signal?.addEventListener('abort', () => done({ fresh: false }), { once: true });
+      if (prompt) { done({ fresh: false, prompt }); return; }
       if (cmd) { S.queue.splice(S.queue.indexOf(cmd), 1); done({ fresh: true, id: cmd.id, ...(cmd.question ? { question: cmd.question } : {}) }); return; }
       S.polls.set(key, entry);
     });
+  }
+
+  // --- action commands: one prompt to exactly one poller, the app's answer comes back on the result route ---
+  /** The oldest queued prompt that has not expired, handed to this device (once). */
+  function takePrompt(S, deviceId) {
+    S.prompts = S.prompts.filter(c => c.expires > now() && !c.cancelled);
+    const c = S.prompts.shift();
+    if (!c) return null;
+    c.deviceId = deviceId;
+    return { id: c.id, text: c.text };
+  }
+  /**
+   * Sends {type:'main-agent-prompt', text} to the attached Screen Agent and waits for its answer:
+   * received within T.received (else no-app: an old app or none), then done/failed within T.done (else timeout).
+   * Resolves {delivered, code, landed?, chars?}. A prompt that nobody picked up is withdrawn: it is never typed late.
+   */
+  async function command(sid, { type, text }) {
+    if (type !== 'main-agent-prompt' || typeof text !== 'string') throw new Error('unknown command');
+    if (!attached(sid)) return { delivered: false, code: 'no-device' };
+    const S = states.get(sid), id = `p${crypto.randomBytes(8).toString('hex')}`;
+    const cmd = { id, text, deviceId: null, state: null, expires: now() + T.ttl, cancelled: false, wake: null };
+    S.commands.set(id, cmd);
+    // resolves true when `ready(cmd)` holds after an answer came in, false after ms
+    const settled = (ms, ready) => new Promise(resolve => {
+      const t = setTimeout(() => { cmd.wake = null; resolve(false); }, ms);
+      t.unref?.();
+      cmd.wake = () => { if (!ready(cmd)) return; clearTimeout(t); cmd.wake = null; resolve(true); };
+    });
+    const target = [...S.polls.entries()][0];
+    if (target) { cmd.deviceId = target[0]; target[1].resolve({ fresh: false, prompt: { id, text } }); }
+    else S.prompts.push(cmd);
+    try {
+      if (!cmd.state && !await settled(T.received, c => c.state)) { cmd.cancelled = true; return { id, delivered: false, code: 'no-app' }; }
+      if (cmd.state === 'received' && !await settled(T.done, c => c.state !== 'received')) return { id, delivered: true, code: 'timeout' };
+      return { id, delivered: true, state: cmd.state, code: cmd.code, landed: cmd.landed ?? null, chars: cmd.chars };
+    } finally {
+      cmd.cancelled = true; cmd.text = ''; // the text is not kept once the command is over
+      setTimeout(() => S.commands.delete(id), T.keep).unref?.();
+    }
+  }
+  /** POST .../commands/:id/result: only a command delivered to THIS device is known; everything else is 404. */
+  function commandResult(sid, record, id, body) {
+    const S = states.get(sid), cmd = S?.commands.get(id);
+    if (!cmd || cmd.deviceId !== record.deviceId) throw deviceError('Unbekannter Befehl.', 404);
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    const bad = () => deviceError('Ungültiges Ergebnis.');
+    if (!keys || keys.some(k => !['state', 'code', 'landed', 'chars'].includes(k))) throw bad();
+    const { state, code, landed, chars } = body;
+    if (!COMMAND_STATES.includes(state)) throw bad();
+    if (code !== undefined && !(typeof code === 'string' && code.length <= 40 && COMMAND_CODES.includes(code))) throw bad();
+    if (state !== 'received' && code === undefined) throw bad();
+    if (landed !== undefined && landed !== null && typeof landed !== 'boolean') throw bad();
+    if (chars !== undefined && !(Number.isSafeInteger(chars) && chars >= 0 && chars <= 1e6)) throw bad();
+    if (cmd.state === 'done' || cmd.state === 'failed') return { ok: true }; // the first final answer stands
+    Object.assign(cmd, { state, code: code ?? cmd.code, landed, chars });
+    cmd.wake?.();
+    return { ok: true };
   }
 
   /** look_at_screen: ask for a fresh frame (max cfg.visionFreshWaitMs), fall back to the newest description with its age. */
@@ -302,5 +367,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, look, chatBlock, snapshot, _states: states };
+  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, look, chatBlock, snapshot, _states: states };
 }

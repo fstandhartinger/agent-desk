@@ -46,6 +46,8 @@ export const METHOD_PARAMS = {
   'board.handoff': { title: 'string', task: 'string', why: 'string' },
   'notify.cardLink': { id: 'string' },
   'notify.cardRead': { id: 'string' },
+  // voice action (Sandy bridge only): the gateway gates it on Florian's spoken words, the bridge guards it once more (jobStart.js)
+  'job.start': { requestId: 'string', title: 'string', prompt: 'string', spoken: 'array', host: 'string', aid: 'string', provider: 'string' },
   'notify.loginLink': { url: 'string' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
 };
