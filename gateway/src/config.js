@@ -14,7 +14,7 @@ export const cfg = {
   canvasModel: () => env('DESK_CANVAS_MODEL') || 'deepseek/deepseek-v4.1-flash-20261017:nitro',
   canvasDebounceMs: () => Number(env('DESK_CANVAS_DEBOUNCE_MS', '1200')),
   canvasTimeoutMs: () => Number(env('DESK_CANVAS_TIMEOUT_MS', '25000')),
-  xaiSilenceMs: () => Number(env('DESK_XAI_SILENCE_MS', '1500')), // xAI server VAD: a pause shorter than this does not end the turn (live 2 Nov: 1000 ms split a 1.4 s pause, 1500 ms did not); 0 = vendor default
+  xaiSilenceMs: () => Number(env('DESK_XAI_SILENCE_MS', '1000')), // xAI server VAD: a pause shorter than this does not end the turn (live 2 Nov: 1000 ms split a 1.4 s pause, 1500 ms did not); 0 = vendor default
   userMergeMs: () => Number(env('DESK_VOICE_MERGE_MS', '1500')), // user transcript fragments within this window are one question
   canvasEarly: () => env('DESK_CANVAS_EARLY', '1') !== '0', // kill switch of the early illustrator
   canvasResearchMs: () => Number(env('DESK_CANVAS_RESEARCH_MS', '6000')),

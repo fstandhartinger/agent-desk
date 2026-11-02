@@ -65,7 +65,7 @@ test('openai: documented events translate (audio, transcripts, nested function c
 test('xai: documented events translate; session.update has pcm 24k, server_vad and function tools', () => {
   const u = sessionUpdate({ instructions: 'x', tools }).session;
   assert.equal(u.turn_detection.type, 'server_vad');
-  assert.equal(u.turn_detection.silence_duration_ms, 1500, 'a thinking pause of 1.4 s must not split the turn (live 2 Nov)');
+  assert.equal(u.turn_detection.silence_duration_ms, 1000, "a thinking pause of 1 s must not split the turn");
   assert.equal(u.audio.input.format.rate, 24000);
   assert.equal(u.tools[0].type, 'function');
   const state = {};
