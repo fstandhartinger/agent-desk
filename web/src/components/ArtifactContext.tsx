@@ -50,7 +50,7 @@ export default function ArtifactContext() {
   if (!state || (!state.context.items.length && !state.notice && !entry.voice)) return null;
   return <section aria-label="Artefakt-Kontext" className="max-h-60 shrink-0 overflow-auto border-b border-white/[0.06] px-4 py-3 text-sm">
     {entry.voice && !trusted && <button className="mb-3 rounded-xl bg-white/15 px-4 py-3 font-semibold" onClick={() => { if (entry.voice) { setVoiceOption(entry.voice); void startVoice(); } }}>Sprachsitzung starten ({optionByKey(entry.voice).label})</button>}
-    {entry.voice && suggestion && <button className="mb-3 block rounded-xl border border-white/20 px-3 py-2 text-left" onClick={() => { if (sendVoiceText(suggestion)) setSuggestion(''); }}>Vorgeschlagene Frage: {suggestion}</button>}
+    {entry.voice && suggestion && <button className="mb-3 block rounded-xl border border-white/20 px-3 py-2 text-left" onClick={() => { if (sendVoiceText(suggestion, true)) setSuggestion(''); }}>Vorgeschlagene Frage: {suggestion}</button>}
     {state.notice && <p role="status" className="text-mute">{state.notice}</p>}
     {state.context.items.length > 0 && <p className="mb-2 text-xs text-mute">Artefakt-Kontext</p>}
     {state.context.items.map(item => <article key={item.id} className="mb-2 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">

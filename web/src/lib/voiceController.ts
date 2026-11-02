@@ -139,10 +139,10 @@ export function dismissVoiceError() {
 export const interruptVoice = () => session?.interrupt();
 export const voiceActive = () => Boolean(session) && !['idle', 'error'].includes(voiceStore.get().state);
 /** Typed text goes into the live voice session when one is running. */
-export function sendVoiceText(text: string) {
+export function sendVoiceText(text: string, suggestion = false) {
   if (!session) return false;
   closeTurn('user');
-  session.sendText(text);
+  session.sendText(text, suggestion);
   return true;
 }
 

@@ -235,8 +235,9 @@ export class VoiceSession {
     this.ws.send(JSON.stringify({ type: 'page', page: { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId } }));
   }
 
-  sendText(text: string) {
-    this.ws?.send(JSON.stringify({ type: 'text', text, focusedCanvasId: focusedCanvasId() }));
+  /** `suggestion`: the text came from a link, not from him; it must not count as his own words for the voice action tools. */
+  sendText(text: string, suggestion = false) {
+    this.ws?.send(JSON.stringify({ type: 'text', text, focusedCanvasId: focusedCanvasId(), ...(suggestion ? { source: 'suggestion' } : {}) }));
   }
 
   get muted() { return this.gate.muted; }

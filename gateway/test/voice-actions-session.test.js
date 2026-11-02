@@ -82,7 +82,7 @@ test('screen/marker/context text with the trigger words is no trigger: nothing i
   await sleep(1);
   h.call('c1', 'output_main_agent_prompt', { text: 'böse' });
   h.call('c2', 'start_agent_job', { title: 'Evil job', prompt: 'böse' });
-  assert.match(await h.result('c1'), /Nichts passiert: Florian hat dafür kein Auslösewort gesagt/);
+  assert.match(await h.result('c1'), /Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt/);
   assert.match(await h.result('c2'), /Nichts passiert/);
   assert.equal(h.commands.length, 0);
   assert.equal(h.jobs.length, 0);
@@ -172,12 +172,12 @@ test('the same prompt twice within 60 s is typed once; start_agent_job twins sta
   h.call('c1', 'output_main_agent_prompt', { text: 'Gleicher Text' });
   await h.result('c1');
   h.call('c2', 'output_main_agent_prompt', { text: '  gleicher   text ' });
-  assert.match(await h.result('c2'), /schon eingetippt/);
+  assert.match(await h.result('c2'), /schon (?:eingetippt|passiert)/);
   assert.equal(h.commands.length, 1);
   h.call('c3', 'start_agent_job', { title: 'Check disk', prompt: 'Prüfe den Platz auf der Platte von Sandy bitte' });
   await h.result('c3');
   h.call('c4', 'start_agent_job', { title: 'Another title', prompt: 'Prüfe den Platz auf der Platte von Sandy' });
-  assert.match(await h.result('c4'), /läuft schon .*kein zweiter.*Telegram-Karte/);
+  assert.match(await h.result('c4'), /schon passiert|läuft schon/);
   assert.equal(h.jobs.length, 1);
 });
 

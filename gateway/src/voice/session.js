@@ -23,6 +23,8 @@ const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 // Action tools wait for him to finish and are no research: they never count against the research cap
 const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job']);
 const SPOKEN_KEEP = 12;
+const ECHO_MS = 20_000;
+const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
 // Topic files of the desk knowledge are dense and ordered by importance; voice models need most of one at once.
 /** Round 11: {focusedId} from a client message (`focusedCanvasId`: string or null); {} when the client did not say. */
 const focusOf = (msg) => (Object.hasOwn(msg ?? {}, 'focusedCanvasId') ? { focusedId: typeof msg.focusedCanvasId === 'string' ? msg.focusedCanvasId.slice(0, 64) : null } : {});
@@ -102,7 +104,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // Marker turns, context turns, tool results and screen/registry text never get in.
   const spoken = []; // the last SPOKEN_KEEP {text, at, turn}
   let speechAt = -Infinity; // when he last made a sound or a transcript piece arrived: speaking() = within SETTLE_MS
-  const noteSpoken = (text, at_, turn_) => { spoken.push({ text, at: at_, turn: turn_ }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
+  let speechOpen = false; // he started speaking and that sound has no final transcript yet
+  let heardBack = { text: '', at: -Infinity }; // what the agent said last: its own voice through his speakers must not count as his words
+  const echoOf = (text, at_) => { // most of the sentence's words were just spoken by the agent
+    if (at_ - heardBack.at > ECHO_MS) return false;
+    const said = new Set(normText(heardBack.text).split(' ')), own = normText(text).split(' ').filter(Boolean);
+    return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
+  };
+  const noteSpoken = (text, at_, turn_) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_) }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
   let lastFinal = null; // the newest user final of the current turn: a longer final that extends it replaces it (growing fragments)
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
@@ -150,8 +159,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
     trace.event(`transcript.${role}.final`, { turn: turnId, text });
-    if (role === 'assistant' && lastFinal && !isPromiseOnly(text)) lastFinal.answered = true;
-    if (role === 'user') { lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId); }
+    if (role === 'assistant') {
+      heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
+      if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) spoken.at(-1).answered = true; }
+    }
+    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId); }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
     turn.text = '';
@@ -330,7 +342,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     sendJson({ type: 'transcript', role: 'user', text, final: true, replace: true });
     trace.event('transcript.user.final', { turn: prev.turn, text, grown: true });
     lastFinal = { text, norm: normText(text), itemId: e.itemId ?? prev.itemId, turn: prev.turn, at: now() };
-    if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { text, at: lastFinal.at, turn: prev.turn }; // the grown sentence REPLACES the fragment
+    speechOpen = false;
+    if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, echo: echoOf(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
     else noteSpoken(text, lastFinal.at, prev.turn);
     lastUserText = text;
     if (contentOpen) { // not committed yet: collect again from the whole sentence
@@ -413,7 +426,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     audit({ action: 'voice.tool', detail: `${provider}:${name} ${JSON.stringify(args).slice(0, 120)}` });
     let output;
     try {
-      const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, epoch: () => contentEpoch, provider, turn: turnId };
+      const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
       const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
       output = String(res.content ?? '').slice(0, voiceCap(name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
@@ -481,6 +494,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         break;
       case 'speech_started':
         speechAt = now();
+        speechOpen = true;
         flushTranscript();
         beginUserTurn(false);
         dropAudio = false;
@@ -708,7 +722,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     else if (msg.type === 'page' && adapter) updatePage(msg.page);
     else if (msg.type === 'focus') canvas?.setFocus?.(focusOf(msg).focusedId); // round 11: the canvas the browser shows now
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {
-      deliverText(msg.text, msg, true);
+      deliverText(msg.text, msg, msg.source !== 'suggestion'); // a suggested question from a link is not his own wording
     }
     else if (msg.type === 'interrupt' && adapter) { dropAudio = true; adapter.interrupt(); trace.event('client.interrupt', { turn: turnId }); }
     else if (msg.type === 'mute') setMuted(msg.muted === true, msg.source);
