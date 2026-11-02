@@ -92,6 +92,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // Incident 2 Nov (GPT-Live, 5 minutes of silence): a call is only "old" on positive evidence, see belongsToOldQuestion.
   const overtaken = new Set(); // vendor response ids that were open when a new question began
   let openResponses = new Set(); // vendor response ids that started and did not finish yet
+  const responseStarted = new Map(); // vendor response id -> when it started
   const fragmentResponses = new Set(); // vendor responses that answered a fragment which then grew: their tool calls are stale
   let lastFinal = null; // the newest user final of the current turn: a longer final that extends it replaces it (growing fragments)
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
@@ -140,6 +141,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
     trace.event(`transcript.${role}.final`, { turn: turnId, text });
+    if (role === 'assistant' && lastFinal && !isPromiseOnly(text)) lastFinal.answered = true;
     if (role === 'user') { lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
@@ -306,7 +308,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const prev = lastFinal;
     if (!prev || e.role !== 'user' || !e.final || typeof e.text !== 'string' || prev.turn !== turnId || now() - prev.at > GROW_WINDOW_MS) return false;
     const norm = normText(e.text);
-    if (prev.answered && (e.itemId == null || e.itemId !== prev.itemId)) return false; // he heard an answer: "Ja genau" after "Ja" is a new turn, not a longer fragment
+    const answering = turn.role === 'assistant' && turn.text.trim() && !isPromiseOnly(turn.text); // the answer still being spoken counts, a filler like "Ich schaue kurz" does not
+    if ((prev.answered || answering) && (e.itemId == null || e.itemId !== prev.itemId)) return false; // he heard an answer: "Ja genau" after "Ja" is a new turn, not a longer fragment
     if (!norm || norm === prev.norm) return Boolean(norm) && (e.itemId ?? null) === prev.itemId && prev.itemId !== null; // a repeated item is dropped, an equal sentence by another item is a new turn
     return (e.itemId != null && e.itemId === prev.itemId) || `${norm} `.startsWith(`${prev.norm} `);
   }
@@ -324,7 +327,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       collectUser(text);
       return;
     }
-    if (responding || responseOpen) { for (const id of openResponses) fragmentResponses.add(id); cutAnswer('grown'); }
+    // xAI opens the response about 0.4 s BEFORE it delivers the transcript it answers (a#7f54a5, a#eb8667): a response started since the shorter fragment belongs to this
+    // longer one and must live, otherwise the whole sentence gets 10 s of silence. Only what was already running when the shorter fragment arrived is out of date.
+    const old = [...openResponses].filter((id) => (responseStarted.get(id) ?? 0) <= prev.at);
+    if (old.length || (responding && !tracksResponses)) { old.forEach((id) => fragmentResponses.add(id)); cutAnswer('grown'); }
     contentEpoch += 1; // results of the fragment's answer arrive for an older epoch: stale
     pending.recoveries = 0; pending.answer = ''; pending.facts = []; pending.promised = false; pending.overlap = false; pending.settled = null;
     armNoAnswer(text);
@@ -343,7 +349,6 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       // GPT-Live sends user deltas without a final: the watchdog also has to run for a question that was never committed
       armNoAnswer(`${userBuf} ${turn.role === 'user' ? turn.text : ''} ${e.delta ?? e.text ?? ''}`.replace(/\s+/g, ' ').trim());
     } else {
-      if (lastFinal) lastFinal.answered = true;
       assistantStarted();
       noteAnswer(e.delta ?? e.text ?? '');
     }
@@ -482,7 +487,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       case 'response_started':
         tracksResponses = true;
         responseOpen = true;
-        if (e.id != null) openResponses.add(e.id);
+        if (e.id != null) { openResponses.add(e.id); responseStarted.set(e.id, now()); }
         pending.overlap = false; // a response that started after the question: what it says belongs to the question
         restartNoAnswer();
         trace.event('response.created', { turn: turnId, id: e.id });
@@ -669,7 +674,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     lastFinal = spoken && !spoken.answered ? { ...spoken, turn: turnId } : null; // he often goes on talking while he draws: the sentence still grows across the marking
     lastUserText = text;
     armNoAnswer(text);
-    trace.event('transcript.user.final', { turn: turnId, text, marker: true });
+    trace.event('transcript.user.final', { turn: turnId, text: text.replace(/\d/g, '#'), marker: true }); // what he circled is screen data: numbers stay out of the durable trace
     adapter.sendText(text);
     return true;
   }
