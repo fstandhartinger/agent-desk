@@ -6,6 +6,8 @@ import Gate from './components/Gate';
 import Desk from './components/Desk';
 import Logo from './components/Logo';
 import { resetArtifactEntry } from './components/ArtifactContext';
+import CompanionPairing from './components/CompanionPairing';
+import { companionEntry } from './lib/deviceEntry';
 
 type Phase = 'checking' | 'gate' | 'desk';
 type GateError = { text: string; retryAfter?: number };
@@ -40,6 +42,11 @@ function checkStartup() {
 }
 
 export default function App() {
+  if (companionEntry(location)) return <CompanionPairing />;
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [phase, setPhase] = useState<Phase>('checking');
   const [gateError, setGateError] = useState<GateError | null>(null);
 
