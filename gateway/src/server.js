@@ -62,7 +62,7 @@ function streamCanvas(req, res, url, bus) {
 
 export function createApp({ deviceOptions = {} } = {}) {
   const hub = new BridgeHub();
-  const artifacts = createArtifactService();
+  const artifacts = createArtifactService({ hub });
   const devices = createDeviceService({ artifacts, ...deviceOptions });
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));

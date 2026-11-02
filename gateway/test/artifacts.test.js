@@ -196,14 +196,14 @@ it('GitHub owner, path and credential allowlists fail closed', async () => {
 });
 it('card links, explainer points and title-only bridge reads use narrow capabilities', async () => {
   const refs = ['card:123', 'explainer:example#point', 'board:42', 'job:fake-job', 'job:..', 'decisions:missing'];
-  const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, readExplainer: async (slug, file) => { assert.equal(slug, 'example'); assert.equal(file, 'points.json'); return { points: { point: { title: 'Point', more: 'Exact point text' } } }; }, fetchImpl: async () => Response.json({ items: [{ id: 'abcdef', refs: refs.map(target => ({ target })) }] }) });
-  const seen = [], hub = { call: async (method) => { seen.push(method); return method === 'notify.cardLink' ? { title: 'Karte 123', url: 'https://cards.app.mintapis.com/p/fake' } : { title: 'Safe title', name: 'job', state: 'EUR 999 private', content: 'private', found: false }; } };
-  assert.match(await service.refRead('a', 'abcdef', 0, hub), /p\/fake/);
+  const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, readExplainer: async (slug, file) => { assert.equal(slug, 'example'); assert.equal(file, 'points.json'); return { points: { point: { title: 'Point', more: 'Exact point text' } } }; }, fetchImpl: async () => Response.json({ items: [{ id: 'abcdef', kind: 'card', refs: refs.map(target => ({ target })) }] }) });
+  const seen = [], hub = { call: async (method) => { seen.push(method); return method === 'notify.cardRead' ? { aid: 'abcdef', text: 'Fake card text', url: 'https://cards.app.mintapis.com/p/fake', details: 'Fake details page' } : { title: 'Safe title', name: 'job', state: 'EUR 999 private', content: 'private', found: false }; } };
+  assert.match(await service.refRead('a', 'abcdef', 0, hub), /Fake card text.*p\/fake.*Fake details page/);
   assert.match(await service.refRead('a', 'abcdef', 1, hub), /Exact point text/);
   for (const i of [2, 3]) assert.doesNotMatch(await service.refRead('a', 'abcdef', i, hub), /999|private/);
   assert.equal(await service.refRead('a', 'abcdef', 4, hub), 'nicht lesbar');
   assert.match(await service.refRead('a', 'abcdef', 5, hub), /nicht gefunden/);
-  assert.deepEqual(seen, ['notify.cardLink', 'board.entry', 'jobs.get', 'ctx.decisionKey']);
+  assert.deepEqual(seen, ['notify.cardRead', 'board.entry', 'jobs.get', 'ctx.decisionKey']);
 });
 it('context-turn requires an explicit same-origin Origin', async () => {
   for (const origin of [undefined, 'https://foreign.test']) {
@@ -224,6 +224,7 @@ it('artifact path return targets normalize without changing origin', async () =>
   for (const path of ['/a/../private', '/a/%2F%2Fevil.test', '//evil.test/a/abcdef']) assert.equal(safeNext(path), null);
   const { routeOf } = await import('../src/bridgeHub.js');
   assert.deepEqual(routeOf('notify.cardLink'), ['sandy']);
+  assert.deepEqual(routeOf('notify.cardRead'), ['sandy']);
 });
 it('public allowlisted-owner reads never attach a token without an exact repo grant', async () => {
   const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake', GITHUB_TOKEN: 'fake-secret' }, fetchImpl: async (url, opts) => {
@@ -233,4 +234,60 @@ it('public allowlisted-owner reads never attach a token without an exact repo gr
   assert.equal(await service.refRead('a', 'abcdef', 0, {}), ''); // fixture starts at line 2
   const board = JSON.parse(await service.refRead('a', 'abcdef', 2, { call: async () => ({ thread: 'Thread title', kind: 'decision', text: 'private EUR 999' }) }));
   assert.deepEqual(board, { title: 'Thread title', status: 'decision' });
+});
+
+// 2 Nov 2026: the Desk answered "nicht lesbar" for two Telegram cards. Synthetic card content only (public repo).
+const cardRow = (id, mid, summary = 'masked excerpt') => ({ id: `a#${id}`, kind: 'card', title: `Fake card ${mid}`, summary, status: 'active',
+  refs: [{ kind: 'card', label: `Karte ${mid}, Volltext`, target: `card:${mid}` }] });
+const cardEnv = { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' };
+it('resolve replaces the masked card excerpt with the real card text for several cards at once', async () => {
+  const rows = { aaaaaa: cardRow('aaaaaa', 111), bbbbbb: cardRow('bbbbbb', 222) };
+  const calls = [];
+  const hub = { call: async (method, args) => { calls.push([method, args.id]); return { aid: ({ 111: 'aaaaaa', 222: 'bbbbbb' })[args.id], text: `✅ ERLEDIGT\nFake price EUR 0,05\n✓ You chose Ja · 09:54\n↳ Agent: fake follow-up for ${args.id}`, url: 'https://cards.app.mintapis.com/p/fake', answered: true, linked_ids: ['a#bbbbbb'], details: 'x' }; } };
+  const service = createArtifactService({ hub, env: cardEnv, fetchImpl: async (url) => {
+    const ids = new URL(url).searchParams.get('ids').split(',');
+    return Response.json({ items: ids.map(i => rows[i]).filter(Boolean), unknown: [] });
+  } });
+  const result = await service.resolve('s1', 'a#aaaaaa,A#BBBBBB');
+  assert.deepEqual(calls.sort(), [['notify.cardRead', '111'], ['notify.cardRead', '222']]);
+  for (const [i, mid] of [[0, 111], [1, 222]]) {
+    assert.match(result.items[i].summary, /Fake price EUR 0,05/); assert.match(result.items[i].summary, /✓ You chose Ja/);
+    assert.match(result.items[i].summary, new RegExp(`follow-up for ${mid}`));
+    assert.equal(result.items[i].answered, true); assert.equal(result.items[i].has_details_page, true);
+  }
+  assert.deepEqual(result.items[0].linked_ids, ['a#bbbbbb']);
+  assert.match(JSON.stringify(service.get('s1').items), /follow-up for 222/, 'session context carries the real text');
+  assert.match(artifactInstructions(service.get('s1')), /follow-up for 111[\s\S]*follow-up for 222/);
+});
+it('card expansion keeps the registry excerpt when the bridge is offline and ignores non-card rows', async () => {
+  const hub = { call: async () => { throw new Error('bridge offline'); } };
+  const service = createArtifactService({ hub, env: cardEnv, fetchImpl: async () => Response.json({ items: [cardRow('aaaaaa', 111, 'registry excerpt'), { id: 'a#bbbbbb', kind: 'panel', title: 'Panel', summary: 'panel summary', refs: [{ kind: 'card', target: 'card:5' }] }], unknown: [] }) });
+  const result = await service.resolve('s2', 'aaaaaa,bbbbbb');
+  assert.equal(result.items[0].summary, 'registry excerpt'); assert.equal(result.items[1].summary, 'panel summary');
+});
+it('urgent-bot card refs resolve, and the text budget is shared between cards', async () => {
+  const long = 'x'.repeat(3500);
+  const hub = { call: async (m, a) => ({ aid: a.id === '111' ? 'aaaaaa' : 'bbbbbb', text: long }) };
+  const rows = [cardRow('aaaaaa', 111), { ...cardRow('bbbbbb', 222), refs: [{ kind: 'card', target: 'card:urgent:222' }] }];
+  const service = createArtifactService({ hub, env: cardEnv, fetchImpl: async () => Response.json({ items: rows, unknown: [] }) });
+  const result = await service.resolve('s3', 'aaaaaa,bbbbbb');
+  assert.equal(result.items[0].summary.length, 2200); assert.equal(result.items[1].summary.length, 2200);
+});
+it('voice allows a full-size artifact_resolve result; the bridge call has a route', async () => {
+  const { routeOf } = await import('../src/bridgeHub.js');
+  assert.deepEqual(routeOf('notify.cardRead'), ['sandy']);
+  const value = await runTool('artifact_resolve', { ids: ['aaaaaa', 'bbbbbb'] }, { sid: 'x', maxChars: 6000, artifacts: { resolve: async () => ({ items: [{ summary: 'a'.repeat(2400) }, { summary: 'b'.repeat(2400) }] }) } });
+  assert.match(value.content, /a{2400}/); assert.match(value.content, /b{2400}/);
+});
+
+it('a row cannot expose a card that belongs to another artifact, and the bridge call is time-bounded', async () => {
+  const options = [];
+  const hub = { call: async (method, args, opt) => { options.push(opt); return { aid: 'cccccc', text: 'Fake foreign card text', details: 'x' }; } };
+  const service = createArtifactService({ hub, env: cardEnv, fetchImpl: async () => Response.json({ items: [cardRow('aaaaaa', 111, 'registry excerpt')], unknown: [] }) });
+  const result = await service.resolve('s4', 'aaaaaa');
+  assert.equal(result.items[0].summary, 'registry excerpt');
+  assert.equal(await service.refRead('s4', 'aaaaaa', 0, hub), 'nicht lesbar');
+  assert(options.length >= 2 && options.every(o => o.timeoutMs > 0 && o.timeoutMs <= 5000));
+  const other = createArtifactService({ hub, env: cardEnv, fetchImpl: async () => Response.json({ items: [{ id: 'cccccc', kind: 'panel', title: 'P', refs: [{ kind: 'card', target: 'card:111' }] }], unknown: [] }) });
+  assert.equal(await other.refRead('s5', 'cccccc', 0, hub), 'nicht lesbar', 'only kind card rows may read card refs');
 });

@@ -45,6 +45,7 @@ export const METHOD_PARAMS = {
   // the ONLY write: called by the gateway after Florian's click (POST /api/handoff), never by a model tool
   'board.handoff': { title: 'string', task: 'string', why: 'string' },
   'notify.cardLink': { id: 'string' },
+  'notify.cardRead': { id: 'string' },
   'notify.loginLink': { url: 'string' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
 };
