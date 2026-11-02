@@ -159,3 +159,16 @@ test('mute: no frame reaches the vendor, no barge-in, no remark, no recovery of 
   assert.deepEqual(h.ws.sent.filter((m) => m.type === 'mute').map((m) => m.muted), [true, false]);
   assert.ok(!h.audits.some((a) => a.action === 'voice.barge_in'));
 });
+
+test('GPT-Live keeps speaking the old answer after the barge-in: that text settles nothing, the question still gets its recovery', async (t) => {
+  const h = harness(t, { noAnswerMs: 15 });
+  await sleep(1);
+  h.emit({ t: 'ready', model: 'm' });
+  h.emit({ t: 'response_started', id: 'old' });
+  h.emit({ t: 'transcript', role: 'assistant', delta: 'Hallo Florian, schön dass du da bist. ', final: false });
+  ask(h);
+  await sleep(5);
+  h.emit({ t: 'transcript', role: 'assistant', delta: 'Heute gibt es einiges Neues zu berichten, wie zum Beispiel Sonnenschein und gutes Wetter in Passau. ', final: false });
+  await sleep(60);
+  assert.ok(h.recovered.length >= 1);
+});

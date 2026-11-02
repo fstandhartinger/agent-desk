@@ -9,7 +9,7 @@ import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
-import { belongsToOldQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
+import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
 export const USAGE_TICK_MS = 10_000;
@@ -33,6 +33,7 @@ function isSilent(pcm) {
 
 export const MAX_RECOVERIES = 2;
 const RECOVERY_FACT_CHARS = 1500;
+const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
 
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
@@ -90,7 +91,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let openResponses = new Set(); // vendor response ids that started and did not finish yet
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
-  const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false };
+  const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false, overlap: false };
   let runningTools = 0;
   let muted = false;
   let mutedAt = 0;
@@ -163,9 +164,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       pending.answer = '';
       pending.facts = [];
       pending.promised = false;
+      pending.overlap = false;
       trace.event('turn.user.start', { turn: turnId, epoch: contentEpoch, trigger });
       if (responding) {
         interrupted = true;
+        pending.overlap = tracksResponses; // GPT-Live keeps speaking the old answer for many seconds: that text answers nothing
         staleChain = tracksResponses ? responseOpen : true;
         for (const id of openResponses) overtaken.add(id);
         responding = false;
@@ -229,7 +232,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function restartNoAnswer() {
     clearTimeout(pending.timer);
     if (!pending.active || closed) return;
-    pending.timer = setTimeout(fireNoAnswer, noAnswerMs());
+    pending.timer = setTimeout(fireNoAnswer, noAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0));
     pending.timer.unref?.();
   }
 
@@ -259,6 +262,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   /** Assistant text since the question: real content settles it; a promise ("Ich schaue sofort") keeps waiting for a tool or an answer. */
   function noteAnswer(delta) {
     if (!pending.active) return;
+    if (pending.overlap && !fitsQuestion(delta, pending.text)) { restartNoAnswer(); return; }
+    pending.overlap = false;
     pending.answer += delta;
     if (isPromiseOnly(pending.answer)) { pending.promised = true; restartNoAnswer(); return; }
     pending.active = false;
@@ -327,7 +332,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       if (!closed) adapter.sendToolResult(id, requestedName, JSON.stringify({ error: pseudo.content }));
       return;
     }
-    if (myEpoch === contentEpoch) restartNoAnswer();
+    if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
     runningTools += 1;
     sendJson({ ...evt, status: 'start' });
     viz?.noteEvent({ ...evt, status: 'start' });
@@ -420,6 +425,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         tracksResponses = true;
         responseOpen = true;
         if (e.id != null) openResponses.add(e.id);
+        pending.overlap = false; // a response that started after the question: what it says belongs to the question
+        restartNoAnswer();
         trace.event('response.created', { turn: turnId, id: e.id });
         break;
       case 'watchdog': // the model stayed silent after its tool results: the adapter asked for the answer again

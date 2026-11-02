@@ -22,7 +22,7 @@ export const cfg = {
   openaiDelegateModel: () => env('DESK_OPENAI_DELEGATE_MODEL', 'gpt-6.1-sol'),
   openaiDelegateEffort: () => env('DESK_OPENAI_DELEGATE_EFFORT', 'low'),
   voiceWatchdogMs: () => Number(env('DESK_VOICE_WATCHDOG_MS', '6000')), // no assistant audio this long after a tool result -> ask again
-  voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '9000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)
+  voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '10000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)
   allowedModels: () => [cfg.textModel(), ...env('DESK_ALLOWED_MODELS').split(',').map((m) => m.trim()).filter(Boolean)],
   reasoningEffort: () => env('DESK_TEXT_REASONING', 'low'),
   dailyCapUsd: () => Number(env('DESK_DAILY_USD_CAP', '15')),

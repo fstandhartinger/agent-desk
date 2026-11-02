@@ -20,6 +20,9 @@ export function belongsToOldQuestion(args, previous, current) {
   return overlaps(given, prev) && !overlaps(given, words(current));
 }
 
+/** The assistant text names something of the question. */
+export const fitsQuestion = (text, question) => overlaps(words(text), words(question));
+
 const CLOSING = /^(?:ja|nein|ok|okay|gut|danke|genau|hm+|mhm|ah|aha|ach so|alles klar|passt|super|tschüss|ciao|bye|hallo|hi)(?:\s+(?:danke|schön|gut|klar|genau))?[.!?]*$/i;
 /** Short acknowledgements and noise need no answer; everything else with at least two words, or a question mark, does. */
 export function needsAnswer(text) {
