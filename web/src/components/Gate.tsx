@@ -3,6 +3,7 @@ import { ArrowRight, Clapperboard, Eye, EyeOff, Loader2, Lock, Send } from 'luci
 import { ApiError, auth, errorMessage, fmtRetry } from '../lib/api';
 import Logo from './Logo';
 import { deepLinkNext, requestLoginLink, type LinkResult } from '../lib/loginLink';
+import { deviceLoginContext } from '../lib/deviceEntry';
 
 // Can this browser mask a text field? If not, fall back to type=password (masking beats PM isolation).
 const canMask = typeof CSS !== 'undefined' && (CSS.supports('-webkit-text-security', 'disc') || CSS.supports('text-security', 'disc'));
@@ -65,22 +66,23 @@ export default function Gate({ onUnlocked, initialError }: { onUnlocked: () => v
 
   const masked = canMask && !reveal;
   const next = deepLinkNext(location);
+  const device = deviceLoginContext(location);
   return (
     <main className="stage-glow relative flex min-h-full items-center justify-center overflow-hidden px-5 pb-[calc(var(--sab)+24px)] pt-[calc(var(--sat)+24px)]">
       <GateBackdrop />
       <div className="relative w-full max-w-[400px] animate-rise">
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo size={56} />
-          <h1 className="mt-5 text-[28px] font-semibold tracking-[-0.02em] text-fg">Agent Desk</h1>
-          <p className="mt-2 text-[15px] leading-relaxed text-dim">Erklärung ansehen, nachfragen, Aufgaben an Claude Code geben – live.</p>
+          <h1 className="mt-5 text-[28px] font-semibold tracking-[-0.02em] text-fg">{device ? 'Screen Agent verbinden' : 'Agent Desk'}</h1>
+          <p className="mt-2 text-[15px] leading-relaxed text-dim">{device ? 'Melde dich zuerst bei Desk an. Danach bestätigst du die Verbindung mit deiner App.' : 'Erklärung ansehen, nachfragen, Aufgaben an Claude Code geben – live.'}</p>
         </div>
-        {next && <LinkRequest next={next} />}
+        {next && <LinkRequest next={next} device={device} />}
         <form
           onSubmit={submit}
           key={shake}
           className={`rounded-3xl border border-white/[0.08] bg-ink-800/80 p-2 shadow-[0_30px_80px_-20px_rgb(0_0_0/0.8)] backdrop-blur-xl ${shake ? 'animate-shake' : ''}`}
         >
-          <label htmlFor="desk-code" className="sr-only">Zugangscode</label>
+          <label htmlFor="desk-code" className="sr-only">{device ? 'Desk-Zugangscode' : 'Zugangscode'}</label>
           <div className="flex items-center gap-2 rounded-[18px] border border-white/[0.06] bg-ink-900/70 pl-4 pr-1.5 transition-colors focus-within:border-violet/50">
             <Lock className="h-4 w-4 shrink-0 text-mute" />
             <input
@@ -88,9 +90,9 @@ export default function Gate({ onUnlocked, initialError }: { onUnlocked: () => v
               id="desk-code"
               type={canMask ? 'text' : 'password'}
               className={`h-12 min-w-0 flex-1 bg-transparent text-base text-fg outline-none placeholder:tracking-normal placeholder:text-mute ${masked ? 'masked' : ''}`}
-              placeholder="Zugangscode"
+              placeholder={device ? 'Desk-Zugangscode (optional)' : 'Zugangscode'}
               name="agent-desk-access-code"
-              aria-label="Zugangscode"
+              aria-label={device ? 'Desk-Zugangscode' : 'Zugangscode'}
               autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
@@ -124,6 +126,7 @@ export default function Gate({ onUnlocked, initialError }: { onUnlocked: () => v
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : locked > 0 ? <span className="tabular">Gesperrt – erneut {fmtRetry(locked)}</span> : <>Öffnen <ArrowRight className="h-4 w-4" /></>}
           </button>
         </form>
+        {device && <p className="mt-2 text-center text-xs text-mute">Dieses Feld ist nur für den Desk-Zugangscode, nicht für einen Gerätezugang. Mit dem Telegram-Link musst du nichts einfügen.</p>}
         <p id="desk-code-err" role="alert" className={`mt-4 min-h-5 text-center text-sm text-danger/90 transition-opacity ${error ? 'opacity-100' : 'opacity-0'}`}>
           {error}
         </p>
@@ -134,7 +137,7 @@ export default function Gate({ onUnlocked, initialError }: { onUnlocked: () => v
 }
 
 /** From an explainer page without a session: explain the Telegram link and offer to send a fresh one. */
-function LinkRequest({ next }: { next: string }) {
+function LinkRequest({ next, device }: { next: string; device: boolean }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<LinkResult | null>(null);
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
@@ -146,7 +149,7 @@ function LinkRequest({ next }: { next: string }) {
     const r = await requestLoginLink(next);
     setResult(r);
     if (!r.ok && r.retryAfter) setLockedUntil(Date.now() + r.retryAfter * 1000);
-    if (r.ok) setLockedUntil(Date.now() + 60_000); // no double sends from an impatient second tap
+    if (r.ok) setLockedUntil(Date.now() + 600_000); // the server coalesces link requests for ten minutes
     setBusy(false);
   }
   return (
@@ -154,10 +157,10 @@ function LinkRequest({ next }: { next: string }) {
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet/15 text-violet-light"><Clapperboard className="h-[18px] w-[18px]" /></span>
         <div className="min-w-0">
-          <h2 id="gate-link-h" className="text-[15px] font-semibold text-fg">Du kommst von einer Erklärseite</h2>
+          <h2 id="gate-link-h" className="text-[15px] font-semibold text-fg">{device ? 'Mit Telegram bei Desk anmelden' : 'Du kommst von einer Erklärseite'}</h2>
           <p className="mt-1 text-[13.5px] leading-relaxed text-dim">
-            Öffne zuerst den Login-Link aus Telegram – er meldet dich an und bringt dich genau zu dieser Erklärung zurück.
-            Keinen Link mehr? Dann schick dir einen neuen.
+            {device ? 'Öffne den Login-Link aus Telegram auf diesem Computer. Er bringt dich zur Bestätigung für Screen Agent zurück.' : 'Öffne zuerst den Login-Link aus Telegram – er meldet dich an und bringt dich genau zu dieser Erklärung zurück.'}
+            {' '}Keinen Link mehr? Dann schick dir einen neuen.
           </p>
         </div>
       </div>
@@ -168,7 +171,7 @@ function LinkRequest({ next }: { next: string }) {
         className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-violet text-[15px] font-semibold text-white transition-[background-color,opacity,transform] hover:bg-violet-light active:scale-[0.99] disabled:opacity-50"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        {result?.ok ? 'Link geschickt' : 'Neuen Login-Link per Telegram schicken'}
+        {result?.ok ? 'Link ist unterwegs' : 'Neuen Login-Link per Telegram schicken'}
       </button>
       <p role="status" aria-live="polite" className={`mt-2 min-h-5 text-center text-[13px] ${result ? (result.ok ? 'text-moss' : 'text-danger/90') : ''}`}>
         {result?.text}

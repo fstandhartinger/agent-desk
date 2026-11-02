@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
+import { createPairing } from './pairing.js';
 import { limits } from './limits.js';
 import { artifactId, artifactData } from './artifacts.js';
 import { cfg } from './config.js';
-import { originOk, readSession, validSessionId } from './auth.js';
+import { originOk, readSession, validSessionId, issueCookie } from './auth.js';
 import { readBody, readJson, sendJson, clientIp } from './http.js';
 import { createDeviceMedia, deviceError as fail, deviceIds, imageBytes, dictateContext, correctionPair, wavDuration } from './deviceMedia.js';
 
@@ -47,23 +48,34 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
     if (!dict || dict.expires <= now()) dict = { value: await registry('/v1/dictionary'), expires: now() + 300000 };
     return structuredClone(dict.value);
   }
+  async function mint() {
+    const token = crypto.randomBytes(32).toString('base64url'), expiresAt = now() + TTL;
+    const created = await registry('/v1/devices', { hash: hash(token), label: 'Screen Agent', scopes: SCOPES, expires_at: expiresAt });
+    return { token, deviceId: created.id, expiresAt };
+  }
+  const pairing = createPairing({ now, rate, mint, origin: () => cfg.deskOrigin() });
+  async function authorizeSession(session) {
+    if (!session?.deviceHash) return !!session;
+    try { const row = await registry('/v1/devices/verify', { hash: session.deviceHash }); return !row.revoked_at && Date.parse(row.expires_at) > now(); }
+    catch (err) { if (err.status === 404) return false; throw fail('Registry ist vorübergehend nicht erreichbar.', 503); }
+  }
   async function route(req, res, url) {
     const path = url.pathname;
     if (!path.startsWith('/api/device/')) return false;
     res.setHeader('cache-control', 'no-store');
     // No CORS headers, no cross-origin requests (including reads), no cookie fallback for native APIs.
     if (req.headers.origin && !originOk(req)) throw fail('Zugriff verweigert.', 403);
+    if (await pairing(req, res, path)) return true;
     const management = path === '/api/device/pair' || path === '/api/device/list' || path.startsWith('/api/device/revoke/') || path === '/api/device/learned' || path.startsWith('/api/device/learned/');
     if (management) {
       const session = readSession(req);
       if (!session) throw fail('Bitte anmelden.', 401);
+      if (session.deviceHash) throw fail('Bitte die Geräteverwaltung im normalen Browser öffnen.', 403);
       if (req.method !== 'GET' && !originOk(req)) throw fail('Zugriff verweigert.', 403);
       rate(`manage:${session.sid}`, 20);
       if (path === '/api/device/list' && req.method === 'GET') sendJson(res, 200, { devices: (await registry('/v1/devices')).devices.filter(r => !r.revoked_at && Date.parse(r.expires_at) > now()).map(device) });
       else if (path === '/api/device/pair' && req.method === 'POST') {
-        const token = crypto.randomBytes(32).toString('base64url'), expiresAt = now() + TTL;
-        const created = await registry('/v1/devices', { hash: hash(token), label: 'Screen Agent', scopes: SCOPES, expires_at: expiresAt });
-        sendJson(res, 200, { token, deviceId: created.id, expiresAt });
+        sendJson(res, 200, await mint());
       } else if (path.startsWith('/api/device/revoke/') && req.method === 'DELETE') {
         const id = path.slice('/api/device/revoke/'.length);
         if (!/^[0-9a-f-]{36}$/i.test(id)) throw fail('Ungültiges Gerät.');
@@ -87,8 +99,9 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
       else {
         verified.delete(digest);
         try {
-          record = device(await registry('/v1/devices/verify', { hash: digest }));
-          if (!(record.expiresAt > now())) record = null;
+          const row = await registry('/v1/devices/verify', { hash: digest });
+          record = row.revoked_at ? null : device(row);
+          if (!(record?.expiresAt > now())) record = null;
           if (record) {
             if (verified.size >= 1000) verified.delete(verified.keys().next().value);
             verified.set(digest, { record, until: Math.min(now() + 60000, record.expiresAt) });
@@ -98,6 +111,15 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
     }
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     rate(`device:${record.deviceId}`, 120);
+    if (path === '/api/device/web-session' && req.method === 'POST') {
+      // Recheck the registry even on a warm native cache. Bind the browser session to the device hash so
+      // registry revocation also stops Desk HTTP/voice authentication after process restarts.
+      const digest = hash(token);
+      if (!await authorizeSession({ deviceHash: digest })) throw fail('Gerätezugang ungültig.', 401);
+      const cookie = issueCookie(now(), { deviceHash: digest }).split(';')[0].slice('desk_s='.length);
+      sendJson(res, 200, { cookie, expiresAt: Math.min(record.expiresAt, now() + 30 * 86400000) });
+      return true;
+    }
     const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|highlight)$/.exec(path);
     const scope = target ? 'screen' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
@@ -155,5 +177,5 @@ export function createDeviceService({ artifacts, env = process.env, now = Date.n
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary };
+  return { route, dictionary, authorizeSession };
 }

@@ -13,17 +13,18 @@ const notifyBin = () => process.env.BRIDGE_NOTIFY_BIN || path.join(os.homedir(),
 
 // CANVAS.md words this card in German, but notify rejects German prose ("rewrite the body in plain English") and
 // requires a result sentence after "Worum geht's:"; this wording passes `notify now --dry-run --requested`.
-export const loginCard = (url) => `✅ ERLEDIGT\nWorum geht's: Your Agent Desk login link (desk.app.mintapis.com) is ready to open.\n${url}\nValid for 24 h, 3 uses.`;
+export const loginCard = (url) => `✅ ERLEDIGT\nWorum geht's: Your Agent Desk login link (desk.app.mintapis.com) is ready to open.\n${url}\n${url.includes('#k=L2.') ? 'Valid for 5 min, one use.' : 'Valid for 24 h, 3 uses.'}`;
 
 export async function loginLink({ url } = {}) {
   if (typeof url !== 'string' || url.length > 600 || !URL_RE.test(url)) throw new Error('url must be an https://desk.app.mintapis.com/ link');
   const args = ['now', '--requested', loginCard(url)];
   return new Promise((resolve) => {
-    execFile(notifyBin(), args, { timeout: 25_000, env: { ...process.env, AGENT_BOARD_NAME: 'desk:bridge' }, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(notifyBin(), args, { timeout: 240_000, env: { ...process.env, AGENT_BOARD_NAME: 'desk:bridge' }, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       // The link is a secret: it never goes back into the detail text.
       const clean = (s) => redact(String(s ?? '')).replaceAll(url, '[link]').trim().slice(-300);
       const out = clean(`${stdout}\n${stderr}`) || clean(err?.message);
-      if (!err) return resolve({ sent: true, detail: out || 'sent' });
+      if (/QUEUED: outbox [0-9]+/.test(String(stdout))) return resolve({ sent: false, queued: true, detail: 'queued in notify' });
+      if (!err) return resolve({ sent: !/NOT SENT|BOARD ONLY/.test(String(stdout)), detail: out || 'sent' });
       resolve({ sent: false, detail: out || 'notify failed', ...(typeof err.code === 'number' ? { exit: err.code } : {}) });
     });
   });

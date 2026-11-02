@@ -10,7 +10,7 @@ test('only an explainer deep link (?x=slug) offers the Telegram link; next keeps
   assert.equal(deepLinkNext({ pathname: '/', search: '?x=a&k=secret' }), '/?x=a', 'a stray code param is not forwarded');
 });
 
-test('success, rate limit (with retry time) and Telegram outage read in German', async () => {
+test('queued success, rate limit and uncertain delivery are truthful', async () => {
   let body: unknown;
   const ok = await requestLoginLink('/?x=a', async (b) => { body = b; return { ok: true }; });
   assert.deepEqual(body, { next: '/?x=a' });
@@ -24,7 +24,12 @@ test('success, rate limit (with retry time) and Telegram outage read in German',
   const fresh = await requestLoginLink('/?x=a', async () => { throw new ApiError(429, 'Gerade erst einen Link geschickt.', 600); });
   assert.equal(fresh.text, 'Gerade erst einen Link geschickt – erneut möglich in 10 min.');
   const down = await requestLoginLink('/?x=a', async () => { throw new ApiError(502, 'Der Dienst antwortet gerade nicht.'); });
-  assert.match(down.text, /Telegram ist gerade nicht erreichbar/);
+  assert.match(down.text, /Link kann bereits unterwegs sein/);
+  assert.doesNotMatch(down.text, /Telegram ist gerade nicht erreichbar/);
+  assert.equal(!down.ok && down.retryAfter, 600);
+  const lost = await requestLoginLink('/?x=a', async () => { throw new TypeError('Failed to fetch'); });
+  assert.match(lost.text, /Telegram prüfen/);
+  assert.equal(!lost.ok && lost.retryAfter, 600);
 });
 
 test('normalizes artifact login returns and preserves the selected voice and question', () => {
@@ -34,5 +39,8 @@ test('normalizes artifact login returns and preserves the selected voice and que
 
 test('keeps device pairing and companion destinations behind login', () => {
   assert.equal(deepLinkNext({ pathname: '/device', search: '' }), '/device');
+  const pair = 'a'.repeat(43);
+  assert.equal(deepLinkNext({ pathname: '/device', search: `?pair=${pair}&k=secret&other=ignored` }), `/device?pair=${pair}`);
+  assert.equal(deepLinkNext({ pathname: '/device', search: '?pair=invalid&k=secret' }), '/device');
   assert.equal(deepLinkNext({ pathname: '/', search: '?companion=1&voice=gemini' }), '/?companion=1&voice=gemini');
 });

@@ -1,11 +1,15 @@
 import { artifactUrl, parseArtifactUrl } from './artifactUrl';
+import { pairingId } from './deviceEntry';
 // Gate "login link" UX (docs/CANVAS.md "Login UX gap"): someone opens the desk from an explainer page without a
 // session; the gate can ask the gateway to send a fresh login link via Telegram that leads back to the same place.
 import { ApiError, api, errorMessage, fmtRetry } from './api';
 
 /** The path+query to come back to, when the URL is an explainer deep link (`?x=<slug>`); otherwise null. */
 export function deepLinkNext(loc: { pathname: string; search: string }): string | null {
-  if (loc.pathname === '/device') return '/device';
+  if (loc.pathname === '/device') {
+    const pair = pairingId(loc);
+    return pair ? `/device?pair=${encodeURIComponent(pair)}` : '/device';
+  }
   const q = new URLSearchParams(loc.search);
   if (loc.pathname === '/' && q.get('companion') === '1') {
     q.delete('k');
@@ -32,7 +36,8 @@ export async function requestLoginLink(next: string, post = (body: { next: strin
       const base = /zu viele anfragen/i.test(e.message) || !e.message ? 'Es wurde gerade erst ein Link geschickt.' : e.message;
       return { ok: false, text: e.retryAfter && !/erneut möglich/i.test(base) ? `${base.replace(/[.\s]+$/, '')} – erneut möglich ${fmtRetry(e.retryAfter)}.` : base, retryAfter: e.retryAfter };
     }
-    if (e instanceof ApiError && (e.status === 502 || e.status === 503)) return { ok: false, text: 'Telegram ist gerade nicht erreichbar – bitte gleich noch einmal versuchen.' };
+    // A lost response does not prove delivery failed: notify may already have queued the link.
+    if (!(e instanceof ApiError) || e.status >= 500) return { ok: false, text: 'Versandstatus unbekannt – der Link kann bereits unterwegs sein. Bitte Telegram prüfen, ohne erneut anzufordern.', retryAfter: 600 };
     return { ok: false, text: errorMessage(e) };
   }
 }
