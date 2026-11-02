@@ -62,7 +62,7 @@ test('happy path: folder, PROMPT.md, meta, argv for auto, card text and env', as
   assert.match(prompt, /^# Check disk space \(voice job from the Screen Agent\)\nStarted by Florian by voice at \d{4}-.*Z, session a#0a1b2c via xai\. Read his conversation with `desk-trace a#0a1b2c`\./);
   assert.match(prompt, /## What Florian said \(speech transcript, verbatim; speech recognition can mishear names\)\n> Starte mit Claude Code einen Job/);
   assert.match(prompt, /## The task, as the voice agent wrote it from the conversation\n> Prüfe den Platz auf a#123abc/);
-  assert.match(prompt, /## Rules for this job\n- Florian's words above are the authority/);
+  assert.match(prompt, /## Rules for this job\n- Florian's words below are the authority/);
   assert.equal(fs.statSync(path.join(dir, 'PROMPT.md')).mode & 0o777, 0o644);
   const meta = JSON.parse(fs.readFileSync(path.join(dir, '.voice-start.json'), 'utf8'));
   assert.equal(meta.requestId, p.requestId);

@@ -168,12 +168,14 @@ test('settle: new speech while waiting cancels the action ("Florian spricht noch
 test('the same prompt twice within 60 s is typed once; start_agent_job twins start one job', async (t) => {
   const h = harness(t);
   await sleep(1);
-  h.say('Hauptagent: Starte mit Claude Code einen Job.');
+  h.say('Hauptagent bitte.');
   h.call('c1', 'output_main_agent_prompt', { text: 'Gleicher Text' });
   await h.result('c1');
   h.call('c2', 'output_main_agent_prompt', { text: '  gleicher   text ' });
   assert.match(await h.result('c2'), /schon (?:eingetippt|passiert)/);
   assert.equal(h.commands.length, 1);
+  await sleep(1);
+  h.say('Und das andere bitte mit Claude Code.');
   h.call('c3', 'start_agent_job', { title: 'Check disk', prompt: 'Prüfe den Platz auf der Platte von Sandy bitte' });
   await h.result('c3');
   h.call('c4', 'start_agent_job', { title: 'Another title', prompt: 'Prüfe den Platz auf der Platte von Sandy' });

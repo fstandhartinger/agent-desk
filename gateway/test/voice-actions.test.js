@@ -133,6 +133,7 @@ describe('output_main_agent_prompt results', () => {
     assert.match((await main(c)).content, /Unklar, ob der Prompt angekommen ist.*NICHT nochmal/);
     assert.match((await main(c)).content, /schon/, 'second try does not go out');
     assert.equal(c.log.commands.length, 1);
+    resetActions();
     const f = ctx(say, { vision: { delivered: true, state: 'failed', code: 'no-field' } });
     await main(f); await main(f);
     assert.equal(f.log.commands.length, 2);
