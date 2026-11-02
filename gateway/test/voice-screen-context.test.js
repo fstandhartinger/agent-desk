@@ -83,11 +83,14 @@ test('gemini: nothing goes out (realtimeInput text would trigger a reply); the n
   a.close();
 });
 
-test('instructions tell the truth: no Screen Agent -> no screen; attached -> look_at_screen, masking, ids only for Earnings', () => {
+test('instructions tell the truth: no Screen Agent -> no screen; attached -> look_at_screen, ids with background, never "geschützt"', () => {
   const none = buildInstructions(null, undefined, { provider: 'openai' });
   assert.match(none, /Du siehst Florians Bildschirm NICHT/); assert.doesNotMatch(none, /Du siehst Florians Bildschirm:/);
   const yes = buildInstructions(null, undefined, { provider: 'xai', screen: true });
-  assert.match(yes, /Du siehst Florians Bildschirm: /); assert.match(yes, /look_at_screen/); assert.match(yes, /Banken und Passwortmanagern sind geschwärzt/); assert.match(yes, /Earnings-Bereich kommen nur IDs/);
+  assert.match(yes, /Du siehst Florians Bildschirm: /); assert.match(yes, /look_at_screen/); assert.doesNotMatch(yes, /geschützt|geschwärzt|Earnings-Bereich/);
+  assert.match(yes, /Frage Florian nie, ob er dir IDs nennen/); assert.match(yes, /"hintergrund"/); assert.match(yes, /Kannst du die IDs sehen/);
+  assert.match(yes, /immer frisch/);
+  assert.match(none, /session_trace/); assert.match(none, /Biete dann nicht an, daraus eine Aufgabe/);
   assert.doesNotMatch(yes, /NICHT: Es ist kein Screen Agent/);
 });
 

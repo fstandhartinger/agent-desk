@@ -28,3 +28,14 @@ test('interrupted punctuation-only voice answers disappear but tool chips and me
   assert.ok(convStore.get().messages.some((m) => m.id === id));
   assert.equal(toolLabel('decisions_recent'), 'Entscheidungen');
 });
+
+test('a grown final (replace) overwrites the earlier user message in place: one message, the whole sentence', () => {
+  convStore.set({ id: 'voice-test', messages: [] });
+  receiveVoiceTranscript('user', 'Nein, wir nehmen dieses Protokoll jetzt auf, weil wir', true, false);
+  receiveVoiceTranscript('user', 'Nein, wir nehmen dieses Protokoll jetzt auf, weil wir eine Fehlerbehebung vornehmen müssen', true, false, false, true);
+  const users = convStore.get().messages.filter((m) => m.role === 'user');
+  assert.equal(users.length, 1);
+  assert.equal(textOf(users[0]), 'Nein, wir nehmen dieses Protokoll jetzt auf, weil wir eine Fehlerbehebung vornehmen müssen');
+  receiveVoiceTranscript('user', 'Und jetzt?', true, false);
+  assert.equal(convStore.get().messages.filter((m) => m.role === 'user').length, 2, 'without replace a final is a new message');
+});

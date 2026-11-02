@@ -8,6 +8,7 @@ import { asksForSecrets, attachDetail, connectCanvas, detailSpec, ensureSimple, 
 import { cfg } from './config.js';
 import { deskModelFacts, MODEL_FACT_LINES } from './deskStatus.js';
 import { hostDisplay, hostMentions, KNOWN_HOSTS, modelAllowed, modelTokens } from './proseGuard.js';
+import { askKind } from './ask.js';
 import { fastCalls, isArchitectureQuestion, isMoneyQuestion } from './fastPath.js';
 import { applyLedger, ledgerSources, moneyBody, parseLedger } from './ledgerViz.js';
 import { canonRef, dropOffTopicSources, normalizeRef, normalizeSources } from './sources.js';
@@ -264,8 +265,11 @@ export function createMemory() {
   let inflight = 0; // the main agent's tools that started and have not reported back yet
   const wake = () => { for (const w of [...waiters]) w(); };
   return {
-    noteTurn({ role, text }) {
-      if ((role === 'user' || role === 'assistant') && typeof text === 'string' && text.trim()) turns.push({ role, text: text.trim() });
+    noteTurn({ role, text, replace }) {
+      if (!((role === 'user' || role === 'assistant') && typeof text === 'string' && text.trim())) return;
+      const at = replace ? turns.findLastIndex((t) => t.role === role) : -1;
+      if (at >= 0) turns[at].text = text.trim(); // a grown fragment replaces the shorter one
+      else turns.push({ role, text: text.trim() });
       wake();
     },
     /** A tool of the main agent started (its result arrives with noteTool). */
@@ -826,7 +830,7 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
       // critic r2 P1-2: a question about the clicked element is answered from the page: no keyword searches ("grenze gibt
       // diesem element" found AGENTS.md / FACTS.md), and the voice model gets the page facts as its facts of this question
       const pageQuestion = job.early && isPageQuestion(job.question ?? job.request, job.page);
-      const fast = job.early && !pageQuestion ? fastCalls(job.question ?? job.request, { now: now() }) : [];
+      const fast = job.early && !pageQuestion ? fastCalls(job.question ?? job.request, { now: now(), utterance: job.utterance }) : [];
       if (pageQuestion) {
         const facts = pageFacts(job.page);
         if (facts) { try { job.onFacts?.(`Frage: ${short(job.question ?? job.request, 200)}\n\n### Erklärseite (angeklicktes Element, erste Quelle)\n${facts}`, { strong: true, exact: true, final: false }); } catch { /* advisory */ } }
@@ -1099,7 +1103,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
     const run = { id, why };
     early = run;
     publish({ phase: 'pending', id, by: 'auto' });
-    start({ id, request, question, early: true, by: 'auto' }, () => {
+    start({ id, request, question, early: true, utterance: why === 'user' || why === 'research', by: 'auto' }, () => {
       if (early !== run) return; // a newer turn or a finished spec took over
       early = null;
       if (!deferred) return;
@@ -1276,6 +1280,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         researchTimer = null;
         if (toolRan || autoRan || closed || writeTurn || limitReached() || !cfg.canvasEarly()) return;
         if (isYesNoQuestion(turnUser) && !namedId) return;
+        if (['screen', 'session', 'none'].includes(askKind(turnUser))) return;
         if (!isExplanatory(turnUser, '') && toolCount < 2) return;
         startEarly(turnUser, 'research');
       }, researchMs());
@@ -1316,6 +1321,8 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       forbidden = wantsNoDrawing(text);
       if (forbidden) return 'forbidden';
       if (toolRan || autoRan) return 'skipped';
+      const kind = askKind(text);
+      if (kind === 'screen' || kind === 'session') return kind; // look_at_screen / session_trace answer; no research, no drawing
       if (asksForSecrets(text)) return 'secret';
       if (wantsWriteAction(text)) { writeTurn = true; return 'write-intent'; }
       namedId = namedCanvas(text);
@@ -1343,6 +1350,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         startEarly(ref.question ?? text, 'deictic', target, `${text}\n${turnContext}`);
         return 'deictic';
       }
+      if (!namedId && kind === 'none') return 'not-explanatory';
       if (!namedId && isYesNoQuestion(text)) return 'yes-no'; // a yes/no question gets its answer, not a drawing
       if (text.length < 12 || !(namedId || isExplanatory(text, ''))) return 'not-explanatory';
       if (limitReached()) return 'limit';
@@ -1373,6 +1381,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       }
       if (toolRan || autoRan) return 'skipped';
       if (isMetaAnswer(answerText) || asksForSecrets(user)) return 'meta';
+      if (['screen', 'session'].includes(askKind(user))) return 'screen'; // the answer describes the screen / the session: nothing to draw
       if (dataFailed > 0 && dataOk === 0) return 'tools-failed'; // r6 P2-3: nothing was read, so an automatic drawing could only invent
       if (String(answerText ?? '').trim().length < 20 || !isExplanatory(user, answerText)) return 'not-explanatory';
       clearTimeout(timer);

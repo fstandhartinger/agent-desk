@@ -100,6 +100,26 @@ it('highlight validates foreign sid, sizes and bbox, sends normal text turn, sto
   assert.equal((await native(`session/${sid}/screen/clear`, {})).status, 200);
   assert.deepEqual(app.artifacts.screen(sid).ids, []);
 });
+it('highlight reaches the session as a MARKER turn with verified ids and their background; v0.1.4 noImage never yields "Element(e)  ()"; the latest marking is kept', async () => {
+  const seen = [], off = app.artifacts.registerVoice(sid, (text, o) => { seen.push({ text, o }); return true; });
+  const res = await native(`session/${sid}/highlight`, highlight); assert.equal(res.status, 200);
+  const body = await res.json(); assert.deepEqual(body.ids, ['a#abcdef']);
+  assert.equal(seen[0].o.marker, true, 'the session gets it as a marker turn, not a typed user turn');
+  assert.match(seen[0].text, /^\[Markierung vom Desk, nicht von Florian/);
+  const block = JSON.parse(/<artifact_data source="screen">\n([\s\S]*)\n<\/artifact_data>/.exec(seen[0].text)[1]);
+  assert.equal(block.hintergrund[0].id, 'a#abcdef'); assert.equal(block.hintergrund[0].titel, 'Fake artifact');
+  // no ids, no image: plain words, never an empty "Element(e)"
+  seen.length = 0;
+  assert.equal((await native(`session/${sid}/highlight`, { ids: [], bbox: highlight.bbox, noImage: true })).status, 200);
+  assert.doesNotMatch(seen[0].text, /Element\(e\)|\(IDs:/); assert.match(seen[0].text, /Florian hat etwas markiert/);
+  seen.length = 0;
+  assert.equal((await native(`session/${sid}/highlight`, { ids: ['abcdef'], bbox: highlight.bbox, noImage: true })).status, 200); off();
+  assert.match(seen[0].text, /Markiert ist a#abcdef \(Fake artifact\)/); assert.doesNotMatch(seen[0].text, /Element\(e\)/);
+  assert.equal(app.artifacts.screen(sid).highlights.at(-1).ids[0], 'abcdef');
+});
+it('screen/clear and screen/private take an optional why; v0.1.4 sends none', async () => {
+  for (const [p, b] of [['screen/clear', {}], ['screen/clear', { why: 'paused' }], ['screen/private', {}], ['screen/private', { why: 'locked' }], ['screen/clear', { why: 'stop' }]]) assert.equal((await native(`session/${sid}/${p}`, b)).status, 200, p + JSON.stringify(b));
+});
 it('dictionary cached five minutes, correction syntax validated, learned source and invalidation', async () => {
   const before = registry.seen.filter(r => r.url === '/v1/dictionary').length;
   assert.equal((await native('dictionary')).status, 200); assert.equal((await native('dictionary')).status, 200);

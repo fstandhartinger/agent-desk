@@ -36,7 +36,7 @@ export type ClaudeEvent = { seq: number; ts: string } & (
 
 export type VoiceServerMsg =
   | { type: 'ready'; provider: string; model: string }
-  | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean }
+  | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean }
   | { type: 'speech_started' }
   | ToolEvent
   | HandoffEvent

@@ -288,10 +288,12 @@ export function createVizGenerator({
   }
 
   return {
-    noteTurn({ role, text }) {
+    noteTurn({ role, text, replace }) {
       const t = clipWords(text, WINDOW.turnChars);
       if (!t) return;
-      turns.push({ role: role === 'user' ? 'user' : 'assistant', text: t });
+      const at = replace ? turns.findLastIndex((x) => x.role === (role === 'user' ? 'user' : 'assistant')) : -1;
+      if (at >= 0) turns[at].text = t; // a grown fragment replaces the shorter one
+      else turns.push({ role: role === 'user' ? 'user' : 'assistant', text: t });
       if (turns.length > WINDOW.turns) turns.shift();
       schedule();
     },

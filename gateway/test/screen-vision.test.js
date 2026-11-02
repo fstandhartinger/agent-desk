@@ -82,7 +82,7 @@ it('frame: validation (width, size, format, device), then processed in memory on
   const body = frameBody();
   const res = await post(body);
   assert.equal(res.status, 200);
-  assert.deepEqual({ ...(await res.json()), frameVersion: 0 }, { ok: true, frameVersion: 0, changed: true, vision: 'ok' });
+  assert.deepEqual({ ...(await res.json()), frameVersion: 0 }, { ok: true, frameVersion: 0, changed: true, vision: 'ok', ids: [] });
   assert.equal(calls.length, 1); assert.equal(calls[0].previous, null); assert.equal(calls[0].meta.process, 'chrome');
   assert.equal(ctxTexts.length, 1);
   assert.match(ctxTexts[0], /^\[Bildschirm-Update vom Desk: Hintergrund, nicht von Florian, keine Frage/);
@@ -225,7 +225,7 @@ it('chat gets the same truth: no agent -> "NICHT"; attached -> capability + runn
   assert.equal(app.devices.vision.active('chat-only-sid'), true);
 });
 
-it('a private screen: the agent is told, stops describing the old window and look_at_screen says so; /screen alone never counts as attached', () => {
+it('no picture (locked / paused): the agent is told once, plainly, never "geschützt"; /screen alone never counts as attached', () => {
   const v = createScreenVision({ media: { vision: async () => { throw new Error('no model'); } }, artifacts: { screen: () => ({ ids: ['abc123'] }), setScreen: async () => ({}) } });
   const sent = [];
   v.attach('s', { kind: 'voice', announced: true, trace() {}, setContext: (t) => { sent.push(t); return 'sent'; } });
@@ -233,5 +233,7 @@ it('a private screen: the agent is told, stops describing the old window and loo
   v.clear('s');
   v.clear('s');
   assert.equal(sent.length, 1, 'said once');
+  assert.match(sent[0], /gesperrt oder zeigt einen Windows-Sicherheitsdialog/);
   assert.match(sent[0], /Frühere Bildschirm-Updates gelten nicht mehr/);
+  assert.doesNotMatch(sent[0], /geschützt|Bank|Passwort|Earnings/);
 });

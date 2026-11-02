@@ -25,7 +25,9 @@ const idOf = (key, value) => (value == null ? {} : { [key]: value });
 
 /** Pure translation of one server frame into normalised events (see adapter.js). */
 export function translate(msg, state = {}) {
-  if (msg.type === 'error' && /^screen-/.test(msg.error?.event_id ?? msg.event_id ?? '')) return [{ t: 'screen_error', message: msg.error?.message ?? 'xAI-Fehler' }]; // passive screen context: never shown to Florian
+  const failed = msg.error?.event_id ?? msg.event_id ?? '';
+  // passive screen context: never shown to Florian; a delete of an item the vendor no longer has is harmless (`gone`)
+  if (msg.type === 'error' && /^screen-/.test(failed)) return [{ t: 'screen_error', message: msg.error?.message ?? 'xAI-Fehler', ...(/^screen-del-/.test(failed) || /not found/i.test(msg.error?.message ?? '') ? { gone: true } : {}) }];
   switch (msg.type) {
     case 'session.updated':
       return state.ready ? [] : ((state.ready = true), [{ t: 'ready', model: MODEL }]);
@@ -37,7 +39,7 @@ export function translate(msg, state = {}) {
       return [{ t: 'transcript', role: 'assistant', delta: msg.delta, final: false }];
     case 'conversation.item.input_audio_transcription.updated':
     case 'conversation.item.input_audio_transcription.completed':
-      return [{ t: 'transcript', role: 'user', text: msg.transcript ?? msg.text ?? '', final: true }];
+      return [{ t: 'transcript', role: 'user', text: msg.transcript ?? msg.text ?? '', final: true, ...idOf('itemId', msg.item_id) }];
     case 'input_audio_buffer.speech_started':
       return [{ t: 'speech_started' }];
     case 'response.function_call_arguments.done':
