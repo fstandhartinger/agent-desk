@@ -10,7 +10,7 @@ const ev = (o: Partial<CanvasBusEvent> & { id: string; phase: CanvasBusEvent['ph
 test('canvas-pending is posted once per drawing id, on pending or on a first ready', () => {
   const sent: unknown[] = [];
   const host = { postMessage: (m: unknown) => sent.push(m) };
-  const n = canvasPendingNotifier(() => host);
+  const n = canvasPendingNotifier(() => host, () => 1);
   n(ev({ id: 'a', phase: 'pending', title: '  Ablauf  ' }));
   n(ev({ id: 'a', phase: 'ready', title: 'Ablauf' }));
   n(ev({ id: 'a', phase: 'pending', title: 'Ablauf' }));
@@ -22,10 +22,19 @@ test('canvas-pending is posted once per drawing id, on pending or on a first rea
   assert.deepEqual(sent[1], { type: 'canvas-pending', title: 'x'.repeat(80) });
 });
 
+test('a replayed old drawing does not announce itself', () => {
+  const sent: unknown[] = [];
+  const n = canvasPendingNotifier(() => ({ postMessage: (m: unknown) => sent.push(m) }), () => 10_000_000);
+  n(ev({ id: 'old', phase: 'ready', at: 1 }));
+  assert.equal(sent.length, 0);
+  n(ev({ id: 'new', phase: 'pending', at: 9_999_000 }));
+  assert.equal(sent.length, 1);
+});
+
 test('outside the native host nothing is posted, and a later host still gets the drawing', () => {
   let host: { postMessage(m: unknown): void } | undefined;
   const sent: unknown[] = [];
-  const n = canvasPendingNotifier(() => host);
+  const n = canvasPendingNotifier(() => host, () => 1);
   n(ev({ id: 'a', phase: 'pending' }));
   host = { postMessage: (m) => sent.push(m) };
   n(ev({ id: 'b', phase: 'pending', title: 'B' }));
