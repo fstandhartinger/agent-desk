@@ -45,6 +45,7 @@ beforeEach(() => {
   origLog = console.log; console.log = (line) => { logs.push(String(line)); };
 });
 import { afterEach } from 'node:test';
+import { createScreenVision } from '../src/screenVision.js';
 afterEach(() => { console.log = origLog; });
 const frameBody = (o = {}) => { const j = jpeg(); return { deviceId, frameVersion: ++version, jpeg: j.toString('base64'), process: 'chrome', title: 'Bittensor Earnings', masked: 1, ids: ['abcdef'], reason: 'interval', ...o }; };
 const post = (b, p = 'frame', s = sid) => fetch(`${base}/api/device/session/${s}/${p}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(b) });
@@ -222,4 +223,15 @@ it('chat gets the same truth: no agent -> "NICHT"; attached -> capability + runn
   assert.match(block, /Du siehst Florians Bildschirm: /); assert.match(block, /<artifact_data source="screen">[\s\S]*Mailprogramm/);
   app.devices.vision.touchChat('chat-only-sid');
   assert.equal(app.devices.vision.active('chat-only-sid'), true);
+});
+
+it('a private screen: the agent is told, stops describing the old window and look_at_screen says so; /screen alone never counts as attached', () => {
+  const v = createScreenVision({ media: { vision: async () => { throw new Error('no model'); } }, artifacts: { screen: () => ({ ids: ['abc123'] }), setScreen: async () => ({}) } });
+  const sent = [];
+  v.attach('s', { kind: 'voice', announced: true, trace() {}, setContext: (t) => { sent.push(t); return 'sent'; } });
+  assert.equal(v.attached('s'), false, 'a voice session without polls or frames has no Screen Agent');
+  v.clear('s');
+  v.clear('s');
+  assert.equal(sent.length, 1, 'said once');
+  assert.match(sent[0], /Frühere Bildschirm-Updates gelten nicht mehr/);
 });

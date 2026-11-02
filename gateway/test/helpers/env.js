@@ -12,6 +12,7 @@ export const DESK_ORIGIN = 'https://desk.test';
 
 export function setEnv(extra = {}) {
   Object.assign(process.env, {
+    ARTIFACTS_URL: '', ARTIFACTS_DESK_TOKEN: '', // a test must never write to the live registry from a shell that has these set
     DESK_ACCESS_CODE: CODE,
     DESK_SESSION_SECRET: syn('sess·ion-·secr·et-0·1234·5678·9abc·def'),
     BRIDGE_TOKEN,
