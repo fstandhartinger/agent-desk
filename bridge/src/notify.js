@@ -77,8 +77,6 @@ export function pageText(html) {
   return text.split('\n').map((l) => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
 }
 
-const cardPlain = pageText;
-
 async function readCapped(file, max) {
   const fd = await fs.open(file, 'r');
   try {
@@ -98,8 +96,9 @@ export async function cardRead({ id } = {}) {
   if (typeof id !== 'string' || !/^[1-9]\d{0,11}$/.test(id)) throw new Error('invalid card id');
   const card = JSON.parse(await readCapped(path.join(HOME, '.notify', 'cards', `${id}.json`), 65536));
   const raw = String(card.text ?? '');
-  const lines = cardPlain(raw).split('\n');
-  const footer = lines.findIndex((l) => /^a#[0-9a-f]{6}(?:\s*·\s*Karte\s+\d+)?$/i.test(l));
+  // HTML cards (card v2) lose their tags; plain cards keep every character ("<reviewed-sha>" is content there).
+  const lines = (card.parse_mode === 'HTML' ? pageText(raw) : raw.split('\n').map((l) => l.trim()).filter(Boolean).join('\n')).split('\n');
+  const footer = lines.findLastIndex((l) => /^a#[0-9a-f]{6}(?:\s*·\s*Karte\s+\d+)?$/i.test(l));
   const body = lines.filter((_, i) => i !== footer).join('\n');
   const own = /a#([0-9a-f]{6})/i.exec(footer >= 0 ? lines[footer] : '')?.[1]?.toLowerCase() ?? (typeof card.aid === 'string' ? card.aid : null);
   const linked = [...new Set([...body.matchAll(/(?<!\w)a#([0-9a-f]{6})(?!\w)/gi)].map((m) => m[1].toLowerCase()))].filter((x) => x !== own);
@@ -108,13 +107,13 @@ export async function cardRead({ id } = {}) {
   if (url && PAGE_ID.test(url[1])) {
     try {
       const page = JSON.parse(await readCapped(path.join(HOME, '.notify', 'pages', `${url[1]}.json`), MAX_PAGE_BYTES));
-      if (!(Number(page.expires) < Date.now() / 1000)) details = redact(pageText(page.html)).slice(0, DETAILS_CAP);
+      if (!(Number(page.expires) < Date.now() / 1000)) details = redact(pageText(page.html).slice(0, DETAILS_CAP));
     } catch { /* The page may be expired or never published; the card text still stands. */ }
   }
   return {
     id, ...(own ? { aid: own } : {}), source: redact(String(card.source ?? '')).slice(0, 200),
     ...(card.answered ? { answered: true } : {}), bot: card.bot === 'TG_URGENT_BOT_TOKEN' ? 'urgent' : 'main',
-    text: redact(body).slice(0, READ_CAP), ...(url ? { url: url[0] } : {}), ...(details ? { details } : {}),
+    text: redact(body.slice(0, READ_CAP)), ...(url ? { url: url[0] } : {}), ...(details ? { details } : {}),
     ...(linked.length ? { linked_ids: linked.map((x) => `a#${x}`) } : {}),
   };
 }

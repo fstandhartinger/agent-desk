@@ -45,7 +45,9 @@ export function artifactInstructions(context) {
 
 // Cards: the registry summary is a masked excerpt (its guard refuses amounts); the real card text comes from the bridge.
 export const CARD_REF = /^card:(?:urgent:)?([1-9]\d{0,11})$/;
-const CARD_TEXT_TOTAL = 4400, CARD_TEXT_EACH = 2800, CARD_EXPAND_MAX = 4;
+const CARD_TEXT_TOTAL = 4400, CARD_TEXT_EACH = 2800, CARD_EXPAND_MAX = 4, CARD_READ_MS = 4000;
+// Only the row that owns the card may expose its text: the card file must name this very artifact.
+const ownsCard = (item, card) => item?.kind === 'card' && typeof card?.aid === 'string' && card.aid.toLowerCase() === item.id;
 
 export function createArtifactService({ fetchImpl = fetch, now = Date.now, env = process.env, readExplainer = fetchExplainerJson, hub = null } = {}) {
   const screens = new Map(), screenVersions = new Map();
@@ -80,8 +82,8 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     await Promise.all(cards.map(async (item) => {
       const id = CARD_REF.exec(item.refs.find(r => CARD_REF.test(r.target)).target)[1];
       try {
-        const card = await hub.call('notify.cardRead', { id });
-        if (typeof card?.text === 'string' && card.text.trim()) {
+        const card = await hub.call('notify.cardRead', { id }, { timeoutMs: CARD_READ_MS });
+        if (ownsCard(item, card) && typeof card.text === 'string' && card.text.trim()) {
           item.summary = clip(card.text, room);
           if (card.url) item.details_url = clip(card.url, 200);
           if (card.answered) item.answered = true;
@@ -160,7 +162,8 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
       }
       if (card) {
         // Full card text, the chosen button, "↳ Agent" lines, the Details page text and the a# ids it mentions.
-        const value = await hub.call('notify.cardRead', { id: card[1] });
+        const value = await hub.call('notify.cardRead', { id: card[1] }, { timeoutMs: CARD_READ_MS });
+        if (!ownsCard(item, value)) return 'nicht lesbar';
         return clip(JSON.stringify({ card: card[1], aid: value?.aid, source: value?.source, answered: value?.answered, text: value?.text, linked_ids: value?.linked_ids, details_url: value?.url, details: value?.details }), 6000);
       }
       if (explainer) {

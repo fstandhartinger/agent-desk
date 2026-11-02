@@ -12,7 +12,7 @@ const PAGE = 'FakePageId_0123456789abcdefghijklmn';
 const PAGE2 = 'FakeOtherPage_0123456789abcdefghij';
 const card = {
   text: `✅ ERLEDIGT\n<b>Offer the fake service for EUR 0,05 per call?</b>\n▸ Fake summary line.\nWhy: Fake reason, see a#abc123 and a#ABC123.\nCatch: Fake catch.\n<a href="https://cards.app.mintapis.com/p/${PAGE}">Details ›</a> · 1 min\n✓ You chose Ja · 09:54\n↳ Agent: Fake follow-up &amp; more\n<i>a#def456 · Karte 123</i>`,
-  aid: 'def456', source: 'fake:job', answered: true,
+  aid: 'def456', source: 'fake:job', answered: true, parse_mode: 'HTML',
 };
 const dirs = async () => { await fs.mkdir(path.join(home, '.notify', 'cards'), { recursive: true }); await fs.mkdir(path.join(home, '.notify', 'pages'), { recursive: true }); };
 it('returns card text with price, chosen button, agent line, details page text and linked ids', async () => {
@@ -46,6 +46,13 @@ it('rejects traversal, oversize and non-existing ids; page ids cannot escape the
   await assert.rejects(cardRead({ id: '125' }), /too large/);
   await fs.writeFile(path.join(home, '.notify', 'cards', '126.json'), JSON.stringify({ text: 'x https://cards.app.mintapis.com/p/..%2F..%2Fcards%2F123' }));
   assert.equal((await cardRead({ id: '126' })).details, undefined);
+});
+it('plain cards keep angle brackets; HTML cards lose tags; the last footer-looking line wins', async () => {
+  await dirs();
+  await fs.writeFile(path.join(home, '.notify', 'cards', '127.json'), JSON.stringify({ text: '🤖 LÄUFT\nchecked <fake-sha> and x < 5 -> y\na#abc123\na#def456 · Karte 127', aid: 'def456' }));
+  const r = await cardRead({ id: '127' });
+  assert.match(r.text, /checked <fake-sha> and x < 5 -> y/);
+  assert.equal(r.aid, 'def456'); assert.deepEqual(r.linked_ids, ['a#abc123']); assert(!r.text.includes('Karte 127'));
 });
 it('pageText keeps visible text only', () => {
   assert.equal(pageText('<style>a{}</style><p>One</p><ul><li>Two</li></ul>'), 'One\nTwo');
