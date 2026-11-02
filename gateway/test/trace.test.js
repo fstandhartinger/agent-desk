@@ -54,7 +54,7 @@ describe('trace service', () => {
     assert.equal(reg.calls[0].auth, 'Bearer fake');
     assert.deepEqual(reg.sessions[0], {
       kind: 'voice', provider: 'openai', model: 'gpt-live', slug: 'demo', title: 'Demo', page_aid: 'a#bbbbbb', card: 'a#aaaaaa', element: 'a#cccccc',
-      entry: 'card>interactive>desk', device: 'laptop', client: { app: 'web', version: '1.2', commit: 'c0ffee1' }, screen_ids: ['a#dddddd'], gateway_commit: 'abc1234',
+      entry: { path: 'card>interactive>desk', page_aid: 'a#bbbbbb', card: 'a#aaaaaa', element: 'a#cccccc' }, device: 'laptop', client: { app: 'web', version: '1.2', commit: 'c0ffee1' }, screen_ids: ['a#dddddd'], gateway_commit: 'abc1234',
     });
     assert.deepEqual(reg.events.map((e) => e.type), ['session.start', 'session.ready', 'turn.user.start', 'transcript.user.final']);
     assert.deepEqual(reg.events.map((e) => e.seq), [1, 2, 3, 4]);

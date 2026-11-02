@@ -225,6 +225,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
 
   /** The question waits for an answer: `noAnswerMs` of silence with no running tool -> recovery. */
   function armNoAnswer(text) {
+    if (pending.settled === turnId) return; // the fragments of this turn were committed after its answer had begun
     pending.active = needsAnswer(text);
     pending.text = text;
     pending.promised = false;
@@ -272,6 +273,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     pending.overlap = false;
     if (isPromiseOnly(pending.answer)) { pending.promised = true; restartNoAnswer(); return; }
     pending.active = false;
+    pending.settled = turnId;
     clearTimeout(pending.timer);
   }
 
