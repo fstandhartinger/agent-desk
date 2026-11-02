@@ -9,6 +9,7 @@ import { loadPackForSlug, searchPack } from './pack.js';
 import { formatWebRead, webRead } from './webRead.js';
 import { proposeHandoff } from './handoff.js';
 import { claudeProposalStore, proposalEvent } from './claudeProposal.js';
+import { describeSession } from './trace.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -92,6 +93,8 @@ export const TOOL_DEFS = [
     parameters: obj({ from: str('First day YYYY-MM-DD'), to: str('Last day YYYY-MM-DD'), groupBy: str('Aggregation', { enum: ['counterparty', 'category', 'month'] }), kgOnly: { type: 'boolean', description: 'Only company (KG) expenses' } }) },
   { name: 'desk_status', description: 'LIVE state of the Agent Desk itself: which voice providers (xAI Grok, OpenAI GPT-Live, Gemini Live) work right now, their models, the text and drawing models, connected bridges. Use for every question about the desk\'s own providers, models, credit or bridge status; it beats job notes and your memory.',
     parameters: obj({}) },
+  { name: 'session_trace', description: 'Ablaufprotokoll einer Desk-Sitzung (Sprache oder Chat): Diagnose plus die letzten 40 Ereignisse (Fragen ohne Antwort, Werkzeugfehler, veraltete Ergebnisse, Anbieterfehler, Stummschaltung). Nutze es bei "Warum kam eben keine Antwort?" und ähnlichen Fragen zur Sitzung selbst.',
+    parameters: obj({ which: str('"current" (diese Sitzung, Standard), "last" (die letzte) oder eine a#-ID bzw. ein Slug') }) },
   { name: 'code_outline', description: 'Structure of a code directory: files with line counts, first doc comment and local imports. Use for architecture diagrams, e.g. /home/flori/work/agent-desk/gateway/src.',
     parameters: obj({ path: str('Absolute directory path') }, ['path']) },
   // --- 28 Oct read tools (docs/UPGRADES-1028.md §4). All READ-ONLY; handoff_propose only shows a button to Florian.
@@ -228,6 +231,7 @@ const STATUS = {
   ledger_spend: () => 'Ich hole die Zahlen aus dem Ledger …',
   code_outline: () => 'Ich schaue mir den Code an …',
   desk_status: () => 'Ich prüfe den Live-Status des Desks …',
+  session_trace: () => 'Ich schaue in den Ablauf der Sitzung …',
   explainer_context: () => 'Ich schaue ins Hintergrunddokument …',
 };
 
@@ -519,6 +523,7 @@ async function gatewayTool(name, clean, ctx, max) {
   }
   else if (name === 'screen_context') result = ctx.artifacts?.screen(ctx.sid) ?? { ids: [], items: [], highlights: [] };
   else if (name === 'desk_status') result = deskStatus(ctx.hub);
+  else if (name === 'session_trace') result = await describeSession({ which: clean.which, service: ctx.traces, current: ctx.trace });
   else if (name === 'explainer_context') result = await explainerContext(clean, ctx, max);
   else if (name === 'explainer_point') result = await explainerPoint(clean, ctx);
   else if (name === 'canvas_render') result = needCanvas(ctx).render(clean);

@@ -68,3 +68,18 @@ test('the composer is free at "done" although the stream stays open for the Live
   await run;
   assert.ok(vizSent);
 });
+
+test('the {type:"session"} SSE event shows the chat trace id on the answer without ending the stream', async () => {
+  globalThis.fetch = async () => sse([
+    { type: 'session', aid: 'a#3f9c2e' },
+    { type: 'delta', text: 'Ja.' },
+    { type: 'done', costUsd: 0.001, model: 'm' },
+  ]);
+  const seen: (string | undefined)[] = [];
+  const off = convStore.subscribe(() => seen.push(last().aid && last().status));
+  await sendChat('Läuft der Desk?');
+  off();
+  assert.equal(last().aid, 'a#3f9c2e');
+  assert.ok(seen.includes('streaming'), 'the id arrives while the answer is still streaming');
+  assert.equal(last().status, 'done');
+});

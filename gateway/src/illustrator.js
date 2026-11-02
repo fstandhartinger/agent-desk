@@ -4,7 +4,7 @@ import { knowledgeLines } from './knowledge.js';
 // takes longer than 25 s and publishes pending / ready / error on the canvas bus. canvas session = the per-conversation
 // wrapper (text chat or one voice session) that tools, auto-illustration and the refusal guard talk to.
 import { audit as defaultAudit } from './audit.js';
-import { asksForSecrets, attachDetail, connectCanvas, detailSpec, ensureSimple, isExplanatory, isMetaAnswer, normalizeCanvas, parseNumber, refusesToDraw, simpleError, slugify, wantsNoDrawing, wantsWriteAction } from './canvas.js';
+import { asksForSecrets, attachDetail, connectCanvas, detailSpec, ensureSimple, isExplanatory, isMetaAnswer, isYesNoQuestion, normalizeCanvas, parseNumber, refusesToDraw, simpleError, slugify, wantsNoDrawing, wantsWriteAction } from './canvas.js';
 import { cfg } from './config.js';
 import { deskModelFacts, MODEL_FACT_LINES } from './deskStatus.js';
 import { hostDisplay, hostMentions, KNOWN_HOSTS, modelAllowed, modelTokens } from './proseGuard.js';
@@ -1275,6 +1275,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       researchTimer = setTimeout(() => {
         researchTimer = null;
         if (toolRan || autoRan || closed || writeTurn || limitReached() || !cfg.canvasEarly()) return;
+        if (isYesNoQuestion(turnUser) && !namedId) return;
         if (!isExplanatory(turnUser, '') && toolCount < 2) return;
         startEarly(turnUser, 'research');
       }, researchMs());
@@ -1342,6 +1343,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         startEarly(ref.question ?? text, 'deictic', target, `${text}\n${turnContext}`);
         return 'deictic';
       }
+      if (!namedId && isYesNoQuestion(text)) return 'yes-no'; // a yes/no question gets its answer, not a drawing
       if (text.length < 12 || !(namedId || isExplanatory(text, ''))) return 'not-explanatory';
       if (limitReached()) return 'limit';
       if (!cfg.canvasEarly()) return 'disabled';

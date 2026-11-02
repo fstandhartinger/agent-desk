@@ -19,6 +19,8 @@ export interface Msg {
   error?: string;
   model?: string;
   costUsd?: number;
+  /** Trace id of the chat session (a#xxxxxx), sent by the gateway. */
+  aid?: string;
   /** Label of the explainer point / page the message was asked about. */
   context?: string;
   /** Transient progress line from the server ("Ich schaue kurz in die Jobs …") while nothing else streams. */
@@ -193,6 +195,8 @@ export function appendText(id: string, text: string) {
 }
 
 export const setStatusText = (id: string, statusText: string) => patch(id, (m) => ({ ...m, statusText: statusText || undefined }));
+
+export const setAid = (id: string, aid: string) => patch(id, (m) => ({ ...m, aid }));
 
 export function setText(id: string, text: string) {
   patch(id, (m) => ({ ...m, parts: [...m.parts.filter((p) => p.kind !== 'text'), { kind: 'text', text }] }));
