@@ -209,7 +209,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return {
       attached: true, frisch: fresh === true,
       ...(fresh === null ? { hinweis: 'Bild-Auswertung pausiert (Kostenlimit pro Stunde erreicht): nur IDs und die letzte Beschreibung, keine neuen Bilder.' } : {}),
-      ...(fresh === false ? { hinweis: d ? 'Kein frisches Bild in 3 s: das ist die zuletzt bekannte Beschreibung, achte auf ihr Alter.' : 'Kein Bild erhalten und noch keine Beschreibung vorhanden.' } : {}),
+      ...(fresh === false ? { hinweis: d ? 'Kein frisches Bild rechtzeitig: das ist die zuletzt bekannte Beschreibung, achte auf ihr Alter.' : 'Kein Bild erhalten und noch keine Beschreibung vorhanden.' } : {}),
       ...(d ?? { ids: snap.ids }),
     };
   }
