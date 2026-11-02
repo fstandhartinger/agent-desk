@@ -62,7 +62,7 @@ describe('early illustrator', () => {
   it('not for chit-chat, secrets, a forbidden drawing, or when the daily cost cap is reached', () => {
     const s = session();
     assert.equal(ask(s, 'Danke!'), 'not-explanatory');
-    assert.equal(ask(s, 'Läuft der Job gerade noch?'), 'not-explanatory');
+    assert.equal(ask(s, 'Läuft der Job gerade noch?'), 'yes-no');
     assert.equal(ask(s, 'Wie komme ich an die secrets.env?'), 'secret');
     assert.equal(ask(s, 'Erkläre mir bitte den Ablauf, aber ohne Bild'), 'forbidden');
     assert.equal(ask(s, 'Erkläre bitte nicht zeichnen den Ablauf'), 'forbidden');
@@ -70,6 +70,17 @@ describe('early illustrator', () => {
     assert.equal(ask(capped, 'Wie funktioniert das genau?'), 'limit');
     assert.equal(events().length, 0);
     assert.equal(calls.length, 0);
+  });
+
+  it('a plain yes/no question starts no early drawing (and no research drawing); an explanation request still does', async () => {
+    const s = session();
+    assert.equal(ask(s, 'Ist die Bridge von LeChonk gerade verbunden?'), 'yes-no');
+    s.noteTool?.({ name: 'desk_status', args: {}, ok: true, content: '{}' });
+    await wait(150);
+    assert.equal(events().length, 0, 'nothing drawn for the yes/no question');
+    assert.equal(calls.length, 0);
+    assert.equal(ask(s, 'Wie funktioniert die Bridge von LeChonk genau?'), 'early');
+    await s.idle();
   });
 
   it('only once per turn; a new turn starts fresh', async () => {

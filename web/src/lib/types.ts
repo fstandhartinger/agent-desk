@@ -18,6 +18,7 @@ export type ChatEvent =
   | HandoffEvent
   | ClaudeProposalEvent
   | { type: 'viz'; spec: VizSpec }
+  | { type: 'session'; aid: string }
   | { type: 'done'; usage?: { in: number; out: number }; costUsd?: number; model?: string }
   | { type: 'error'; message: string };
 

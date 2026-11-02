@@ -77,6 +77,7 @@ plus `"unsourced": true`, which the UI shows as a small amber "ohne Quelle" tag.
 | `canvas_draw` | `{request: string, kind?: <kind>, id?: string}` | publish `pending` at once and return immediately `{ok:true, id, status:"zeichne"}`; the **illustrator** builds the spec in the background (below) and publishes `ready` (or `error`). Preferred by voice agents (no long JSON in a voice turn). |
 | `ledger_spend` | `{from?: "YYYY-MM-DD", to?: "YYYY-MM-DD", groupBy?: "counterparty"\|"category"\|"month", kgOnly?: boolean}` | bridge `ledger.entries`: real money movements, aggregated deterministically |
 | `desk_status` | `{}` | gateway-local (no bridge): LIVE state of the desk itself from providerHealth + the bridge hub: voice providers (xAI / OpenAI / Gemini) with model and state, text / drawing models, bridges. Beats job notes. |
+| `session_trace` | `{which?: "current"\|"last"\|"a#xxxxxx"}` | gateway-local: trace of a voice / chat session from the registry (diagnosis + last 40 timeline lines; `current` flushes first and falls back to the local ring when the registry is down). Answers "warum kam eben keine Antwort?" (docs/TRACE.md) |
 | `code_outline` | `{path: string}` | bridge `code.outline`: files of a code directory with line counts, first doc comment, local imports → for architecture diagrams |
 
 Tool schemas: nested `type: object/array/number` properties are needed for canvas_render. `validate()` in tools.js must accept

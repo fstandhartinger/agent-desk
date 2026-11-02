@@ -31,6 +31,8 @@ websocket websockets webhook webhooks kb mb gb tb kib mib gib rpc tcp udp vm vms
 good bad warn warning skip skipped true false null none note tip test prod dev hot cold off on open closed blocked allowed denied
 ohne oder aber eine einer einen einem eines nach wenn dann denn also auch noch schon sonst bis seit beim vom zum zur über unter durch gegen
 mit von für aus bei wie was wer wo wird werden wurde ist sind war hat haben kann muss soll darf erst jetzt heute morgen gestern hier dort
+warum wieso weshalb wozu wann woher wohin welche welcher welches welchen wieviel wieso dazu damit davon darum deshalb sondern weil dass ob
+tab tabs seite fenster knopf menü leiste liste datei ordner
 `.split(/\s+/).filter(Boolean));
 
 const lower = (s) => String(s ?? '').toLowerCase();
@@ -174,7 +176,7 @@ export function createCorpus({ rich = '', strict = '', plain = '' } = {}) {
   const strictWords = new Set();
   const entities = new Set();
   const noteEntities = (text) => {
-    for (const t of wordsOf(text)) if (t.length >= 3 && (isCaps(t) || isCamel(t) || (hasDigit(t) && hasLetter(t)))) entities.add(lower(t));
+    for (const t of wordsOf(text)) if (t.length >= 3 && !COMMON.has(lower(t)) && (isCaps(t) || isCamel(t) || (hasDigit(t) && hasLetter(t)))) entities.add(lower(t)); // TAO / API / WARN name nothing: "Tab" is no misspelt "TAO"
     // quoted names: typographic quotes, capitalised words, or a lowercase word in ASCII quotes right after a word (Coldkey "kappa");
     // code and JSON ("state": …, type: 'transcript', x = "host") name nothing
     const src = String(text);
@@ -183,7 +185,7 @@ export function createCorpus({ rich = '', strict = '', plain = '' } = {}) {
       if (ws.length > 2) continue;
       const typo = m[0][0] !== '"' && m[0][0] !== "'";
       const prose = /[A-Za-zÄÖÜäöüß]\s$/.test(src.slice(Math.max(0, m.index - 2), m.index)) && !/^\s*[:=(]/.test(src.slice(m.index + m[0].length, m.index + m[0].length + 3));
-      for (const t of ws) if (t.length >= 3 && (typo || prose || /^[A-ZÄÖÜ]/.test(t))) entities.add(lower(t));
+      for (const t of ws) if (t.length >= 3 && !COMMON.has(lower(t)) && (typo || prose || /^[A-ZÄÖÜ]/.test(t))) entities.add(lower(t));
     }
   };
   for (const t of wordsOf(rich)) for (const p of [t, ...t.split(/[._]/)]) if (p) words.add(lower(p));

@@ -13,7 +13,8 @@ COPY gateway/package*.json ./
 RUN npm ci --omit=dev
 COPY gateway/src ./src
 COPY --from=web /web/dist ./public
-ENV NODE_ENV=production PORT=8080
+ARG SOURCE_COMMIT=
+ENV NODE_ENV=production PORT=8080 SOURCE_COMMIT=$SOURCE_COMMIT
 EXPOSE 8080
 USER node
 CMD ["node", "src/server.js"]

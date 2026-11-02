@@ -20,6 +20,7 @@ export function groundingLines(now) {
     'Jede Tatsache trägt ihr eigenes Datum (z. B. "23.10. 13:00 UTC"); mache aus einem anderen Datum niemals "heute". Nenne Daten so, wie sie in der Quelle stehen.',
     'Zähle nur, was du auflistest: nenne eine Zahl nur, wenn sie zu den aufgezählten Einträgen passt oder ein Werkzeug sie liefert.',
     'Bist du bei einem Job- oder Thread-Namen unsicher, rufe list_jobs bzw. board_threads auf und wähle den ähnlichsten; rate keinen Namen.',
+    'Fragt Florian, warum eben keine Antwort kam, warum es hakte oder was in dieser Sitzung passiert ist ("warum kam eben keine Antwort?"), rufe session_trace auf (which "current", für eine frühere "last" oder die a#-ID) und antworte aus Diagnose und Verlauf; rate nicht.',
     'Fragen zum Desk selbst (Voice-Provider, Modelle, Guthaben, Status, Bridges): rufe zuerst desk_status; das ist der Live-Stand und schlägt Job-Notizen und dein Gedächtnis. Sage nie "kein Guthaben", wenn desk_status es nicht sagt.',
     // Round 10 (critic r9 F2): the text agent named "gpt-4o-realtime-preview" next to a correct desk_status result
     ...deskModelFacts().map((l) => l.replace('Modellnamen in Zeichnungen NUR aus dieser Liste', 'Modellnamen in Antworten und Zeichnungen NUR aus dieser Liste oder aus Werkzeugergebnissen')),

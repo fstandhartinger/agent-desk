@@ -103,6 +103,7 @@ function AssistantMessage({ m, streaming, onRetry, onHandoff }: Props) {
                 <RefreshCw className="h-3.5 w-3.5" /> Neu
               </button>
             )}
+            {m.aid && <span data-testid="session-aid" className="ml-1 whitespace-nowrap font-mono text-[11px] text-mute" title="Sitzungs-ID (Trace)">a#{m.aid.replace(/^a#/, '')}</span>}
             {(m.model || m.costUsd) && (
               <span data-testid="model-badge" className="ml-1 whitespace-nowrap text-[11px] text-mute" title={m.model}>
                 {[m.model && modelLabel(m.model), m.costUsd ? fmtUsd(m.costUsd) : ''].filter(Boolean).join(' · ')}
