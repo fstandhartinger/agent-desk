@@ -137,3 +137,28 @@ it('no frame arrives: paused says so plainly, locked says locked, stop/error tel
   assert.equal(vision.snapshot('s').desc, null);
   assert.doesNotMatch(JSON.stringify(r) + sent.join(''), /geschützt/);
 });
+
+it('screen_context carries the background of each visible id (newest first) and the latest marking, ahead of the raw registry rows', async () => {
+  await vision.frame('s', record, frame({ ids: ['aaaaaa'] }));
+  await vision.frame('s', record, frame({ ids: ['aaaaaa', 'bbbbbb'] }));
+  screenRec.highlights = [{ summary: 'Pay stops ist markiert.', ids: ['bbbbbb'] }];
+  const out = await runTool('screen_context', {}, { vision, artifacts: fakeArtifacts, sid: 's' });
+  const d = data(out);
+  assert.deepEqual(d.ids.sort(), ['a#aaaaaa', 'a#bbbbbb']);
+  assert.equal(d.hintergrund[0].id, 'a#bbbbbb'); assert.equal(d.hintergrund[0].titel, 'Pay stops');
+  assert.equal(d.letzteMarkierung.beschreibung, 'Pay stops ist markiert.');
+});
+
+it('media.vision: asks for ids, returns the ones in the model answer (json or in the text), a fresh look uses the lean prompt, MINIMAL thinking is never sent', async () => {
+  const { createDeviceMedia, VISION_PROMPT, VISION_PROMPT_LEAN } = await import('../src/deviceMedia.js');
+  const bodies = [];
+  const fetchImpl = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ beschreibung: 'Seite mit a#D7C856 und Kapitel', aenderung: '', ids: ['a#e0b59c', 'zzzzzz', 'B3F477', 'a#e0b59c'] }) }] } }], usageMetadata: {} }) }; };
+  const media = createDeviceMedia({ env: { GOOGLE_API_KEY: 'fake', DESK_VISION_THINKING: 'minimal' }, fetchImpl });
+  const r = await media.vision(jpeg(), { process: 'chrome', title: 't', masked: 0 }, null);
+  assert.deepEqual(r.ids.sort(), ['b3f477', 'd7c856', 'e0b59c']);
+  assert.match(bodies[0].contents[0].parts[1].text, /ids: jede Artefakt-ID der Form a#/); assert.match(bodies[0].contents[0].parts[1].text, /kleiner, blasser Text in den Ecken/);
+  assert.equal(bodies[0].generationConfig.thinkingConfig.thinkingLevel, 'low');
+  await media.vision(jpeg(), { process: 'chrome', title: 't', masked: 0 }, null, { lean: true });
+  assert(bodies[1].contents[0].parts[1].text.startsWith(VISION_PROMPT_LEAN)); assert(!bodies[1].contents[0].parts[1].text.startsWith(VISION_PROMPT));
+  assert.doesNotMatch(VISION_PROMPT, /geschützt|geschwärzt/);
+});

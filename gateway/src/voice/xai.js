@@ -11,7 +11,7 @@ export function sessionUpdate({ instructions, tools, voice = 'eve', lang = 'de' 
     session: {
       voice,
       instructions,
-      turn_detection: { type: 'server_vad' },
+      turn_detection: { type: 'server_vad', ...(cfg.xaiSilenceMs() > 0 ? { silence_duration_ms: cfg.xaiSilenceMs() } : {}) },
       tools: toolsOf(tools).map((t) => ({ type: 'function', ...t })),
       audio: {
         input: { format: { type: 'audio/pcm', rate: 24000 }, transcription: { language_hint: lang } },
