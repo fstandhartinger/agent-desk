@@ -20,6 +20,8 @@ import LivePanel from './live/LivePanel';
 import Toasts from './ui/Toasts';
 import { useShortcuts } from './useShortcuts';
 import { canvasBus } from '../canvas/bus';
+import { canvasPendingNotifier } from '../canvas/nativeNotify';
+import { nativeHost } from '../lib/companion';
 import { logActivity } from '../lib/activity';
 
 type MobileTab = 'explainer' | 'chat' | 'live';
@@ -66,7 +68,9 @@ export default function Desk({ onLoggedOut }: { onLoggedOut: () => void }) {
   const tabRef = useRef(tab);
   tabRef.current = tab;
   useEffect(() => {
+    const notifyNative = canvasPendingNotifier(nativeHost);
     const bus = canvasBus((ev) => {
+      notifyNative(ev);
       if (ev.phase === 'ready') logActivity('system', 'Skizze auf der Canvas', ev.spec?.title ?? ev.title, 'violet');
       else if (ev.phase === 'error') logActivity('system', 'Skizze fehlgeschlagen', ev.message, 'red');
       if (ev.phase !== 'pending') return;

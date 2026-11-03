@@ -12,6 +12,7 @@ import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
 import { cardLink, cardRead } from './notify.js';
+import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
 import { startNotesMirror } from './notesMirror.js';
@@ -39,6 +40,7 @@ export const METHOD_TIMEOUT_MS = {
   'mail.search': 40_000,
   'mail.read': 40_000,
   'ops.run': 30_000,
+  'job.start': 60_000, // quota-pace (15 s) + job-start (30 s) + a card that is allowed to take 25 s
 };
 
 /**
@@ -80,6 +82,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
       'notify.cardRead': cardRead,
+      'job.start': jobStart, // voice action: starts a real job; Sandy only
     };
   }
   return {

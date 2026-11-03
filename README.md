@@ -145,3 +145,18 @@ Pairing uses separate 256-bit browser and polling nonces, a 5-minute transaction
 Native device credentials stay in Windows DPAPI. `/api/device/web-session` signs a cookie bound to the device hash; HTTP and new voice connections verify it against the registry. Device sessions cannot pair or manage devices. Revocation clears the native cache immediately through Desk's management endpoint (otherwise native cache TTL is at most sixty seconds). Existing voice sockets may finish until closed. Registry outages return 503 and preserve saved native credentials.
 
 Login-link delivery is acknowledged after the bridge writes its private durable queue, independently of the slow central notifier. Repeated requests retain a ten-minute cooldown even when an acknowledgement is lost. The notifier's `QUEUED: outbox` response is queue admission, not delivery failure. After an ambiguous notifier outcome the bridge never repeats automatically. Queue files are private (directory0700/files0600), and raw links are removed after notifier ownership; claimed sends are never replayed after a crash. This deliberately chooses no duplicate send over automatic retry of an ambiguous send.
+
+## Voice action tools (2 Nov 2026)
+
+Two voice-only tools (`voiceOnly: true` in `TOOL_DEFS`; the text chat and the provider schemas never see the flag) act without a click:
+`output_main_agent_prompt {text}` types a standalone prompt into the Claude Code input box of VS Code on Florian's laptop (the Screen
+Agent command `main-agent-prompt`, not submitted) and `start_agent_job {title, prompt, host?}` starts a real Claude Code job on Sandy or
+LeChonk (bridge method `job.start`, Sandy bridge) and announces it with a Telegram card. Both run only when Florian's OWN words in the
+session (`spoken`: the last 12 speech finals and typed Desk turns; never marker, context, screen or tool text) contain the trigger
+(`gateway/src/voiceActions.js`: Main Agent / Hauptagent / Stabschef / Chief of Staff, resp. Claude Code / Agent Job / "auf Sandy|LeChonk"),
+the call does not answer a fragment or an older question, and no new speech arrived for 2.5 s. Dedupe: the same prompt text within 60 s;
+a job with the same title or a word overlap of 0.6 within 3 minutes. `agentJob` is limited to 20 per day. The Screen Agent receives the
+prompt on its long poll as `{fresh:false, prompt:{id,text}}` (older apps ignore it) and answers on
+`POST /api/device/session/:sid/commands/:id/result {state: received|done|failed, code, landed, chars}`; with no Screen Agent (or one that
+does not answer within 6 s) the browser gets `{type:"main_agent_prompt", text}` to show with a copy button. Traces carry no text.
+

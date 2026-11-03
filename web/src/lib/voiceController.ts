@@ -1,5 +1,5 @@
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertTool } from './conversation';
+import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -89,6 +89,11 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
       upsertClaudeProposal(id, p);
       logActivity('voice', 'Claude-Auftrag vorgeschlagen', p.title, 'violet');
     },
+    onMainAgentPrompt(p) {
+      let id = open.assistant;
+      if (!id) id = open.assistant = addMessage('assistant', 'voice');
+      if (upsertMainAgentPrompt(id, p)) logActivity('voice', 'Prompt für den Main Agent nicht eingetippt', undefined, 'amber');
+    },
     onViz: noteViz,
     onNotice: (message) => toast(message, 'info', 8000),
     onUsage(seconds, cost) {
@@ -134,10 +139,10 @@ export function dismissVoiceError() {
 export const interruptVoice = () => session?.interrupt();
 export const voiceActive = () => Boolean(session) && !['idle', 'error'].includes(voiceStore.get().state);
 /** Typed text goes into the live voice session when one is running. */
-export function sendVoiceText(text: string) {
+export function sendVoiceText(text: string, suggestion = false) {
   if (!session) return false;
   closeTurn('user');
-  session.sendText(text);
+  session.sendText(text, suggestion);
   return true;
 }
 

@@ -64,7 +64,7 @@ describe('POST /api/chat', () => {
     await readSse(await chat(ask('hi')), (e) => e.some((x) => x.type === 'done'));
     const [first, second] = openrouter.seen.map((r) => r.body);
     assert.match(first.messages[0].content, /Desk-Agent/);
-    assert.equal(first.tools.length, (await import('../src/tools.js')).TOOL_DEFS.length);
+    assert.equal(first.tools.length, (await import('../src/tools.js')).TOOL_DEFS.filter((t) => !t.voiceOnly).length);
     assert.equal(first.stream, true);
     const toolMsg = second.messages.at(-1);
     assert.equal(toolMsg.role, 'tool');

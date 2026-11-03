@@ -51,13 +51,32 @@ Adjust `ExecStart` if the checkout lives elsewhere. `loginctl enable-linger $USE
 The same code runs on Sandy with `BRIDGE_HOST=sandy` and serves a different, allowlisted method set (`buildMethods` in
 `src/bridge.js`): shared read methods (`ctx.*`, `jobs.*`, `board.threads/read/search`, `chats.search/recent/read`,
 `skills.list/read`, `ledger.entries`, `code.outline`) plus `discord.list/read` (home-IP Chrome, own tab, read-only),
-`mail.search/read` (IMAP read-only, BODY.PEEK), `ops.run` (fixed read-only command map) and `board.handoff`
-(the only write; gateway calls it only after the human's click). No Claude sessions, no login-link notifier, no audit sink.
+`mail.search/read` (IMAP read-only, BODY.PEEK), `ops.run` (fixed read-only command map), `board.handoff`
+(a write; gateway calls it only after the human's click) and `job.start` (a write, voice only, see below). No Claude sessions, no login-link notifier, no audit sink.
 Install: copy `bridge/` to `~/apps/agent-desk-bridge-sandy`, `npm ci --omit=dev`, install
 `systemd/agent-desk-bridge-sandy.service` as `~/.config/systemd/user/agent-desk-bridge.service`, put the token in
 `~/.config/agent-desk/bridge.env`, then enable. Mail passwords are read from `~/.config/dev-secrets.env` by the mail child
 process only (the bridge environment never holds them). The gateway must wait >= 85 s for `discord.*`
 (`METHOD_TIMEOUT_MS`).
+
+### `job.start` (Sandy only, 2 Nov 2026)
+
+`job.start({requestId, title, prompt, spoken, host, aid, provider})` (`src/jobStart.js`) starts a real Claude Code job for a
+voice request, with no click. The gateway gates the tool on Florian's own spoken words (`gateway/src/voiceActions.js`); the
+bridge is the second lock. Strict input (uuid `requestId`, title 1-60 characters, prompt 1-20000, at most 6 spoken lines);
+`~/.local/state/desk-job-starts.jsonl` (0600) makes a `requestId` start only once and caps starts at 6 per hour and 20 per
+day across restarts (`limit`). Title, task and his words pass the bridge `redactAsync()` (known secret values, shapes,
+fragments) before `~/jobs/voice-<slug>-<YYYYMMDD>/PROMPT.md` and `CARD-DETAILS.md` are written. Then `~/bin/quota-pace
+account --kind work` picks the account and `~/bin/job-start <dir> lead --kind judgement [--account X] [--host H]` starts the
+job (environment without `BRIDGE_TOKEN` and the other `DROP_ENV` names). One `notify now --requested --document
+CARD-DETAILS.md` announces it (`NOT SENT` is retried after 10 and 30 minutes, `QUEUED` never resent, `non-English` resent
+once); `job.start` waits at most 25 s for it (`card: pending`). It never returns paths or prompt text. Tests substitute
+`BRIDGE_JOBSTART_BIN`, `BRIDGE_QUOTA_BIN`, `BRIDGE_NOTIFY_BIN`.
+
+Deploy to Sandy (not done by the feature branch): merge, copy `bridge/` to `~/apps/agent-desk-bridge-sandy`, `npm ci --omit=dev`,
+`systemctl --user restart agent-desk-bridge`; the hello `caps` then lists `job.start`. The gateway must be deployed first or
+together (it waits 70 s for the method, `METHOD_TIMEOUT_MS`). The Sandy bridge needs `~/bin/job-start`, `~/bin/quota-pace` and
+`~/bin/notify` on its PATH-independent home paths and `XDG_RUNTIME_DIR` for `systemd --user`.
 
 ## Secret redaction and the fragment hash file (critic round 3, 28 Oct 2026)
 

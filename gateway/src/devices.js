@@ -134,9 +134,10 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       return true;
     }
     const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|screen\/private|highlight|trace|frame|commands)$/.exec(path);
-    const scope = target ? 'screen' : path.split('/')[3];
+    const cmdResult = /^\/api\/device\/session\/([^/]+)\/commands\/(p[0-9a-f]{16})\/result$/.exec(path);
+    const scope = target || cmdResult ? 'screen' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
-    if (target && !validSessionId(target[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
+    if ((target || cmdResult) && !validSessionId((target ?? cmdResult)[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
     if (path === '/api/device/exists' && req.method === 'GET') {
       const ids = deviceIds(url.searchParams.get('ids') === '' ? [] : (url.searchParams.get('ids') ?? '').split(','));
       const result = ids.length ? await registry(`/v1/exists?ids=${ids.join(',')}`) : { known: [] };
@@ -161,6 +162,9 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
         if (answer.stop) sendJson(res, 409, { error: 'Keine aktive Sprach- oder Chat-Sitzung.', code: 'no-session', stop: true });
         else if (!abort.signal.aborted) sendJson(res, 200, answer);
       } catch (err) { if (!err.code) throw err; sendJson(res, err.status, { error: err.message, code: err.code, stop: true }); }
+    } else if (cmdResult && req.method === 'POST') {
+      rate(`cmdresult:${record.deviceId}`, 60);
+      sendJson(res, 200, vision.commandResult(cmdResult[1], record, cmdResult[2], await readJson(req, 2048)));
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
       vision.clear(target[1], (await readJson(req, 2048).catch(() => null))?.why);
       sendJson(res, 200, { ok: true });

@@ -9,6 +9,7 @@ import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
+import { SETTLE_MS } from '../voiceActions.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -19,6 +20,11 @@ export const FACTS_WAIT_MS = 2500;
 // Gemini researches in long loops (8 tools on one question, critic r7; 5 sequential calls = 20 s and no answer, critic r9): after 3 it must answer
 export const MAX_RESEARCH_TOOLS = { gemini: 3 };
 const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
+// Action tools wait for him to finish and are no research: they never count against the research cap
+const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job']);
+const SPOKEN_KEEP = 12;
+const ECHO_MS = 20_000;
+const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
 // Topic files of the desk knowledge are dense and ordered by importance; voice models need most of one at once.
 /** Round 11: {focusedId} from a client message (`focusedCanvasId`: string or null); {} when the client did not say. */
 const focusOf = (msg) => (Object.hasOwn(msg ?? {}, 'focusedCanvasId') ? { focusedId: typeof msg.focusedCanvasId === 'string' ? msg.focusedCanvasId.slice(0, 64) : null } : {});
@@ -94,6 +100,18 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let openResponses = new Set(); // vendor response ids that started and did not finish yet
   const responseStarted = new Map(); // vendor response id -> when it started
   const fragmentResponses = new Set(); // vendor responses that answered a fragment which then grew: their tool calls are stale
+  // Florian's own words (speech finals, typed turns): the only thing the action tools' trigger is checked against (voiceActions.js).
+  // Marker turns, context turns, tool results and screen/registry text never get in.
+  const spoken = []; // the last SPOKEN_KEEP {text, at, turn}
+  let speechAt = -Infinity; // when he last made a sound or a transcript piece arrived: speaking() = within SETTLE_MS
+  let speechOpen = false; // he started speaking and that sound has no final transcript yet
+  let heardBack = { text: '', at: -Infinity }; // what the agent said last: its own voice through his speakers must not count as his words
+  const echoOf = (text, at_) => { // most of the sentence's words were just spoken by the agent
+    if (at_ - heardBack.at > ECHO_MS) return false;
+    const said = new Set(normText(heardBack.text).split(' ')), own = normText(text).split(' ').filter(Boolean);
+    return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
+  };
+  const noteSpoken = (text, at_, turn_) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_) }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
   let lastFinal = null; // the newest user final of the current turn: a longer final that extends it replaces it (growing fragments)
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
@@ -141,8 +159,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
     trace.event(`transcript.${role}.final`, { turn: turnId, text });
-    if (role === 'assistant' && lastFinal && !isPromiseOnly(text)) lastFinal.answered = true;
-    if (role === 'user') { lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; }
+    if (role === 'assistant') {
+      heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
+      if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) spoken.at(-1).answered = true; }
+    }
+    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId); }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
     turn.text = '';
@@ -293,7 +314,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
 
   /** Gemini: a research result waits (bounded) for the early facts, so they ride along with it. */
   async function waitForFacts(name) {
-    if (!factsDue || DRAW_TOOLS.has(name) || adapter?.factsDelivered?.()) return;
+    if (!factsDue || DRAW_TOOLS.has(name) || ACTION_TOOLS.has(name) || adapter?.factsDelivered?.()) return;
     const left = factsDue - now();
     if (left <= 0) return;
     await new Promise((resolve) => { const timer = setTimeout(resolve, left); factsReady = () => { clearTimeout(timer); resolve(); }; });
@@ -321,6 +342,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     sendJson({ type: 'transcript', role: 'user', text, final: true, replace: true });
     trace.event('transcript.user.final', { turn: prev.turn, text, grown: true });
     lastFinal = { text, norm: normText(text), itemId: e.itemId ?? prev.itemId, turn: prev.turn, at: now() };
+    speechOpen = false;
+    if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, echo: echoOf(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
+    else noteSpoken(text, lastFinal.at, prev.turn);
     lastUserText = text;
     if (contentOpen) { // not committed yet: collect again from the whole sentence
       userBuf = '';
@@ -341,6 +365,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   }
 
   function onTranscript(e) {
+    if (e.role === 'user') speechAt = now();
     if (growsPrevious(e)) { if (turn.role === 'assistant') flushTranscript(); growUser(e); return; }
     if (e.role !== turn.role) flushTranscript();
     if (e.role === 'user') {
@@ -382,7 +407,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     // round 12: once the early facts went out with a tool result, Gemini may research once more, then it answers
     if (factsAt === null && adapter?.factsDelivered?.()) factsAt = researchTools;
     const cap = MAX_RESEARCH_TOOLS[provider] && factsAt !== null ? Math.min(MAX_RESEARCH_TOOLS[provider], factsAt + 1) : MAX_RESEARCH_TOOLS[provider];
-    if (cap && !DRAW_TOOLS.has(name) && (researchTools += 1) > cap) {
+    if (cap && !DRAW_TOOLS.has(name) && !ACTION_TOOLS.has(name) && (researchTools += 1) > cap) {
       audit({ action: 'voice.tool.capped', detail: `${provider}:${name}` });
       if (!closed) adapter.sendToolResult(id, requestedName, JSON.stringify({ error: `Recherche-Limit erreicht (${cap} Werkzeuge pro Frage): keine weiteren Werkzeuge. Antworte Florian jetzt auf Deutsch mit dem, was du bisher gefunden hast.` }));
       return;
@@ -401,7 +426,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     audit({ action: 'voice.tool', detail: `${provider}:${name} ${JSON.stringify(args).slice(0, 120)}` });
     let output;
     try {
-      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name) });
+      const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
+      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
       output = String(res.content ?? '').slice(0, voiceCap(name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
@@ -409,7 +435,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       for (const r of cjkRuns(res.content)) if (cjkKnown.size < 500) cjkKnown.add(r);
       const done = { ...evt, status: 'done', summary: res.summary, ms: now() - t0 };
       sendJson(done);
-      if (res.event?.type === 'handoff' || res.event?.type === 'claude_proposal') sendJson(res.event); // handoff_propose / claude_task: same confirm cards as in the text chat
+      if (res.event?.type === 'handoff' || res.event?.type === 'claude_proposal' || res.event?.type === 'main_agent_prompt') sendJson(res.event); // handoff_propose / claude_task: same confirm cards as in the text chat; main_agent_prompt: the text to copy when the Screen Agent could not type it
       viz?.noteEvent({ ...done, content: output });
     } catch (err) {
       output = JSON.stringify({ error: String(err.message ?? err).slice(0, 300) });
@@ -429,7 +455,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     await waitForFacts(name);
     if (closed) return;
-    if (myEpoch !== contentEpoch) {
+    // An action tool's answer is never swallowed: xAI can call before the transcript of the same sentence arrives (which moves the epoch), and a refusal must reach the model so it calls again or says why
+    if (myEpoch !== contentEpoch && !ACTION_TOOLS.has(name)) {
       audit({ action: 'voice.tool.stale', detail: `${provider}:${name}` });
       trace.event('tool.stale', { turn: turnId, id, name, myEpoch, epoch: contentEpoch, reachedModel: true, responseRequested: provider === 'gemini', reason: fromFragment ? 'fragment superseded' : oldChain ? 'args fit the previous question' : 'result arrived after a new question began' });
       if (provider === 'gemini') { // the model waits for every call it made: answer it, but say the result is old (dropping it made Gemini report "ich bearbeite noch deine vorherige Anfrage")
@@ -466,6 +493,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         onTranscript(e);
         break;
       case 'speech_started':
+        speechAt = now();
+        speechOpen = true;
         flushTranscript();
         beginUserTurn(false);
         dropAudio = false;
@@ -636,7 +665,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   }
 
   // Both browser WS text and authenticated context-turn use this exact user-turn path.
-  function deliverText(raw, msg = {}) {
+  function deliverText(raw, msg = {}, typedByHim = false) {
     const text = raw.slice(0, 2000).trim();
     if (!text || !adapter || closed) return false;
     if (Object.hasOwn(msg, 'focusedCanvasId')) canvas?.setFocus?.(focusOf(msg).focusedId);
@@ -651,6 +680,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     expectFacts(canvas?.userTurn(text));
     sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
     lastUserText = text;
+    if (typedByHim) { speechAt = now(); noteSpoken(text, now(), turnId); } // typed in the Desk composer: his words; a context turn is not
     armNoAnswer(text);
     trace.event('transcript.user.final', { turn: turnId, text, typed: true });
     adapter.sendText(text);
@@ -692,7 +722,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     else if (msg.type === 'page' && adapter) updatePage(msg.page);
     else if (msg.type === 'focus') canvas?.setFocus?.(focusOf(msg).focusedId); // round 11: the canvas the browser shows now
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {
-      deliverText(msg.text, msg);
+      deliverText(msg.text, msg, msg.source !== 'suggestion'); // a suggested question from a link is not his own wording
     }
     else if (msg.type === 'interrupt' && adapter) { dropAudio = true; adapter.interrupt(); trace.event('client.interrupt', { turn: turnId }); }
     else if (msg.type === 'mute') setMuted(msg.muted === true, msg.source);

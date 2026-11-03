@@ -291,7 +291,7 @@ describe('tool hallucinations', () => {
     assert.match(r.content, /knowledge_read\(topic\?\)/);
     assert.ok(r.content.length < 1500);
     assert.ok(r.summary.length <= 180);
-    assert.equal(toolSummary().split('; ').length, TOOL_DEFS.length);
+    assert.equal(toolSummary().split('; ').length, TOOL_DEFS.filter((t) => !t.voiceOnly).length);
   });
 
   it('argument aliases are mapped: file_path -> path, name/slug -> topic, query -> topic', async () => {

@@ -10,6 +10,7 @@ import { formatWebRead, webRead } from './webRead.js';
 import { proposeHandoff } from './handoff.js';
 import { claudeProposalStore, proposalEvent } from './claudeProposal.js';
 import { describeSession } from './trace.js';
+import { runVoiceAction } from './voiceActions.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -82,10 +83,16 @@ export const TOOL_DEFS = [
   { name: 'explainer_context', description: 'Look up more in the background document (deep-dive) and the narration of the explainer page the user is looking at. Use when the page context in your instructions is cut off ("gekürzt") or lacks a detail. With query: the best matching deep-dive sections and scenes (German or English words); with section: one deep-dive section by heading part or number; with sceneId: the full narration and elements of one scene; without arguments: the outline.',
     parameters: obj({ query: str('Search words, e.g. "Quelle Zahl Steuer"'), section: str('Heading part or 1-based number of a deep-dive section'), sceneId: str('Scene id from the page context') }) },
   // --- end explainer_context ---
-  { name: 'claude_task', description: 'PROPOSE a task for a real Claude Code session on the workshop (only when Florian explicitly asks to start or continue one). Starts NOTHING: it shows Florian a card "An Claude übergeben?"; only his click starts the session (or, with sessionId, sends the text to that running session).',
+  { name: 'claude_task', description: 'PROPOSE a task for a real Claude Code session on the workshop (only when Florian explicitly asks to start or continue one in the TEXT chat, or to continue an already running Desk session with sessionId). Starts NOTHING: it shows Florian a card "An Claude übergeben?"; only his click starts the session (or, with sessionId, sends the text to that running session). In a VOICE conversation "mit Claude Code" now means start_agent_job, not this tool; here only for sessionId follow-ups.',
     parameters: obj({ prompt: str('The complete task or follow-up message'), sessionId: str('Existing session to continue'), model: str('Model', { enum: ['opus', 'sonnet'] }), title: str('Optional short title, German') }, ['prompt']) },
   { name: 'claude_status', description: 'State of Claude Code sessions: without sessionId the list, with sessionId state, last 5 tool uses and last text.',
     parameters: obj({ sessionId: str('Session id') }) },
+  // --- voice actions (voiceOnly: not offered to the text chat; gated on Florian's own words, see voiceActions.js) ---
+  { name: 'output_main_agent_prompt', voiceOnly: true, description: 'TIPPT einen eigenständigen Prompt in das Claude-Code-Eingabefeld von VS Code auf Florians Laptop (der Main Agent / Hauptagent / Stabschef / Chief of Staff). Wird NICHT abgeschickt; Florian liest und sendet selbst. Nur wenn Florian "Main Agent", "Hauptagent" oder "Stabschef" gesagt hat, sonst passiert nichts. Der Text muss allein stehen: was entschieden wurde, mit den a#-IDs vom Bildschirm, in der Sprache, in der Florian gesprochen hat. NICHT für "mit Claude Code" oder Jobs auf den Servern: das ist start_agent_job. Starte sofort, ohne Rückfrage, und lies den Prompt nicht vor.',
+    parameters: obj({ text: str('Der vollständige, eigenständige Prompt (1 bis 8000 Zeichen)', { minLength: 1, maxLength: 8000 }) }, ['text']) },
+  { name: 'start_agent_job', voiceOnly: true, description: 'Startet SOFORT einen echten Claude-Code-Job auf den Servern, ohne Bestätigungsklick (Florian will das so). Nur wenn Florian "mit Claude Code" (ohne zu sagen, welche Sitzung) oder "starte einen Agent Job auf Sandy/LeChonk" gesagt hat, sonst passiert nichts. NICHT für Main Agent / Hauptagent / Stabschef: das ist output_main_agent_prompt. Florian bekommt eine Telegram-Karte. Lies den Auftrag nicht vor.',
+    parameters: obj({ title: str('Kurzer ENGLISCHER Jobtitel, höchstens 60 Zeichen, einfache Wörter, keine IDs oder Pfade', { maxLength: 60 }), prompt: str('Die vollständige, eigenständige Aufgabe in Florians Sprache, mit den a#-IDs vom Bildschirm und dem, was entschieden wurde'), host: str('auto (Standard), lechonk oder sandy. Sandy nur, wenn der Job etwas braucht, das nur Sandy hat (Telegram-Karten, Discord-Heimroute, Coolify-Steuerung, GPU-Broker-Schlüssel, Wallets); lechonk, wenn Florian es sagt; sonst auto.', { enum: ['auto', 'lechonk', 'sandy'] }) }, ['title', 'prompt']) },
+  // --- end voice actions ---
   { name: 'canvas_draw', async: true, description: 'Draw a visual on the canvas next to the conversation: flow, architecture, sequence, pie, bar, line, table, timeline, sankey or a free SVG sketch. You CAN draw - never say you cannot. Call it on your own, without asking, whenever you explain a flow, an architecture, a comparison or numbers; keep talking meanwhile. Returns at once; a drawing agent builds it in the background (it may read ledger/code/board itself). Describe precisely WHAT to draw, WHICH parts and WHICH numbers from which tools. The drawing is simple by default (at most 5 boxes) with an optional detailed version behind a Details button. Reuse the id to update the same canvas.',
     parameters: obj({ request: str('Precise description: what to draw, which parts/steps/numbers, which source'), kind: str('Preferred kind', { enum: CANVAS_KINDS }), id: str('Slug a-z0-9-; reuse to update an existing canvas') }, ['request']) },
   { name: 'canvas_render', description: 'Draw a finished CanvasSpec on the canvas at once. Use when you already hold the data (text agent). You CAN draw - never say you cannot. Needs kind, title and the fields of that kind: flow/architecture nodes+edges (+groups), sequence actors+messages, pie/bar items(label,value), line series, table columns+rows, timeline events, sankey nodes+links, custom_svg svg. Numbers must come from tools or the conversation. Add sources. Keep it SIMPLE (<= 5 nodes, one main flow, short labels, <= 6 items / 5 rows); put a fuller version of the same diagram into "detail" (same kind and ids) - the desk shows it behind a Details button.',
@@ -128,7 +135,7 @@ function READ_TOOL_DEFS() {
 /** Old tool names that still work (exact match only). */
 const NAME_ALIASES = { search_chats: 'chats_search' };
 /** Fuzzy name recovery never lands on these: a misspelt name must not propose a handoff or start/steer a Claude session. */
-const NO_FUZZY_TARGET = new Set(['handoff_propose', 'claude_task']);
+const NO_FUZZY_TARGET = new Set(['handoff_propose', 'claude_task', 'output_main_agent_prompt', 'start_agent_job']);
 
 // Recover a unique closest spelling before execution and before emitting UI events.
 // Models invent "search_chunk_placeholder" and the like: mapped to the real tool of the same intent (never to a tool with side effects).
@@ -226,6 +233,8 @@ const STATUS = {
   run_readonly: () => 'Ich prüfe den Status auf Sandy …',
   handoff_propose: () => 'Ich bereite eine Übergabe an einen Agenten vor …',
   claude_task: () => 'Ich übergebe das an Claude Code …',
+  output_main_agent_prompt: () => 'Ich tippe das ein …',
+  start_agent_job: () => 'Ich starte den Job …',
   claude_status: () => 'Ich prüfe die Claude-Sessions …',
   canvas_draw: () => 'Ich zeichne dir das auf …',
   canvas_render: () => 'Ich zeichne dir das auf …',
@@ -302,6 +311,8 @@ const TOOL_ALIASES = {
   handoff_propose: { description: 'task', text: 'task', reason: 'why' },
   explainer_point: { id: 'pointId', point: 'pointId', point_id: 'pointId' },
   claude_task: { task: 'prompt', text: 'prompt', message: 'prompt', session_id: 'sessionId' },
+  output_main_agent_prompt: { prompt: 'text', message: 'text', content: 'text' },
+  start_agent_job: { task: 'prompt', text: 'prompt', description: 'prompt', name: 'title' },
   claude_status: { session_id: 'sessionId', id: 'sessionId' },
   canvas_draw: { description: 'request', prompt: 'request', text: 'request', type: 'kind' },
 };
@@ -329,7 +340,7 @@ function argList(t) {
 }
 
 export function toolSummary() {
-  return TOOL_DEFS.map((t) => `${t.name}(${argList(t)})`).join('; ');
+  return TOOL_DEFS.filter((t) => !t.voiceOnly).map((t) => `${t.name}(${argList(t)})`).join('; ');
 }
 
 function validate(def, args) {
@@ -470,6 +481,7 @@ export async function runTool(name, args, ctx) {
     const pseudo = pseudoPathRefusal(name, args);
     if (pseudo) return pseudo;
     const clean = validate(def, args);
+    if (def.voiceOnly) return await runVoiceAction(name, clean, ctx); // gate, audit, trace and redaction live there
     const started = Date.now();
     let host = 'gateway';
     let result;

@@ -14,7 +14,7 @@ const SID_RE = /^d\d{8}-[0-9a-f]{6}$/;
 const MODELS = new Set(['opus', 'sonnet']);
 const EFFORTS = new Set(['low', 'medium', 'high']);
 const ACCOUNT_DIRS = { A: '.claude-A', C: '.claude-C' }; // B is ~/.claude: CLAUDE_CONFIG_DIR stays unset
-const DROP_ENV = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'BRIDGE_TOKEN', 'DESK_URL', 'BRIDGE_HOST', 'CLAUDE_CONFIG_DIR'];
+export const DROP_ENV = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'BRIDGE_TOKEN', 'DESK_URL', 'BRIDGE_HOST', 'CLAUDE_CONFIG_DIR'];
 
 const sessionsDir = () => process.env.DESK_SESSIONS_DIR || path.join(os.homedir(), 'desk-sessions');
 const claudeBin = () => process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
