@@ -261,6 +261,7 @@ const last = (p) => snip(String(p ?? '').split('/').filter(Boolean).at(-1) ?? ''
 const ACTIVITY = {
   screen_context: () => 'Lese den Bildschirm-Kontext',
   look_at_screen: () => 'Schaue auf den Bildschirm',
+  current_state: () => 'Hole den aktuellen Überblick',
   artifact_context: () => 'Lese den Karten-Kontext',
   artifact_resolve: ({ ids }) => `Lese Karte ${(Array.isArray(ids) ? ids : [ids]).map(aid).filter(Boolean).slice(0, 2).join(', ') || 'a#…'}${Array.isArray(ids) && ids.length > 2 ? ` und ${ids.length - 2} weitere` : ''}`,
   artifact_search: ({ q }) => `Suche Karte: ${snip(q, 40)}`,
@@ -290,7 +291,7 @@ const ACTIVITY = {
   desk_status: () => 'Prüfe den Live-Status des Desks',
   session_trace: () => 'Lese das Sitzungsprotokoll',
   code_outline: ({ path }) => `Lese die Code-Struktur ${last(path)}`.trim(),
-  web_read: ({ url }) => `Lese Webseite ${(() => { try { return new URL(url).hostname; } catch { return ''; } })()}`.trim(),
+  web_read: ({ url }) => `Lese Webseite ${(() => { try { return new URL(url).hostname; } catch { /* malformed */ return ''; } })()}`.trim(),
   discord_read: () => 'Lese Discord',
   mail_search: () => 'Suche in den Mails',
   mail_read: () => 'Lese eine Mail',
@@ -303,7 +304,7 @@ const ACTIVITY = {
 export function activityLabel(name, args = {}) {
   const label = ACTIVITY[name];
   if (!label) return snip(name, 40);
-  try { return label(args && typeof args === 'object' ? args : {}).replace(/\s+/g, ' ').trim(); } catch { return snip(name, 40); }
+  try { return label(args && typeof args === 'object' ? args : {}).replace(/\s+/g, ' ').trim(); } catch { /* malformed */ return snip(name, 40); }
 }
 
 const MAX_NESTED_ITEMS = 200;

@@ -133,7 +133,7 @@ export async function cardsRecent({ hours = 12, limit = 20 } = {}) {
   let names;
   try { names = (await fs.readdir(dir)).filter((f) => /^[1-9]\d{0,11}\.json$/.test(f)); } catch { return { hours: h, cards: [] }; }
   const stats = (await Promise.all(names.map(async (f) => {
-    try { return { id: f.slice(0, -5), mtime: (await fs.stat(path.join(dir, f))).mtimeMs }; } catch { return null; }
+    try { return { id: f.slice(0, -5), mtime: (await fs.stat(path.join(dir, f))).mtimeMs }; } catch { /* absent */ return null; }
   }))).filter((x) => x && x.mtime >= since).sort((a, b) => b.mtime - a.mtime).slice(0, n * 3);
   const cards = [];
   for (const { id, mtime } of stats) {
