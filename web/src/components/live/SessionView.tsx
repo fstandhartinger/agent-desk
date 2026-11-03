@@ -80,7 +80,7 @@ export default function SessionView({ sid, title, onBack }: { sid: string; title
         {busy && (
           <button
             type="button"
-            onClick={() => stopSession(sid).catch((e) => toast(`Stopp fehlgeschlagen: ${errorMessage(e)}`, 'error', undefined, { label: 'Erneut versuchen', run: () => void stopSession(sid).catch(() => {}) }))}
+            onClick={() => stopSession(sid).catch((e) => toast(`Stopp fehlgeschlagen: ${errorMessage(e)}`, 'error', undefined, { label: 'Erneut versuchen', run: () => void stopSession(sid).catch(() => /* ignored */ {}) }))}
             className="flex h-9 items-center gap-1.5 rounded-full border border-danger/30 bg-danger/10 px-3 text-[13px] font-medium text-red-200 transition-colors hover:bg-danger/20"
           >
             <Square className="h-3 w-3" fill="currentColor" /> Stopp

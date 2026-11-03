@@ -45,7 +45,7 @@ export async function loadExplainer(slug: string): Promise<Explainer> {
   const [timeline, points, metadata, card] = await Promise.all([
     getJSON<Timeline>(slug, 'timeline.json'),
     getJSON<Points>(slug, 'points.json').catch(() => ({ page: {}, points: {} }) as Points),
-    getJSON<{ scenes?: EndFrame[] }>(slug, 'metadata.json').catch(() => null),
+    getJSON<{ scenes?: EndFrame[] }>(slug, 'metadata.json').catch(() => /* malformed */ null),
     loadCardId(slug),
   ]);
   timeline.scenes ||= [];
@@ -54,7 +54,7 @@ export async function loadExplainer(slug: string): Promise<Explainer> {
 }
 
 export async function loadCardId(slug: string): Promise<number | undefined> {
-  const card = await getJSON<{ card_id?: unknown }>(slug, 'card.json').catch(() => null);
+  const card = await getJSON<{ card_id?: unknown }>(slug, 'card.json').catch(() => /* malformed */ null);
   return typeof card?.card_id === 'number' && Number.isSafeInteger(card.card_id) && card.card_id > 0 ? card.card_id : undefined;
 }
 

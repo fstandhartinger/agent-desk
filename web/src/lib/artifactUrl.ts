@@ -3,7 +3,7 @@ export function parseArtifactUrl(input: string) {
   const url = new URL(input, 'https://desk.local');
   const path = /^\/a\/(.+?)\/?$/.exec(url.pathname)?.[1];
   const parts = [...url.searchParams.getAll('a'), path].filter(Boolean).flatMap(value => {
-    try { return decodeURIComponent(value!).split(','); } catch { return [value!]; }
+    try { return decodeURIComponent(value!).split(','); } catch { return [value!]; /* ignored */ }
   }).filter(Boolean);
   const ids: string[] = [], invalid: string[] = [];
   for (let part of parts) {

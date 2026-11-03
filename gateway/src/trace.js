@@ -12,9 +12,13 @@ const BATCH = 100;
 const FIRST_FLUSH_MS = 3000; // session.ready (the model name) arrives within this window
 const RECENT = 200; // local ring for session_trace "current" when the registry cannot answer
 const CLIENT_CAP = 3000; // client + screen-agent events accepted per session
+const DEVICE_CAP = 20000; // the per-day device log lives all day and takes the app's retry queue too
+export const LATE_MS = 24 * 3600_000; // a retry queue may deliver events up to a day old
+const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const SOURCES = new Set(['gateway', 'client', 'screen-agent']);
 const TYPE_RE = /^[a-z][a-z0-9_.]{1,47}$/;
 const TEXT_KEYS = new Set(['text', 'question', 'transcript']);
+// a key like `bytes` names a payload only when the value is one: a number is a size (screen.frame / device.error record theirs)
 const BINARY_KEYS = /^(?:audio|pcm|image|img|png|jpe?g|base64|b64|bytes|buffer|crop|context_image|screenshot|data_url|dataurl)$/i;
 const RESULT_KEYS = /^(?:result|results|output|content|body)$/i;
 const DATA_URI = /data:[\w/+.-]{1,60};base64,/i;
@@ -40,7 +44,7 @@ export function clean(value, key = '', depth = 0) {
   if (typeof value === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(value).slice(0, 40)) {
-      if (BINARY_KEYS.test(k)) out[k] = `[ausgelassen${typeof v === 'string' ? `, ${v.length} Zeichen` : ''}]`;
+      if (BINARY_KEYS.test(k) && typeof v !== 'number') out[k] = `[ausgelassen${typeof v === 'string' ? `, ${v.length} Zeichen` : ''}]`;
       else if (RESULT_KEYS.test(k)) out[`${k}Chars`] = typeof v === 'string' ? v.length : JSON.stringify(v ?? null).length;
       else out[redact(k).slice(0, 60)] = clean(v, k, depth + 1);
     }
@@ -76,6 +80,15 @@ export function clampTs(ts, at, slackMs = 5 * 60_000) {
   return new Date(Number.isFinite(t) && Math.abs(t - at) <= slackMs ? t : at).toISOString();
 }
 
+/** A retry-queue timestamp: up to 24 h old it is kept and flagged `late`; anything else (future, older, garbage) is clamped like clampTs. */
+export function lateTs(ts, at) {
+  const t = typeof ts === 'number' ? ts : Date.parse(ts);
+  if (Number.isFinite(t) && t < at - 5 * 60_000 && t >= at - LATE_MS) return { ts: new Date(t).toISOString(), late: true };
+  return { ts: clampTs(ts, at), late: false };
+}
+/** "Geräteprotokoll 3 Nov" for the UTC day `day` (YYYY-MM-DD). */
+export const deviceLogTitle = (day) => `Geräteprotokoll ${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function createTraceService({ env = process.env, fetchImpl = fetch, now = Date.now, log = (line) => console.log(line), flushMs = 2000, firstFlushMs = FIRST_FLUSH_MS, chatIdleMs = 15 * 60_000 } = {}) {
@@ -104,7 +117,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     const set = bySid.get(sid) ?? new Set();
     set.add(trace); bySid.set(sid, set);
     const parked = waiting.get(sid);
-    if (parked) { waiting.delete(sid); if (parked.until > now()) trace.external(parked.events, 'screen-agent'); }
+    if (parked) { waiting.delete(sid); clearTimeout(parked.timer); if (parked.until > now()) trace.external(parked.events, 'screen-agent'); else deviceLog(parked.deviceId, parked.events); }
   }
   function unbind(sid, trace) {
     const set = bySid.get(sid);
@@ -125,6 +138,8 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     let started = false;
     let closed = false;
     let fellBack = false;
+    let refused = false;
+    const cap = kind === 'device' ? DEVICE_CAP : CLIENT_CAP;
     let timer = null;
     let inflight = null;
     let turnNo = 0;
@@ -182,7 +197,11 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
           }
           fails = 0;
           return true;
-        } catch { fails = Math.min(fails + 1, 5); if (buffer.length || !aid) arm(); return false; }
+        } catch (err) {
+          // the registry does not know this kind (yet): keep the local audit line, drop the events, stop asking until the next day
+          if (kind === 'device' && !aid && err?.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status)) { refused = true; buffer = []; closed = true; clearTimeout(timer); timer = null; open.delete(self); fallback(`kind-refused-${err.status}`); return true; }
+          fails = Math.min(fails + 1, 5); if (buffer.length || !aid) arm(); return false;
+        }
       })().finally(() => { inflight = null; });
       return inflight;
     }
@@ -208,7 +227,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       /** An event the browser sent over the voice socket: {ts,type,data}. */
       client(event) {
         try {
-          if (closed || !event || typeof event !== 'object' || foreign >= CLIENT_CAP) return;
+          if (closed || !event || typeof event !== 'object' || foreign >= cap) return;
           let type = String(event.type ?? '');
           if (!type.startsWith('client.')) type = `client.${type}`;
           if (!TYPE_RE.test(type)) return;
@@ -221,7 +240,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
         try {
           if (closed || !SOURCES.has(source)) return;
           for (const e of events) {
-            if (foreign >= CLIENT_CAP) break;
+            if (foreign >= cap) break;
             foreign += 1;
             push(stamp(source, e.type, e.data, e.turn, e.ts));
           }
@@ -243,6 +262,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       get aid() { return aid; },
       get started() { return started; },
       get closed() { return closed; },
+      get refused() { return refused; },
       get kind() { return kind; },
       nextTurn: () => (turnNo += 1),
       ready,
@@ -271,19 +291,51 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     return entry.trace;
   }
 
-  /** Device route: events of the Screen Agent for the voice (else chat) session of `sid`; parked for 60 s when there is none yet. */
-  function attach(sid, events) {
+  /** Events with no session: one trace of kind "device" per UTC day and device, created on the first event. */
+  const devlogs = new Map(); // "deviceId:YYYY-MM-DD" -> trace
+  function deviceLog(deviceId, events, source = 'screen-agent') {
+    try {
+      if (!deviceId || !events?.length || !SOURCES.has(source)) return false;
+      const day = iso(now()).slice(0, 10), key = `${deviceId}:${day}`;
+      for (const [k, t] of devlogs) if (!k.endsWith(`:${day}`)) { devlogs.delete(k); void t.close(); } // yesterday's log ends with the first event of today
+      let trace = devlogs.get(key);
+      if (!trace) {
+        if (devlogs.size >= 100) return false;
+        trace = openTrace({ kind: 'device' });
+        trace.event('session.start', { title: deviceLogTitle(day), client: { device: deviceId } });
+        devlogs.set(key, trace);
+      }
+      if (trace.refused || trace.closed) return false;
+      trace.external(events.map((e) => (e.late ? { ...e, data: { ...e.data, late: true } } : e)), source);
+      return true;
+    } catch { return false; /* the caller never depends on the log */ }
+  }
+
+  /** Device route: events of the Screen Agent for the voice (else chat) session of `sid`; parked for 60 s when there is none yet, then they go to the device log. */
+  function attach(sid, events, { deviceId } = {}) {
     const set = bySid.get(sid);
     const traces = set ? [...set] : [];
     const target = [...traces].reverse().find((t) => t.kind === 'voice') ?? traces.at(-1);
     if (target) { target.external(events, 'screen-agent'); return true; }
-    for (const [k, v] of waiting) if (v.until <= now()) waiting.delete(k);
-    if (!waiting.has(sid) && waiting.size >= 200) return false;
-    const parked = waiting.get(sid) ?? { events: [], until: 0 };
+    for (const [k, v] of waiting) if (v.until <= now()) expireParked(k);
+    if (!waiting.has(sid) && waiting.size >= 200) { deviceLog(deviceId, events); return false; }
+    const parked = waiting.get(sid) ?? { events: [], until: 0, deviceId };
+    const overflow = parked.events.length + events.length - 200;
+    if (overflow > 0) deviceLog(parked.deviceId ?? deviceId, [...parked.events, ...events].slice(0, overflow)); // the oldest no longer fit
     parked.events = [...parked.events, ...events].slice(-200);
     parked.until = now() + 60_000;
+    parked.deviceId ??= deviceId;
+    clearTimeout(parked.timer);
+    parked.timer = setTimeout(() => expireParked(sid), 60_500);
+    parked.timer.unref?.();
     waiting.set(sid, parked);
     return false;
+  }
+  function expireParked(sid) {
+    const parked = waiting.get(sid);
+    if (!parked) return;
+    waiting.delete(sid); clearTimeout(parked.timer);
+    deviceLog(parked.deviceId, parked.events);
   }
 
   /** SIGTERM: mark and flush every open trace (a redeploy must not lose them). */
@@ -297,7 +349,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
   const idOf = (q) => String(q).replace(/^a#/, '');
   const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.events) ? r.events : []);
   return {
-    open: openTrace, chat, attach, flushAll, bind, unbind, registry,
+    open: openTrace, chat, attach, deviceLog, flushAll, bind, unbind, registry,
     configured,
     lookup: (q) => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}`),
     remote: async (id) => {

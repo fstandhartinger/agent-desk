@@ -131,7 +131,7 @@ async function readCapped(body, headers, maxBytes) {
 
 function decode(buffer, contentType) {
   const charset = /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ?? /<meta[^>]{1,300}charset=["']?([\w-]+)/i.exec(buffer.subarray(0, 2048).toString('latin1'))?.[1] ?? 'utf-8';
-  try { return new TextDecoder(charset.toLowerCase()).decode(buffer); } catch { return new TextDecoder('utf-8').decode(buffer); }
+  try { return new TextDecoder(charset.toLowerCase()).decode(buffer); } catch { return new TextDecoder('utf-8').decode(buffer); /* ignored */ }
 }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', euro: '€', ndash: '–', mdash: '—', hellip: '…', laquo: '«', raquo: '»', bdquo: '„', ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', copy: '©', reg: '®', middot: '·', bull: '•', eacute: 'é', egrave: 'è', agrave: 'à', ccedil: 'ç' };
@@ -274,7 +274,7 @@ let htmlPool = null;
 /** Starts the page workers now (server start), so the first big page does not pay the start-up. */
 export function warmWebRead() {
   htmlPool ??= createPool({ size: 2, preload: [SELF] });
-  return htmlPool.run(SELF, 'htmlToText', ['<p>warm</p>', 'https://warm.example/'], 10_000).catch(() => {});
+  return htmlPool.run(SELF, 'htmlToText', ['<p>warm</p>', 'https://warm.example/'], 10_000).catch(() => /* ignored */ {});
 }
 
 export async function htmlToTextBudgeted(html, baseUrl, budgetMs = HTML_BUDGET_MS) {

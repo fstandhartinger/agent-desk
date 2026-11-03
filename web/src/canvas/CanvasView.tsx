@@ -287,7 +287,7 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
   const history = state.order.map((id) => state.entries[id]).filter(Boolean);
   // The ELK chunk (~1.6 MB) starts loading as soon as a diagram is being drawn, not when its spec arrives.
   useEffect(() => {
-    if (pending && (!kind || graph)) void import('./render/graph').then((m) => m.loadElk()).catch(() => {});
+    if (pending && (!kind || graph)) void import('./render/graph').then((m) => m.loadElk()).catch(() => /* ignored */ {});
   }, [pending, kind, graph]);
 
   return (

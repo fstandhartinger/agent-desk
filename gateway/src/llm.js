@@ -44,7 +44,7 @@ export async function postOpenRouter(url, headers, body, signal) {
   const first = privacyProvider(body.model);
   const response = await send(first);
   if (response.status !== 404 || !first.zdr) return response;
-  await response.body?.cancel().catch(() => {});
+  await response.body?.cancel().catch(() => /* ignored */ {});
   noZdrUntil.set(body.model, Date.now() + NO_ZDR_MS);
   console.warn(`${new Date().toISOString()} llm: no zero-data-retention endpoint for ${short(body.model, 80)}; retrying with data_collection=deny only`);
   return send({ ...PRIVACY });

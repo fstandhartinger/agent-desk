@@ -1,3 +1,4 @@
+import { setClientErrorSink } from './clientError';
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
 import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
@@ -118,12 +119,14 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
     },
   }, startMuted);
   session = s;
+  setClientErrorSink((d) => s.eventNow('error', d));
   void s.start();
 }
 
 export function stopVoice() {
   session?.stop();
   session = null;
+  setClientErrorSink(null);
   voiceStore.set((s) => ({ ...s, notice: null }));
   closeTurn('user');
   closeTurn('assistant');

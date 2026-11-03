@@ -1,3 +1,4 @@
+import { reportClientError } from './clientError';
 import { createStore } from './store';
 import { uid } from './format';
 import type { Tone, ToolEvent, VizSpec } from './types';
@@ -9,6 +10,7 @@ const MAX = 400;
 export const activityStore = createStore<Activity[]>([]);
 
 export function logActivity(source: Source, label: string, detail?: string, tone: Tone = 'neutral') {
+  if (tone === 'red') reportClientError(`${source}`, detail ? `${label}: ${detail}` : label);
   activityStore.set((a) => [...a, { id: uid('a_'), ts: Date.now(), source, label, detail, tone }].slice(-MAX));
 }
 

@@ -26,7 +26,7 @@ export async function startRecording(onAutoStop: () => void): Promise<Recording>
   const release = () => {
     clearTimeout(timer);
     stream.getTracks().forEach((t) => t.stop());
-    void ctx.close().catch(() => {});
+    void ctx.close().catch(() => /* ignored */ {});
   };
 
   return {

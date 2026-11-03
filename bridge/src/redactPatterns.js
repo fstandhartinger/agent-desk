@@ -290,7 +290,7 @@ const isWebhook = (hostPath) => {
 
 function scrubUrl(url) {
   let parsed;
-  try { parsed = new URL(url); } catch { return url; }
+  try { parsed = new URL(url); } catch { return url; /* unparsable */ }
   const rest = url.slice(parsed.origin.length).replace(URL_PLACEHOLDER, '=');
   if (isWebhook(`${parsed.host}${parsed.pathname}`) && parsed.pathname.length > 1) return `${parsed.origin}/${R}`;
   if (SECRET_PARAMS.test(rest) || (LINK_WORDS.test(rest) && LONG_PIECE.test(rest))) return `${parsed.origin}/${R}`;

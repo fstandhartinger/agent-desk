@@ -302,7 +302,7 @@ const BODY = {
 export function normalizeCanvas(input, { gate = false } = {}) {
   let spec = input;
   if (typeof spec === 'string') {
-    try { spec = JSON.parse(spec); } catch { return fail('spec is not valid JSON'); }
+    try { spec = JSON.parse(spec); } catch { return fail('spec is not valid JSON'); /* malformed */ }
   }
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return fail('spec must be a JSON object');
   try {

@@ -41,7 +41,7 @@ async function resolveFile(pathname) {
   if (relative.includes('\0')) return null;
   const target = path.join(ROOT, path.normalize(relative));
   if (target !== ROOT && !target.startsWith(ROOT + path.sep)) return null;
-  const info = await stat(target).catch(() => null);
+  const info = await stat(target).catch(() => /* absent */ null);
   if (info?.isFile()) return target;
   // Unknown paths with an extension are real 404s; extensionless ones belong to the SPA.
   return path.extname(relative) ? null : path.join(ROOT, 'index.html');

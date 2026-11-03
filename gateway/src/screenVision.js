@@ -18,6 +18,8 @@ export const COMMAND_CODES = ['typed', 'typed-unverified', 'no-window', 'no-fore
 export const COMMAND_TIMEOUTS = { received: 6000, done: 40_000, ttl: 8000, keep: 120_000 };
 const ATTACHED_MS = 45_000, CHAT_ACTIVE_MS = 10 * 60_000, COMMAND_TTL_MS = 10_000, POLL_MS = 25_000, HOUR = 3_600_000;
 const SEND_EARLY = 20, SEND_FAST_MS = 5000, SEND_SLOW_MS = 20_000; // context updates: one per 5 s, one per 20 s after 20 (OpenAI instructions only grow)
+/** A registry hiccup while merging screen ids must not fail the frame, but it leaves an event. */
+const softFail = (tr, what) => err => { tr('screen.error', { what, ...(err?.status ? { status: err.status } : {}), message: String(err?.message ?? err).slice(0, 100) }); return null; };
 const noSession = () => Object.assign(deviceError('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session', stop: true });
 const TIME = /\b\d{1,2}:\d{2}(?::\d{2})?\b/g;
 const numbers = t => new Set((String(t).replace(TIME, ' ').match(/\d+(?:[.,]\d+)*/g) ?? []));
@@ -187,7 +189,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
     tr('screen.frame', { reason, ids, masked, process: redact(proc), bytes: jpeg.length });
     audit({ action: 'screen.frame', detail: `${reason} v${frameVersion} ${jpeg.length}B masked=${masked}` });
-    if (ids.length || artifacts?.screen(sid).ids.length) noteIds(S, await artifacts?.setScreen(sid, { deviceId: key, ids, window: { process: proc, blocked: false }, frameVersion }).catch(() => null));
+    if (ids.length || artifacts?.screen(sid).ids.length) noteIds(S, await artifacts?.setScreen(sid, { deviceId: key, ids, window: { process: proc, blocked: false }, frameVersion }).catch(softFail(tr, 'setScreen')));
     const out = { ok: true, frameVersion, changed: false, vision: 'ok', ids: [] };
     const cmd = S.queue[0]; if (cmd && cmd.expires > now() && reason !== 'fresh') out.fresh = { id: cmd.id };
     const job = { sid, deviceId: key, frameVersion, proc, title, url, masked, reason, ids, jpeg, commandId: body.commandId };
@@ -211,16 +213,16 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     const { sid, frameVersion, proc, title, url, masked, ids } = job;
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
     S.busy++;
-    const prev = S.desc?.text ?? null;
+    const prev = S.desc?.text ?? null, t0 = Date.now();
     try {
-      const r = await media.vision(job.jpeg, { process: proc, title, url, masked, question: S.questions?.get(job.commandId) }, prev, { timeoutMs: cfg.visionTimeoutMs(), lean: job.reason === 'fresh' });
+      const r = await media.vision(job.jpeg, { process: proc, title, url, masked, question: S.questions?.get(job.commandId) }, prev, { timeoutMs: job.reason === 'fresh' ? cfg.visionFreshTimeoutMs() : cfg.visionTimeoutMs(), lean: job.reason === 'fresh' });
       const usd = r.usage.inputTokens / 1e6 * cfg.visionPriceIn() + r.usage.outputTokens / 1e6 * cfg.visionPriceOut();
       S.frames++; S.usd += usd; S.spend.push({ t: now(), usd }); limits.addCost(usd);
       // ids read by the vision model count only after the registry knows them (setScreen keeps just the existing ones)
       const read = deviceIds(r.ids ?? []), extra = read.filter(id => !ids.includes(id));
       let verified = [];
       if (extra.length && active(sid)) {
-        const merged = await artifacts?.setScreen(sid, { deviceId: job.deviceId, ids: [...ids, ...extra].slice(0, 20), window: { process: proc, blocked: false }, frameVersion }).catch(() => null);
+        const merged = await artifacts?.setScreen(sid, { deviceId: job.deviceId, ids: [...ids, ...extra].slice(0, 20), window: { process: proc, blocked: false }, frameVersion }).catch(softFail(tr, 'setScreen.vision-ids'));
         noteIds(S, merged);
         verified = (artifacts?.screen(sid).ids ?? []).filter(id => extra.includes(id));
       }
@@ -235,7 +237,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     } catch (err) {
       if (S.desc) S.desc.old = true;
       const cappedByDay = err.status === 429;
-      tr('screen.vision', { ok: false, error: cappedByDay ? 'tagesbudget' : err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : String(err.message ?? err).slice(0, 120), frameVersion });
+      tr('screen.vision', { ok: false, error: cappedByDay ? 'tagesbudget' : err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : String(err.message ?? err).slice(0, 120), ms: Date.now() - t0, bytes: job.jpeg.length, ...(err.upstream ? { status: err.upstream } : {}), reason: job.reason, frameVersion });
       out.vision = cappedByDay ? 'capped' : 'failed';
     } finally {
       S.busy--; settle(S, job);
@@ -247,7 +249,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function drain(sid, S) {
     const job = S.pendingFrame; S.pendingFrame = null;
     if (!job || !active(sid) || capped(S) || job.frameVersion < (S.desc?.version ?? -1)) return;
-    run(S, job, { ok: true }).catch(() => {});
+    run(S, job, { ok: true }).catch(() => {}); // run() traces its own failures
   }
 
   // --- command channel ---

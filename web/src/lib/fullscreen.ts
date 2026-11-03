@@ -50,7 +50,7 @@ export const isPortrait = (w = window.innerWidth, h = window.innerHeight) => h >
 export function lockLandscape(on: boolean) {
   try {
     const o = typeof screen !== 'undefined' ? (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }) : undefined;
-    if (on) void o?.lock?.('landscape')?.catch(() => {});
+    if (on) void o?.lock?.('landscape')?.catch(() => /* ignored */ {});
     else o?.unlock?.();
   } catch {
     /* unsupported */

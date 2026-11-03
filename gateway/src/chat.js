@@ -150,7 +150,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
       given: () => (given.n === ctx.results.length ? given.text : (given = { n: ctx.results.length, text: [givenBase, ...ctx.results].join('\n') }).text),
       proposalTitles: () => [...(ctx.turnProposals?.values() ?? [])].map((p) => p.title).filter(Boolean),
       checkAmounts: () => ctx.results.length > 0, // amounts are checked against the data the model fetched in this turn
-      bridgeHosts: () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; } },
+      bridgeHosts: () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; /* absent */ } },
     });
     const { text, raw } = await runLoop({ model, convo, ctx, send, viz, totals, signal: abort.signal, german: isGermanText(lastUser) });
     const vizArrived = new Promise((resolve) => { onViz = resolve; });

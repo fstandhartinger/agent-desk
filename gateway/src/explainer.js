@@ -99,7 +99,7 @@ async function streamAudio(req, res, slug, file) {
   res.writeHead(upstream.status, headers);
   if (req.method === 'HEAD' || !upstream.body) return res.end();
   const reader = upstream.body.getReader();
-  res.on('close', () => reader.cancel().catch(() => {}));
+  res.on('close', () => reader.cancel().catch(() => /* ignored */ {}));
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;

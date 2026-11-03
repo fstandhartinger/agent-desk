@@ -1,6 +1,7 @@
 // Registry credentials and reference reads stay in the authenticated gateway.
 import { readJson, sendJson } from './http.js';
 import { redact } from './redact.js';
+import { audit } from './audit.js';
 import { originOk } from './auth.js';
 import { fetchExplainerJson } from './explainer.js';
 
@@ -8,7 +9,7 @@ export const CONTEXT_TTL = 30 * 60_000;
 export const PRIVATE_REF = 'privater Wert aus reax-private, Zahlen nur in der Earnings-App sichtbar';
 export function artifactId(value) {
   if (typeof value !== 'string') return null;
-  try { value = decodeURIComponent(value); } catch { return null; }
+  try { value = decodeURIComponent(value); } catch { return null; /* bad escape: no id */ }
   return /^(?:a#)?([0-9a-f]{6})$/i.exec(value.trim())?.[1].toLowerCase() ?? null;
 }
 export function parseArtifactIds(value) {
@@ -65,14 +66,17 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     if (!env.ARTIFACTS_URL || !env.ARTIFACTS_DESK_TOKEN) throw fail('Artefakt-Registry ist nicht eingerichtet.', 503);
     try {
       const res = await fetchImpl(new URL(path, env.ARTIFACTS_URL), { headers: { authorization: `Bearer ${env.ARTIFACTS_DESK_TOKEN}` }, redirect: 'error', signal: AbortSignal.timeout(3000) });
-      if (!res.ok) throw new Error('upstream');
+      if (!res.ok) throw Object.assign(new Error('upstream'), { upstream: res.status });
       const raw = await boundedText(res, 1_000_000);
       const value = JSON.parse(raw);
       const result = { items: (value.items ?? []).slice(0, 20).map(cleanItem).filter(Boolean), unknown: (value.unknown ?? []).map(artifactId).filter(Boolean) };
       if (cache.size >= 500) cache.delete(cache.keys().next().value);
       cache.set(key, { value: result, expires: now() + 60_000 });
       return structuredClone(result);
-    } catch { throw fail('Artefakt-Registry ist gerade nicht erreichbar.', 502); }
+    } catch (err) {
+      audit({ action: 'artifact.registry.error', detail: `${path.split('?')[0]} ${err?.upstream ? `status=${err.upstream}` : err?.name === 'TimeoutError' ? 'timeout' : 'error'}` });
+      throw fail('Artefakt-Registry ist gerade nicht erreichbar.', 502);
+    }
   }
   /** Replace a card row's masked excerpt with the real card text, so "a#xxxxxx" opens a discussion without further tool calls. */
   async function expandCards(items) {
@@ -90,7 +94,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
           if (Array.isArray(card.linked_ids) && card.linked_ids.length) item.linked_ids = card.linked_ids.map(artifactId).filter(Boolean).map(v => `a#${v}`).slice(0, 12);
           item.has_details_page = Boolean(card.details);
         }
-      } catch { /* Bridge offline: the masked registry excerpt stays. */ }
+      } catch (err) { audit({ action: 'artifact.card.unreadable', detail: `${id} ${String(err?.message ?? err).slice(0, 80)}` }); /* the masked registry excerpt stays */ }
     }));
     return items;
   }
@@ -145,9 +149,9 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
         const res = await fetchImpl(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${sha}`, {
           headers: { accept: 'application/vnd.github.raw+json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, redirect: 'error', signal: AbortSignal.timeout(3000),
         });
-        if (!res.ok) return 'nicht lesbar';
+        if (!res.ok) { audit({ action: 'artifact.ref.unreadable', detail: `github status=${res.status}` }); return 'nicht lesbar'; }
         return clip((await boundedText(res, 1_000_000)).split('\n').slice(+lo - 1, +hi).join('\n'), 6000);
-      } catch { return 'nicht lesbar'; }
+      } catch (err) { audit({ action: 'artifact.ref.unreadable', detail: `github ${err?.name === 'TimeoutError' ? 'timeout' : 'error'}` }); return 'nicht lesbar'; }
     }
     const board = /^board:(\d+)$/.exec(target), job = /^job:([A-Za-z0-9][\w.-]*)$/.exec(target), decision = /^decisions:([\w.-]+)$/.exec(target);
     const card = CARD_REF.exec(target), explainer = /^explainer:([a-z0-9-]{3,80})#([\w.-]{1,120})$/.exec(target);
@@ -171,7 +175,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
         const point = points?.points?.[explainer[2]];
         return point ? clip(JSON.stringify(point), 6000) : 'Erklärpunkt nicht gefunden.';
       }
-    } catch { /* Missing bridge capability stays unreadable. */ }
+    } catch (err) { audit({ action: 'artifact.ref.unreadable', detail: String(err?.message ?? err).slice(0, 100) }); /* a missing bridge capability stays unreadable */ }
     return 'nicht lesbar';
   }
   function screen(sid) { sweep(); return structuredClone(screens.get(sid)?.value ?? { ids: [], items: [], highlights: [] }); }

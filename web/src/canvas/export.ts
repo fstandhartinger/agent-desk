@@ -17,7 +17,7 @@ function embeddedFont(): Promise<string> {
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return `@font-face{font-family:"Inter";src:url(data:font/woff2;base64,${btoa(bin)}) format("woff2");font-weight:100 900;}`;
     })
-    .catch(() => '');
+    .catch(() => /* ignored */ '');
   return fontCss;
 }
 

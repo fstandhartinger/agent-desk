@@ -9,7 +9,7 @@ export default function Companion() {
     const host = nativeHost();
     if (!host || new URLSearchParams(location.search).get('companion') !== '1') return;
     let live = true;
-    const session = () => { if (live) void auth.me().catch(() => {}); };
+    const session = () => { if (live) void auth.me().catch(() => /* ignored */ {}); };
     session();
     const timer = setInterval(session, 30000);
     const message = (event: MessageEvent) => {

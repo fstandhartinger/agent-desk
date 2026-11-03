@@ -16,7 +16,7 @@ export function redact(text) {
   const s = String(text);
   if (s.length <= OFFLOAD_FROM) return redactText(s);
   sync ??= createSyncRunner({ preload: [offload.patterns] });
-  try { return sync.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; }
+  try { return sync.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* ignored */ }
 }
 
 /** redact() for async callers (tool results): the work runs in the pool, the event loop stays free. */
@@ -24,14 +24,14 @@ export async function redactAsync(text) {
   const s = String(text);
   if (s.length <= OFFLOAD_FROM) return redactText(s);
   pool ??= createPool({ size: 2, preload: [offload.patterns] });
-  try { return await pool.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; }
+  try { return await pool.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* ignored */ }
 }
 
 /** Starts the workers now, so the first big tool result does not pay the start-up (~40-70 ms). */
 export function warmRedact() {
   sync ??= createSyncRunner({ preload: [offload.patterns] });
   pool ??= createPool({ size: 2, preload: [offload.patterns] });
-  return pool.run(offload.patterns, 'redactText', ['warm'], 10_000).catch(() => {});
+  return pool.run(offload.patterns, 'redactText', ['warm'], 10_000).catch(() => /* ignored */ {});
 }
 
 /** Tests: another patterns module / budget (the fail-closed path). Returns a function that restores the defaults. */
