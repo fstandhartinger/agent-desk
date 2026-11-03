@@ -148,7 +148,8 @@ test('saidExactly: the whole text, case and punctuation aside; an added or missi
   const spoken = 'Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?';
   assert.equal(saidExactly('Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?', spoken), true);
   assert.equal(saidExactly('soll ich die mail an anna example org mit dem betreff rechnung senden', spoken), true);
-  assert.equal(saidExactly('Okay. Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?', spoken), false);
+  assert.equal(saidExactly('Okay. Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?', spoken), true, 'one leading short acknowledgement is allowed');
+  assert.equal(saidExactly('Ich lese dir jetzt vor: Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?', spoken), false);
   assert.equal(saidExactly('Soll ich die Mail speichern?', spoken), false);
   assert.equal(saidExactly('', spoken), false);
   assert.equal(saidExactly('Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden? Sag einfach ja.', spoken), false);

@@ -115,6 +115,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const said = new Set(normText(heardBack.text).split(' ')), own = normText(text).split(' ').filter(Boolean);
     return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
   };
+  let speechStartSeen = false; // did this vendor ever send a speech start? If not, "early" cannot be judged and the confirm code is the only gate
   let lastSpeechStart = -Infinity; // when the sound of his latest utterance began (speech_started); a computer confirm needs it after the question
   let partialTail = ''; // the last characters of his live transcript: stop words are looked for here (computer runs)
   const noteSpoken = (text, at_, turn_, extra = {}) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_), ...extra }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
@@ -167,13 +168,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (!turn.role || !turn.text.trim()) { turn.role = null; turn.text = ''; return; }
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
-    trace.event(`transcript.${role}.final`, { turn: turnId, text });
+    trace.event(`transcript.${role}.final`, deps.computer?.quiet?.(sid, role) ? { turn: turnId, chars: text.length, computer: true } : { turn: turnId, text }); // the app's R2 text and his answer to an ask: length only
     if (role === 'assistant') {
       deps.computer?.assistantFinal(sid, text);
       heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
       if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) spoken.at(-1).answered = true; }
     }
-    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId, { started: lastSpeechStart }); partialTail = ''; deps.computer?.userFinal(sid, spoken.at(-1)); }
+    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId, { started: speechStartSeen ? lastSpeechStart : undefined }); partialTail = ''; deps.computer?.userFinal(sid, spoken.at(-1)); }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
     turn.text = '';
@@ -357,13 +358,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function growUser(e) {
     const text = e.text.trim(), prev = lastFinal;
     if (normText(text) === prev.norm) return; // the same item again
-    trace.event('turn.user.grown', { turn: prev.turn, text: prev.text, into: text });
+    const quiet = deps.computer?.quiet?.(sid, 'user');
+    trace.event('turn.user.grown', quiet ? { turn: prev.turn, chars: text.length, computer: true } : { turn: prev.turn, text: prev.text, into: text });
     sendJson({ type: 'transcript', role: 'user', text, final: true, replace: true });
-    trace.event('transcript.user.final', { turn: prev.turn, text, grown: true });
+    trace.event('transcript.user.final', quiet ? { turn: prev.turn, chars: text.length, grown: true, computer: true } : { turn: prev.turn, text, grown: true });
     lastFinal = { text, norm: normText(text), itemId: e.itemId ?? prev.itemId, turn: prev.turn, at: now() };
     speechOpen = false;
     if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, echo: echoOf(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
-    else noteSpoken(text, lastFinal.at, prev.turn, { started: lastSpeechStart });
+    else noteSpoken(text, lastFinal.at, prev.turn, { started: speechStartSeen ? lastSpeechStart : undefined });
     deps.computer?.userFinal(sid, spoken.at(-1));
     lastUserText = text;
     if (contentOpen) { // not committed yet: collect again from the whole sentence
@@ -527,6 +529,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       case 'speech_started':
         speechAt = now();
         lastSpeechStart = now();
+        speechStartSeen = true;
         speechOpen = true;
         flushTranscript();
         beginUserTurn(false);

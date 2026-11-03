@@ -23,7 +23,7 @@ test('buildArgv refuses globs, options, both/neither, paths, denied job names, b
   for (const bad of [{}, { unit: 'a.service', job: 'x' }, { unit: '*.service' }, { unit: 'job-*' }, { unit: '--all.service' }, { unit: '-u.service' }, { unit: 'a.service; id' }, { unit: '../x.service' }, { unit: 'sshd' }, { unit: 'a b.service' }, { unit: 5 }, { job: '../etc' }, { job: '-x' }, { job: 'a/b' }, { job: 'x*' }]) {
     assert.throws(() => journal.buildArgv(bad), undefined, JSON.stringify(bad));
   }
-  for (const job of ['reaxsign-keys-20261101', 'sealed-bench', 'wallet-check']) assert.throws(() => journal.buildArgv({ job }), /not allowed/, job);
+  for (const job of ['reaxsign-keys-20261101', 'sealed-bench', 'wallet-check', 'x-coldkey', 'swap-mnemonic-1']) assert.throws(() => journal.buildArgv({ job }), /not allowed/, job);
   assert.throws(() => journal.buildArgv({ unit: 'wallet-sync.service' }), /not allowed/);
   for (const lines of [0, -1, 1.5, '5']) assert.throws(() => journal.buildArgv({ unit: 'a.service', lines }), /lines/, String(lines));
 });

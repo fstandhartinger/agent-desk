@@ -12,6 +12,7 @@ const TIMEOUT_MS = 15_000;
 const UNIT = /^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,99}\.(?:service|timer)$/;
 const JOB = /^(?!.*\.\.)[A-Za-z0-9][\w.-]{0,119}$/;
 const home = () => process.env.BRIDGE_HOME || os.homedir();
+const SECRET_NAME = /coldkey|mnemonic|seed[-_ ]?phrase|private[-_]?key/i;
 const bin = () => process.env.BRIDGE_JOURNALCTL || '/usr/bin/journalctl';
 
 /** Pure argv builder (tested): {unit} or {job}, never both, never a glob. */
@@ -20,7 +21,7 @@ export function buildArgv({ unit, job, lines } = {}) {
   const name = unit !== undefined ? unit : `job-${job}.service`;
   if (unit !== undefined && (typeof unit !== 'string' || !UNIT.test(unit))) throw new Error('unit must be a plain name ending in .service or .timer');
   if (job !== undefined && (typeof job !== 'string' || !JOB.test(job))) throw new Error('invalid job name');
-  if (isDenied(name) || isDenied(job ?? '')) throw new Error('path not allowed or not found');
+  if (isDenied(name) || isDenied(job ?? '') || SECRET_NAME.test(name)) throw new Error('path not allowed or not found'); // same words as the gateway's server_read list: a job called x-coldkey is not tailed
   const n = lines === undefined ? 100 : lines;
   if (!Number.isInteger(n) || n < 1) throw new Error('lines must be a positive integer');
   return [bin(), '--user', '--no-pager', '-o', 'short-iso', '-n', String(Math.min(n, MAX_LINES)), `--unit=${name}`, '--'];

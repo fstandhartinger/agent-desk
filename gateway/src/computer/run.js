@@ -1,13 +1,14 @@
 // A computer run (item F): the gateway side of DESIGN-F. The APP owns the run, the policy and the confirm; this file owns the voice link, the loop,
 // the caps, the heartbeat and the trace. Per sid at most one run. Nothing here names a CDP method; nothing page-, window- or screenshot-shaped is traced.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { cfg } from '../config.js';
 import { redact, short } from '../redact.js';
 import { artifactData } from '../artifacts.js';
 import { deviceError } from '../deviceMedia.js';
 import { limits as defaultLimits } from '../limits.js';
 import { ABOUT } from '../voiceActions.js';
-import { askInstruction, ASK_MS, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
+import { askInstruction, ASK_MS, buildAsk, isRealSentence, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
 import { goalForTrace, openrouterComplete, runLoop, toWire } from './loop.js';
 import { serverRead } from './serverRead.js';
@@ -44,9 +45,8 @@ export function validateResult(body) {
 }
 
 const noUrls = (t) => redact(String(t ?? '')).split(/\s+/).slice(0, 200).map((tok) => (/^(?:https?:\/\/|www\.)/i.test(tok) || looksLikeHost(tok) || tok.length > 120 ? '[Link]' : tok)).join(' ').trim().slice(0, 300);
-const WHY = { done: 'erledigt', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als drei Bestätigungen nötig', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'start-failed': 'der Start schlug fehl' };
+const WHY = { done: 'erledigt', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als acht Bestätigungen nötig', 'start-denied': 'Florian hat den Start nicht bestätigt', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'start-failed': 'der Start schlug fehl' };
 const QUIET = new Set(['voice-gone']);
-const FORBIDDEN_ASK = /passwor|kennwort|\bpin\b|\btan\b|\bcode\b|schlüssel|token|geheim|secret|api[-\s]?key|\bkey\b|\botp\b|2fa|zwei[-\s]?faktor|\biban\b|kreditkarte|\bcvv\b|sicherheitsfrage/i;
 const VERB = { ui_windows: 'lese die Fenster', ui_tree: 'lese das Fenster', ui_click: 'klicke', ui_type: 'tippe', key: 'drücke eine Taste', scroll: 'scrolle', window_focus: 'wechsle das Fenster', screenshot: 'schaue auf den Bildschirm', chrome_tabs: 'lese die Tabs', chrome_open: 'öffne eine Seite', chrome_snapshot: 'lese die Seite', chrome_click: 'klicke', chrome_fill: 'fülle ein Feld aus', chrome_read: 'lese die Seite', server_read: 'lese vom Server' };
 const letters = (t, n = 40) => redact(String(t ?? '')).replace(/[^\p{L}\p{N} ]+/gu, '').replace(/\s+/g, ' ').trim().slice(0, n);
 /** Activity line from the app's result, redacted; the label text is page-controlled, so it is quoted, stripped and short. */
@@ -55,14 +55,23 @@ export const activityLine = (tool, res) => `Computer: ${VERB[tool] ?? 'arbeite'}
 const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 const day = (now) => new Date(now()).toISOString().slice(0, 10);
 
-export function createComputer({ vision, hub, limits = defaultLimits, now = Date.now, complete = openrouterComplete, read = serverRead, audit = () => {}, tickMs = 1000 } = {}) {
+const noDay = { day: '', usd: 0 };
+function loadDay(file) {
+  if (!file) return { ...noDay };
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return typeof j?.day === 'string' && Number.isFinite(j.usd) && j.usd >= 0 ? { day: j.day, usd: j.usd } : { ...noDay }; } catch { return { ...noDay }; /* no file yet or unreadable: a fresh day, the per-run cap still holds */ }
+}
+
+export function createComputer({ vision, hub, limits = defaultLimits, now = Date.now, complete = openrouterComplete, read = serverRead, audit = () => {}, tickMs = 1000, statePath = cfg.computerStatePath() } = {}) {
   const sessions = new Map(); // sid -> {client, say, trace, activity}
   const runs = new Map(); // sid -> run
   const guards = new Map(); // sid -> epoch ms until which the two action tools need the app confirm
-  let dayUsd = { day: '', usd: 0 };
+  let dayUsd = loadDay(statePath); // the daily counter survives a gateway restart
   let timer = null;
   const dayCost = () => (dayUsd.day === day(now) ? dayUsd.usd : 0);
-  const addDay = (usd) => { dayUsd = { day: day(now), usd: dayCost() + usd }; };
+  const addDay = (usd) => {
+    dayUsd = { day: day(now), usd: dayCost() + usd };
+    if (statePath) try { fs.writeFileSync(statePath, JSON.stringify(dayUsd)); } catch (err) { audit({ action: 'computer.day.save-failed', detail: String(err?.code ?? err?.message ?? err).slice(0, 80) }); }
+  };
 
   function ensureTimer() {
     if (!timer) { timer = setInterval(tick, tickMs); timer.unref?.(); }
@@ -78,6 +87,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       note: null, extTurn: null, waiters: [], abort: new AbortController(), tools: {}, model: cfg.computerModel(), signal: null,
     };
     R.signal = R.abort.signal;
+    R.sessionRef = s;
     R.complete = async (o) => { R.inflight += 1; try { return await complete(o); } finally { R.inflight -= 1; R.touch(); } }; // a model call in flight is no idle time
     const ev = (type, data) => { try { s.trace?.(type, { ...data }); } catch { /* a trace failure never stops the run */ } };
     R.ev = ev;
@@ -164,19 +174,25 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       R.actions += 1;
       ev('computer.action', { run: R.run, seq, tool: 'server_read', class: 'R0', rule: `server.${args.op}`, ok: out.ok, ms: now() - t0, chars: out.text.length, ...(out.ok ? {} : { reason: 'read-failed' }) });
       s.activity?.({ id: `computer-${R.run}-${seq}`, phase: out.ok ? 'done' : 'fail', tool: 'computer_task', label: activityLine('server_read'), ms: now() - t0 });
+      if (out.ok) { // F1: what the server returned could be sent on: the app raises its taint BEFORE the loop sees the data; if the app cannot be told, the loop does not get the data
+        const t = await vision.computerSend(sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'taint', source: 'server_read' }, { waitMs: 5000, validate: validateResult });
+        ev('computer.taint', { run: R.run, source: 'server_read', ok: t.ok, code: t.code });
+        if (!t.ok) return { ok: false, code: 'refused', class: 'R0', rule: 'taint-failed', note: 'Der Screen Agent konnte den Lesezugriff nicht vermerken; die Daten werden nicht weitergegeben.' };
+      }
       return out.ok ? { ok: true, code: 'done', class: 'R0', rule: `server.${args.op}`, result: { host: out.host, text: out.text } } : { ok: false, code: 'refused', class: 'R0', note: out.text };
     };
 
-    R.ask = async (question) => {
-      const q = redact(String(question ?? '')).replace(/\s+/g, ' ').trim().slice(0, 200);
-      if (FORBIDDEN_ASK.test(q)) { ev('computer.refused', { run: R.run, rule: 'ask-secret' }); return { ok: false, code: 'refused', rule: 'ask-secret', note: 'Fragen nach Passwörtern, Codes, PINs, TANs oder Schlüsseln sind nicht erlaubt.' }; }
+    // F7: only the fixed forms (confirm.js buildAsk); his answer is mapped to ja / nein / one of the loop's options, never passed on as words.
+    R.ask = async (args) => {
+      const a = buildAsk(args);
+      if (!a.ok) { ev('computer.refused', { run: R.run, rule: a.rule }); return { ok: false, code: 'refused', rule: a.rule, note: a.rule === 'ask-secret' ? 'Fragen nach Passwörtern, Codes, PINs, TANs, Schlüsseln oder Zahlen sind nicht erlaubt.' : 'Erlaubt sind nur form=yesno mit topic und form=choice mit 2 bis 4 options.' }; }
       if (R.questions >= MAX_QUESTIONS) return { ok: false, code: 'refused', rule: 'ask-cap', note: 'Mehr als drei Fragen pro Lauf gibt es nicht.' };
       R.questions += 1;
-      ev('computer.ask', { run: R.run, chars: q.length });
-      R.answer = defer();
+      ev('computer.ask', { run: R.run, form: a.form, chars: a.spoken.length });
+      R.answer = { ...defer(), form: a.form, options: a.options };
       const mine = R.answer;
       R.answerDue = now() + ANSWER_MS;
-      if (!s.say?.(askInstruction(`Der Computer-Agent fragt: ${q}`))) { R.answer = null; return { ok: false, code: 'unclear', note: 'Frage konnte nicht gestellt werden' }; }
+      if (!s.say?.(askInstruction(a.spoken))) { R.answer = null; return { ok: false, code: 'unclear', note: 'Frage konnte nicht gestellt werden' }; }
       const res = await mine.promise;
       if (R.answer === mine) R.answer = null;
       return res;
@@ -218,12 +234,18 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     }
     if (out.kind === 'expired') {
       R.ev('computer.confirm.expired', base);
-      if ((R.expiries += 1) >= MAX_EXPIRIES) R.end('expired');
+      if ((R.expiries += 1) >= MAX_EXPIRIES) R.end('expired'); else await sendVoid(R, P.hash);
       return { ok: false, code: 'denied', note: 'Die Bestätigung ist abgelaufen; die Aktion wurde nicht ausgeführt.' };
     }
     R.ev('computer.confirm.no', { ...base, reason: out.reason });
     if (out.kind === 'no') R.end('nein');
+    else if (out.reason !== 'run-ended') await sendVoid(R, P.hash); // the app drops its ask and the overlay code now, not after 60 s
     return { ok: false, code: 'denied', note: 'Florian hat nicht bestätigt; die Aktion wurde nicht ausgeführt. Versuche sie nicht auf einem Umweg.' };
+  }
+  /** The gateway voided the open ask (misquote, other answer, superseded, no voice): the app must not keep it (a chord press could still run it). */
+  async function sendVoid(R, hash) {
+    if (R.ended) return;
+    try { await vision.computerSend(R.sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'void', hash }, { waitMs: 3000, validate: validateResult }); R.ev('computer.void', { run: R.run, hash }); } catch (err) { R.ev('computer.void.failed', { run: R.run, message: short(String(err?.message ?? err), 80) }); }
   }
 
   // ---- hooks from the voice session (session.js keeps them small) ----
@@ -246,26 +268,56 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.touch();
     const P = R.pending;
     if (P?.state === 'asked') {
-      if (e.started !== undefined && e.started < P.askedAt) { P.deferred.resolve({ kind: 'void', reason: 'early' }); return; }
+      // D: when the vendor sends no speech start, "early" cannot be judged and is not assumed; the code is the real gate. The trace says which case held.
+      const known = typeof e.started === 'number' && Number.isFinite(e.started);
+      const early = known && e.started < P.askedAt;
+      R.ev('computer.confirm.timing', { run: R.run, hash: P.hash, gate: !known ? 'code-only' : early ? 'early' : 'after-question', lagMs: known ? e.started - P.askedAt : null });
+      if (early) { P.deferred.resolve({ kind: 'void', reason: 'early' }); return; }
       const a = parseAnswer(text);
       P.deferred.resolve(a.kind === 'digits' ? { kind: 'digits', digits: a.digits } : a.kind === 'no' ? { kind: 'no', reason: 'no' } : { kind: 'void', reason: 'other' });
       return;
     }
     if (P?.state === 'saying') return; // the question is still being spoken: his words in between answer nothing
-    if (R.answer) { const a = R.answer; R.answer = null; a.resolve({ ok: true, code: 'done', result: { antwort: short(text, 400) } }); return; }
-    if (R.paused) { R.paused = false; R.note = 'Die Hands-on-Pause ist vorbei. ALLE Referenzen sind ungültig: hole zuerst einen neuen Stand (ui_tree oder chrome_snapshot).'; R.waiters.splice(0).forEach((f) => f()); return; }
-    if (R.awaitingGo) { R.awaitingGo = false; R.stepLimit = Math.min(MAX_ACTIONS, R.actions + STEP_REPORT); R.note = 'Florian hat gesagt, dass es weitergehen soll.'; R.waiters.splice(0).forEach((f) => f()); return; }
+    if (R.answer) {
+      const a = R.answer; R.answer = null;
+      const m = mapAnswer(a.form, a.options, text);
+      a.resolve(m.kind === 'unclear' ? { ok: false, code: 'unclear', note: 'Florians Antwort war nicht eindeutig.' } : { ok: true, code: 'done', result: { antwort: m.kind === 'yes' ? 'ja' : m.kind === 'no' ? 'nein' : m.option } });
+      return;
+    }
+    if (R.paused || R.awaitingGo) { // B: only a real sentence resumes; the app is told with the `resume` op (no scope)
+      if (!isRealSentence(text)) { R.ev('computer.resume.ignored', { run: R.run, chars: text.length }); return; }
+      resume(R);
+      return;
+    }
     if (e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
   }
+  async function resume(R) {
+    if (R.resuming) return;
+    R.resuming = true;
+    try {
+      const res = await vision.computerSend(R.sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'resume' }, { waitMs: 5000, validate: validateResult });
+      R.ev('computer.resume', { run: R.run, ok: res.ok, code: res.code, after: R.paused ? 'handson' : 'step-report' });
+      if (!res.ok || R.ended) return; // the app said no: the pause stays, he can say it again
+      R.resumedAt = now();
+      if (R.paused) { R.paused = false; R.note = 'Die Hands-on-Pause ist vorbei. ALLE Referenzen sind ungültig: hole zuerst einen neuen Stand (ui_tree oder chrome_snapshot).'; }
+      else { R.awaitingGo = false; R.stepLimit = Math.min(MAX_ACTIONS, R.actions + STEP_REPORT); R.note = 'Florian hat gesagt, dass es weitergehen soll.'; }
+      R.waiters.splice(0).forEach((f) => f());
+    } finally { R.resuming = false; }
+  }
   async function extend(R, e) {
-    R.extTurn = e.turn;
-    const text = `${R.goalText} ${String(e.text)}`.slice(0, GOAL_CHARS);
-    const words = [...new Set([...R.scopeWords, ...scopeWordsOf(e.text)])].slice(0, 12);
-    const res = await vision.computerSend(R.sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', extend: true, goal: text, scopeWords: words }, { waitMs: 8000, validate: validateResult });
-    R.ev('computer.extend', { run: R.run, ok: res.ok, code: res.code, chars: String(e.text).length });
-    if (!res.ok || R.ended) return; // the app said no: the old goal and scope stay
-    R.goalText = text; R.scopeWords = words;
-    R.note = `Florian hat den Auftrag erweitert. Der gesamte Auftrag lautet jetzt (wörtlich gesprochen): ${JSON.stringify(text)}`;
+    if (R.pending || R.answer || R.extending) { R.ev('computer.extend.skipped', { run: R.run, why: R.pending ? 'ask-open' : 'busy' }); return; }
+    R.extTurn = e.turn; R.extending = true;
+    try {
+      const text = `${R.goalText} ${String(e.text)}`.slice(0, GOAL_CHARS);
+      const words = [...new Set([...R.scopeWords, ...scopeWordsOf(e.text)])].slice(0, 12);
+      const wire = { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', extend: true, goal: text, scopeWords: words };
+      let res = await vision.computerSend(R.sid, wire, { waitMs: 8000, validate: validateResult });
+      if (res.code === 'needs-confirm' && !R.ended) res = await confirmFlow(R, R.sessionRef, wire.id, res); // a widened scope needs his code or chord, like the start
+      R.ev('computer.extend', { run: R.run, ok: res.ok, code: res.code, chars: String(e.text).length });
+      if (!res.ok || R.ended) return; // the app said no: the old goal and scope stay
+      R.goalText = text; R.scopeWords = words;
+      R.note = `Florian hat den Auftrag erweitert. Der gesamte Auftrag lautet jetzt (wörtlich gesprochen): ${JSON.stringify(text)}`;
+    } finally { R.extending = false; }
   }
   /** User partials: a stop word ends the run at once, the echo filter is skipped (a false stop is safe). */
   function userPartial(sid, text) {
@@ -298,7 +350,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     const R = runs.get(sid);
     if (!R || R.run !== body.run || R.ended) return { ok: false, code: 'no-run' };
     R.appBeatAt = now();
-    if (body.state === 'handson') markHandsOn(R);
+    if (body.state === 'handson') { if (!R.resumedAt || now() - R.resumedAt > 3000) markHandsOn(R); } // a beat sent before the app took the resume must not pause the run again
     else if (body.state === 'killed') { R.ev('computer.kill', { run: R.run, via: 'app', why: body.why ?? null }); R.end('killed'); }
     else if (body.state === 'ended') { R.ev('computer.app.ended', { run: R.run, why: body.why ?? null }); R.end('app-ended'); }
     return { ok: true };
@@ -320,8 +372,10 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     runs.set(sid, R);
     R.ev('computer.run.start', { run: R.run, goal: goalForTrace(text), modelGoal: short(goalArg ?? '', 120), scope: R.scopeWords.length, model: R.model });
     audit({ action: 'computer.start', detail: `${R.run} scope=${R.scopeWords.length}` });
-    const res = await vision.computerSend(sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', goal: R.goalText, scopeWords: R.scopeWords }, { waitMs: 8000, validate: validateResult });
-    if (!res.ok) {
+    const wire = { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', goal: R.goalText, scopeWords: R.scopeWords };
+    const res = await vision.computerSend(sid, wire, { waitMs: 8000, validate: validateResult });
+    const asks = res.code === 'needs-confirm'; // a start with a non-empty scope needs his code or chord too (a speaker in a video must not open a run)
+    if (!res.ok && !asks) {
       R.ev('computer.run.stop', { run: R.run, why: 'start-failed', code: res.code, rule: res.rule, actions: 0, ms: now() - R.startedAt });
       runs.delete(sid); R.ended = true; R.why = 'start-failed';
       const why = res.code === 'refused' || res.code === 'denied' ? `der Screen Agent hat abgelehnt${res.rule ? ` (${res.rule})` : ''}` : res.code === 'unclear' ? 'keine Antwort vom Screen Agent' : 'der Screen Agent ist nicht erreichbar';
@@ -329,7 +383,13 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     }
     R.appBeatAt = now(); R.nextBeat = now() + BEAT_MS; R.lastActivity = now();
     ensureTimer();
-    runLoop(R).then(() => { if (!R.ended) R.end('model-no-action'); }, (err) => { R.ev('computer.loop.error', { run: R.run, message: short(String(err?.message ?? err), 120) }); R.end('model-error'); });
+    const go = () => runLoop(R).then(() => { if (!R.ended) R.end('model-no-action'); }, (err) => { R.ev('computer.loop.error', { run: R.run, message: short(String(err?.message ?? err), 120) }); R.end('model-error'); });
+    if (asks) {
+      // The question is read by the Desk itself in a moment (not inside this tool call); the loop starts only with his go.
+      confirmFlow(R, s, wire.id, res).then((ans) => { if (R.ended) return; if (!ans.ok) R.end('start-denied'); else go(); }, (err) => { R.ev('computer.loop.error', { run: R.run, message: short(String(err?.message ?? err), 120) }); R.end('model-error'); });
+      return { ok: true, text: 'Die Computer-Steuerung wartet auf Florians Bestätigung mit einem Code. Der Desk stellt die Frage gleich selbst; sag jetzt nichts weiter.' };
+    }
+    go();
     return { ok: true, text: 'Die Computer-Steuerung läuft. Auf dem Bildschirm steht ein lila Rahmen; Strg+Win+Umschalt+X stoppt sofort. Sag nur einen kurzen Satz, zum Beispiel dass du anfängst; die Rückmeldung kommt, wenn der Lauf fertig ist.' };
   }
 
@@ -344,5 +404,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     };
   }
 
-  return { attach, begin, beat, guarded, assistantFinal, userFinal, userPartial, tick, validateResult, ready: (sid) => Boolean(vision.computerReady?.(sid)), isOpen: (sid) => runs.has(sid), runOf: (sid) => runs.get(sid) ?? null, _runs: runs, _guards: guards, _sessions: sessions };
+  /** The session asks before it writes a transcript turn to the DURABLE trace: the app's R2 text (recipient, subject, form words, typed text) while it is being said, and
+   *  his answers to an ask (the code, or the answer to ask_florian) are traced as their length only. */
+  const quiet = (sid, role) => { const R = hooks(sid); return Boolean(R && (role === 'assistant' ? R.pending?.state === 'saying' : (R.pending?.state === 'asked' || R.answer))); };
+  return { attach, begin, beat, guarded, quiet, assistantFinal, userFinal, userPartial, tick, validateResult, ready: (sid) => Boolean(vision.computerReady?.(sid)), isOpen: (sid) => runs.has(sid), runOf: (sid) => runs.get(sid) ?? null, _runs: runs, _guards: guards, _sessions: sessions };
 }

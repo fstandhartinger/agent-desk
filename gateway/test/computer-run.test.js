@@ -246,10 +246,10 @@ test('confirm: an ask expires after 60 s; two expiries stop the run', async () =
   assert.equal(stopReason(h), 'expired');
 });
 
-test('confirm: at most 3 asks per run, the 4th stops it', async () => {
-  const h = setup({ script: Array.from({ length: 6 }, (_, i) => call('chrome_click', { ref: `e${i}` })), app: (w) => (w.op === 'action' ? R2(`bb${w.seq}`.padEnd(16, '0')) : { ok: true, code: 'done' }) });
+test('confirm: at most 8 asks per run, the 9th stops it', async () => {
+  const h = setup({ script: Array.from({ length: 12 }, (_, i) => call('chrome_click', { ref: `e${i}` })), app: (w) => (w.op === 'action' ? R2(`bb${w.seq}`.padEnd(16, '0')) : { ok: true, code: 'done' }) });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     await until(() => h.session.said.filter((t) => /WÖRTLICH/.test(t)).length > i);
     h.computer.assistantFinal('s1', SPOKEN);
     h.clock.t += 1000;
@@ -258,7 +258,7 @@ test('confirm: at most 3 asks per run, the 4th stops it', async () => {
   }
   await until(() => ended(h));
   assert.equal(stopReason(h), 'asks-cap');
-  assert.equal(h.session.events.filter((e) => e.type === 'computer.confirm.ask').length, 3);
+  assert.equal(h.session.events.filter((e) => e.type === 'computer.confirm.ask').length, 8);
 });
 
 test('confirm: a new proposal voids the pending one; the physical hotkey (late result) is accepted once', async () => {
@@ -275,18 +275,19 @@ test('confirm: a new proposal voids the pending one; the physical hotkey (late r
 
 test('ask_florian: secrets are refused, the answer is data, and it can never satisfy an R2', async () => {
   const h = setup({
-    script: [call('ask_florian', { question: 'Sag mir kurz den Code aus der SMS.' }), call('ask_florian', { question: 'Welche Mail meinst du?' }), call('chrome_click', { ref: 'e5' }), call('done', { summary: 'x' })],
+    script: [call('ask_florian', { form: 'yesno', topic: 'den Code aus der SMS eintippen' }), call('ask_florian', { form: 'choice', topic: 'Welche Mail meinst du', options: ['Die von Anna', 'Die von Bernd'] }), call('chrome_click', { ref: 'e5' }), call('done', { summary: 'x' })],
     app: (w) => (w.op === 'action' ? R2() : { ok: true, code: 'done' }),
   });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   await until(() => h.session.said.some((t) => /Computer-Agent fragt/.test(t)));
-  assert.match(h.session.said.find((t) => /Computer-Agent fragt/.test(t)), /Welche Mail meinst du\?/);
+  assert.match(h.session.said.find((t) => /Computer-Agent fragt/.test(t)), /Welche Mail meinst du\. Welche Option\? A: Die von Anna\. B: Die von Bernd\./);
   assert.match(h.model.calls[1].messages.find((m) => m.role === 'tool').content, /ask-secret/, 'the code question was refused');
   say(h, 'Die von Anna, ja vier sieben'); // his answer goes to the loop as data
   await asked(h);
   await until(() => h.model.calls.length >= 3);
   assert.equal(h.vision.ofOp('confirm').length, 0, 'an answer to ask_florian never reaches the app as a confirm');
-  assert.match(JSON.stringify(h.model.calls[2].messages), /antwort/);
+  assert.match(JSON.stringify(h.model.calls[2].messages), /"antwort\\":\\"Die von Anna\\"/);
+  assert.ok(!/sieben|vier/.test(JSON.stringify(h.model.calls[2].messages)), 'his words and digits never reach the loop, only the option');
   h.computer.assistantFinal('s1', SPOKEN);
   h.clock.t += 1000;
   say(h, 'Ja vier sieben');
@@ -459,7 +460,7 @@ test('the start: no capable app, the wrong client, a refusing app and a silent a
 test('trace: intent before the action, typed text as length only; no screenshot, tree, page text, typed text or answer text in ANY event', async () => {
   const SECRET_TYPED = 'GEHEIMER-TEXT-12345', TREE = 'BAUM-INHALT-QWERTZ', PAGE = 'SEITENTEXT-ASDF', SHOT = 'U0hPVFNFTlRJTkVM', ANSWER = 'ANTWORTTEXT-YXCV';
   const h = setup({
-    script: [call('screenshot'), call('ui_tree'), call('chrome_read', { tab: 'AB12CD34' }), call('ui_type', { ref: 'e1', text: SECRET_TYPED }), call('ask_florian', { question: 'Welche Datei?' }), call('server_read', { op: 'load' }), call('done', { summary: 'fertig' })],
+    script: [call('screenshot'), call('ui_tree'), call('chrome_read', { tab: 'AB12CD34' }), call('ui_type', { ref: 'e1', text: SECRET_TYPED }), call('ask_florian', { form: 'choice', topic: 'Welche Datei', options: ['Bericht', 'Rechnung'] }), call('server_read', { op: 'load' }), call('done', { summary: 'fertig' })],
     app: (w) => {
       if (w.op !== 'action') return { ok: true, code: 'done' };
       if (w.tool === 'screenshot') return ok({ result: { jpeg: SHOT, w: 100, h: 50 } });

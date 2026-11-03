@@ -3,18 +3,30 @@
 import { ABOUT } from '../voiceActions.js';
 
 export const TRIGGER_AGE_MS = 90_000;
-// Openers anywhere in the sentence ("Übernimm mal den Computer"), imperatives only at the START of a clause.
-const OPENER = /(?<![\p{L}\p{N}_])(?:übernimm|steuere|fernsteuer\p{L}*|computer[\s-]?use|am\s+rechner|für\s+mich\s+(?:zu\s+)?klick\p{L}*)/iu; // \b is ASCII-only: ü would never match after it
-const IMPERATIVE = /^(?:klick(?:e)?|öffne|tippe|geh(?:e)?\s+auf)\b/i;
+// Openers anywhere in the sentence ("Übernimm mal den Computer"), imperatives only at the START of a clause. Every opener has a RIGHT boundary
+// ("Er übernimmt die Kosten", "Übernimmst du das?", "Fernsteuerung" are no commands); \b is ASCII-only, so the boundary is spelled with \p{L}.
+const END = '(?![\\p{L}\\p{N}_])';
+const OPENER = new RegExp(`(?<![\\p{L}\\p{N}_])(?:übernimm|steuere|fernsteuer(?:e|n)?|computer[\\s-]?use|für\\s+mich\\s+(?:zu\\s+)?klick(?:en|e)?)${END}`, 'iu');
+// "Mach das am Rechner" is an order; "Ich sitze am Rechner" is a report.
+const AT_DESK = new RegExp(`(?<![\\p{L}\\p{N}_])(?:mach|erledige|arbeite|bedien|steuer)\\p{L}*[^.!?;\\n]{0,40}(?<![\\p{L}\\p{N}_])am\\s+rechner${END}`, 'iu');
+const AT_DESK_START = new RegExp(`^\\s*(?:bitte\\s+)?am\\s+rechner${END}`, 'iu'); // "Am Rechner bitte den Dialog schließen."
+const IMPERATIVE = /^(?:klick(?:e)?|öffne|tippe|geh(?:e)?\s+auf)(?![\p{L}\p{N}_])/iu;
 const LEAD = /^(?:(?:und|dann|danach|bitte|mal|jetzt|noch|also|okay|ok|hey|so|na|aber|gut|nun)\b[\s,]*)+/i;
 // "geh auf die Frage ein" answers a point, it clicks nothing
 const GO_INTO = /^geh(?:e)?\s+auf\b(?:(?!\bein\b).){0,40}\bein\b/i;
+// Anything that turns the sentence into something else than an order: a negation ("öffne die Mail nicht"), a doubt or report ("ich glaube, öffne gmail wäre falsch",
+// "er sagt: öffne ..."), a wish or description ("ich möchte, dass der Agent ... fernsteuern kann"). A hit anywhere closes the whole sentence; he says it again plainly.
+const NEGATION = /(?<![\p{L}\p{N}_])(?:nicht|nichts|kein(?:e|en|em|er|es)?|nie|niemals|ohne|don'?t|never|not)(?![\p{L}\p{N}_])/iu;
+const DOUBT = /(?<![\p{L}\p{N}_])(?:glaub\p{L}*|denk\p{L}*|vielleicht|wäre|wären|würde|würdest|würden|könnte|könntest|sollte|sollten|soll|sollen|falls|wenn|ob|angenommen|beispiel|hypothetisch|sagt|sagte|sagen|meinte|meint|behauptet|fragt|möchte|möchten|will|wollen|dass|damit|idealerweise|feature|funktion|idee)(?![\p{L}\p{N}_])/iu;
+const POLITE = /^\s*(?:und\s+)?(?:kannst|könntest|würdest)\s+du(?![\p{L}\p{N}_])/iu;
+const QUESTION_START = /^\s*(?:und\s+)?(?:kannst|könntest|darfst|sollst|willst|möchtest|würdest|hast|bist|ist|sind|kann|wird|kommst)(?![\p{L}\p{N}_])/iu;
 
 export function isTrigger(text) {
   const t = String(text ?? '');
-  if (ABOUT.test(t)) return false;
-  if (OPENER.test(t)) return true;
-  return t.split(/[.!?;,\n]+/).some((clause) => {
+  if (ABOUT.test(t) || NEGATION.test(t) || DOUBT.test(t)) return false;
+  if ((t.includes('?') || QUESTION_START.test(t)) && !(POLITE.test(t) && OPENER.test(t))) return false; // a question opens nothing, except the polite order "Kannst du das für mich klicken?" with an opener
+  if (OPENER.test(t) || AT_DESK.test(t) || AT_DESK_START.test(t)) return true;
+  return t.split(/[.!;,\n]+/).some((clause) => {
     const c = clause.trim().replace(LEAD, '');
     return IMPERATIVE.test(c) && !GO_INTO.test(c);
   });

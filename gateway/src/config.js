@@ -1,5 +1,8 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 // Environment access. Read lazily so tests can set process.env before starting a server.
 const env = (name, fallback = '') => process.env[name] ?? fallback;
+const capUsd = (name, fallback) => { const raw = env(name, '').trim(); if (!raw) return fallback; const n = Number(raw); return Number.isFinite(n) && n >= 0 ? n : fallback; };
 
 export const cfg = {
   port: () => Number(env('PORT', '8080')),
@@ -35,8 +38,10 @@ export const cfg = {
   // computer-use loop (item F): exact allowlist, only anthropic ids without a route suffix; DESK_COMPUTER_MODEL cannot leave it
   computerModels: () => { const ok = env('DESK_COMPUTER_MODELS', 'anthropic/claude-sonnet-5.5').split(',').map((m) => m.trim()).filter((m) => /^anthropic\/[a-z0-9][a-z0-9.-]*$/.test(m)); return ok.length ? ok : ['anthropic/claude-sonnet-5.5']; },
   computerModel: () => { const list = cfg.computerModels(), m = env('DESK_COMPUTER_MODEL').trim(); return list.includes(m) ? m : list[0]; },
-  computerRunUsd: () => Number(env('DESK_COMPUTER_RUN_USD', '1.5')),
-  computerDayUsd: () => Number(env('DESK_COMPUTER_DAY_USD', '5')),
+  // caps: a value that is not a finite number >= 0 (NaN, text, negative) falls back to the default; it never disables the cap
+  computerRunUsd: () => capUsd('DESK_COMPUTER_RUN_USD', 1.5),
+  computerDayUsd: () => capUsd('DESK_COMPUTER_DAY_USD', 5),
+  computerStatePath: () => env('DESK_COMPUTER_STATE', process.env.NODE_ENV === 'production' ? join(tmpdir(), 'agent-desk-computer-day.json') : ''), // the daily spend survives a gateway restart (not a new container without a volume)
   dailyCapUsd: () => Number(env('DESK_DAILY_USD_CAP', '15')),
   vizGraceMs: () => Number(env('DESK_VIZ_GRACE_MS', '3500')),
   openrouterKey: () => env('OPENROUTER_API_KEY'),

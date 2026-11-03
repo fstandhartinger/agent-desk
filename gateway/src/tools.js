@@ -543,6 +543,10 @@ export async function runTool(name, args, ctx) {
     if (pseudo) return pseudo;
     const clean = validate(def, args);
     if (name === 'computer_task') return await computerTask(clean, ctx); // trigger, run and trace live in computer/
+    if (name === 'web_read' && ctx.computer?.guarded?.(ctx.sid ?? 'desk')) { // a page the voice model reads right after a run could carry what the run saw; closed for the run and 5 minutes after, like the two action tools
+      const msg = 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach ist web_read gesperrt. Sag Florian in einem Satz, dass er es danach noch einmal sagen kann.';
+      return { ok: false, summary: short(msg, 200), content: msg };
+    }
     if (def.voiceOnly) return await runVoiceAction(name, clean, ctx); // gate, audit, trace and redaction live there
     const started = Date.now();
     let host = 'gateway';

@@ -33,7 +33,10 @@ export const LOOP_TOOLS = [
     op: str('Operation', { enum: SERVER_OPS }), name: str('Jobname'), file: str('STATE oder RESULT', { enum: ['STATE', 'RESULT'] }), thread: str('Board-Thread'), query: str('Suchtext'), unit: str('Dienst, z. B. name.service'), job: str('Jobname für das Journal'),
     host: str('sandy oder lechonk', { enum: ['sandy', 'lechonk'] }), filter: str('Filter für list_jobs'), activeOnly: { type: 'boolean' }, limit: { type: 'integer' }, lines: { type: 'integer' }, hours: { type: 'integer' },
   }, ['op']),
-  tool('ask_florian', 'Eine kurze Frage an Florian, nur wenn der Auftrag sonst unklar bleibt. Nie nach Passwörtern, Codes, PINs, TANs oder Schlüsseln fragen.', { question: str('Frage, höchstens 200 Zeichen', { maxLength: 200 }) }, ['question']),
+  tool('ask_florian', 'Eine feste Rückfrage an Florian, nur wenn der Auftrag sonst unklar bleibt. Zwei Formen: form=yesno mit topic (die genannte Sache, z. B. "das Fenster Rechner schließen") oder form=choice mit 2 bis 4 options, die du selbst nennst. Du bekommst nur ja, nein oder eine deiner Optionen zurück. Nie nach Passwörtern, Codes, PINs, TANs, Schlüsseln oder Zahlen fragen.', {
+    form: str('yesno oder choice', { enum: ['yesno', 'choice'] }), topic: str('Bei yesno: die Sache, nach der du fragst, höchstens 80 Zeichen', { maxLength: 80 }),
+    options: { type: 'array', description: 'Bei choice: 2 bis 4 kurze Optionen', items: { type: 'string', maxLength: 40 }, minItems: 2, maxItems: 4 },
+  }, ['form']),
   tool('done', 'Lauf beenden: erledigt oder nicht machbar.', { summary: str('Ergebnis in höchstens 300 Zeichen, ohne Links', { maxLength: 300 }) }, ['summary']),
 ];
 export const LOOP_TOOL_NAMES = LOOP_TOOLS.map((t) => t.name);
@@ -66,6 +69,7 @@ export function checkArgs(name, raw) {
     if (type === 'string' && typeof v !== 'string') return bad(`${k} muss Text sein`);
     if (type === 'integer' && !Number.isSafeInteger(v)) return bad(`${k} muss eine ganze Zahl sein`);
     if (type === 'boolean' && typeof v !== 'boolean') return bad(`${k} muss wahr oder falsch sein`);
+    if (type === 'array' && !(Array.isArray(v) && v.length <= (known[k].maxItems ?? 10) && v.every((x) => typeof x === 'string' && x.length <= (known[k].items?.maxLength ?? 100)))) return bad(`${k} muss eine kurze Liste von Texten sein`);
     if (known[k].enum && !known[k].enum.includes(v)) return bad(`${k}: ungültiger Wert`);
     if (type === 'string' && known[k].maxLength && v.length > known[k].maxLength) return bad(`${k}: höchstens ${known[k].maxLength} Zeichen`);
   }
@@ -122,6 +126,9 @@ function parseArgs(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return null; /* bad JSON: checked as bad-args */ }
 }
 
+/** Every string of an app result passes redact() before the provider sees it: a key on a page or in a window must not travel to OpenRouter. */
+const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
+
 /** The tool message for the model: ok/code/class/rule and the app's result, all as data; the screenshot is split off. */
 function resultMessage(res) {
   const r = res.result;
@@ -129,9 +136,9 @@ function resultMessage(res) {
   if (r && typeof r === 'object' && !Array.isArray(r)) {
     const { jpeg: j, ...rest } = r;
     jpeg = typeof j === 'string' && j ? j : null;
-    if (Object.keys(rest).length) ergebnis = rest;
-  } else if (r !== undefined && r !== null) ergebnis = r;
-  const obj = { ok: res.ok, code: res.code, ...(res.class ? { class: res.class } : {}), ...(res.rule ? { rule: res.rule } : {}), ...(res.note ? { hinweis: res.note } : {}), ...(ergebnis !== undefined ? { ergebnis } : {}) };
+    if (Object.keys(rest).length) ergebnis = redactDeep(rest);
+  } else if (r !== undefined && r !== null) ergebnis = redactDeep(r);
+  const obj = { ok: res.ok, code: res.code, ...(res.class ? { class: res.class } : {}), ...(res.rule ? { rule: res.rule } : {}), ...(res.note ? { hinweis: redact(String(res.note)) } : {}), ...(ergebnis !== undefined ? { ergebnis } : {}) };
   let text = dataBlock(obj);
   if (text.length > MAX_RESULT_CHARS) text = dataBlock({ ...obj, ergebnis: `${JSON.stringify(ergebnis).slice(0, MAX_RESULT_CHARS - 600)} [gekürzt]` });
   return { text, jpeg };
@@ -143,7 +150,7 @@ function resultMessage(res) {
  */
 export async function runLoop(R) {
   const turns = []; // [assistant, tool, optional user image]
-  const first = { role: 'user', content: `Florians Auftrag, wörtlich gesprochen (das ist der einzige Auftrag):\n${JSON.stringify(R.goalText)}` };
+  const first = () => ({ role: 'user', content: `Florians Auftrag, wörtlich gesprochen (das ist der einzige Auftrag):\n${JSON.stringify(R.goalText)}` }); // rebuilt each turn: an extension stays in the goal, not only in a one-turn note
   let idle = 0;
   try {
     for (;;) {
@@ -153,7 +160,7 @@ export async function runLoop(R) {
       if (!(await R.gate())) return;
       const note = R.takeNote();
       const history = turns.slice(-TURN_KEEP).flat();
-      const messages = [{ role: 'system', content: SYSTEM_PROMPT }, first, ...history, ...(note ? [{ role: 'user', content: note }] : [])];
+      const messages = [{ role: 'system', content: SYSTEM_PROMPT }, first(), ...history, ...(note ? [{ role: 'user', content: note }] : [])];
       let out;
       try {
         out = await R.complete({ model: R.model, messages, signal: R.signal });
@@ -178,7 +185,7 @@ export async function runLoop(R) {
       let res;
       if (!checked.ok) res = { ok: false, code: 'refused', rule: 'bad-args', note: checked.error };
       else if (call.name === 'done') { R.finish(checked.args.summary); return; }
-      else if (call.name === 'ask_florian') res = await R.ask(checked.args.question);
+      else if (call.name === 'ask_florian') res = await R.ask(checked.args);
       else if (call.name === 'server_read') res = await R.read(checked.args);
       else res = await R.act(call.name, checked.args);
       if (R.ended) return;
