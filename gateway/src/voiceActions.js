@@ -40,6 +40,31 @@ export function jaccard(a, b) {
   return both / (x.size + y.size - both);
 }
 
+// ---- the session stamp: the agent that receives a prompt learns which desk session it came from (a#624670: neither prompt named it) ----
+const AID = /^a#[0-9a-f]{6}$/;
+const STAMP_MS = 2000;
+const previousOf = new Map(); // current a# -> previous a# (null = none): one registry lookup per session
+const within = (promise, ms) => new Promise((resolve) => { const t = setTimeout(resolve, ms, null); t.unref?.(); Promise.resolve(promise).then(resolve, () => resolve(null)).finally(() => clearTimeout(t)); });
+/** `[Desk: diese Sitzung a#x, vorherige a#y; Protokoll: desk-trace a#x]`, or '' while the session has no id yet. Never throws, waits at most ~4 s. */
+export async function deskStamp(ctx) {
+  const trace = ctx.trace?.();
+  if (!trace) return '';
+  if (!AID.test(trace.aid ?? '') && trace.ready) await within(trace.ready, STAMP_MS);
+  const aid = trace.aid;
+  if (!AID.test(aid ?? '')) return '';
+  if (!previousOf.has(aid) && ctx.traces?.configured?.()) {
+    const found = await within(ctx.traces.lookup('last', `&exclude=${aid.slice(2)}`), STAMP_MS);
+    const prev = found?.id ? `a#${String(found.id).replace(/^a#/, '')}` : null;
+    if (found) {
+      if (previousOf.size >= 50) previousOf.delete(previousOf.keys().next().value);
+      previousOf.set(aid, prev && prev !== aid && AID.test(prev) ? prev : null);
+    }
+  }
+  const prev = previousOf.get(aid);
+  return `[Desk: diese Sitzung ${aid}${prev ? `, vorherige ${prev}` : ''}; Protokoll: desk-trace ${aid}]`;
+}
+const stamped = (text, stamp) => (stamp ? `${text}\n${stamp}` : text);
+
 const out = (ok, content, extra = {}) => ({ ok, summary: short(content, 200), content: redact(content), ...extra });
 const refuse = (ctx, name, reason, content) => {
   ctx.audit?.({ action: 'action.refused', detail: `${name} ${reason}` });
@@ -158,7 +183,7 @@ async function mainPrompt({ text }, ctx, clock) {
   if (recall('prompt', sid, PROMPT_DEDUPE_MS, now).some((e) => e.key === key)) return release(g, 'output_main_agent_prompt'), out(true, 'Der Prompt steht schon im Eingabefeld (schon eingetippt), nichts Neues gesendet. Sag nur einen kurzen Satz.');
   if (!ctx.vision?.command) return release(g, 'output_main_agent_prompt'), out(false, 'Nicht eingetippt (kein Screen Agent verbunden). Sag das Florian in einem Satz.');
   const mine = remember('prompt', sid, { key, at: now });
-  const clean = redact(body);
+  const clean = stamped(redact(body), await deskStamp(ctx)); // the stamp is no part of the 8000 characters nor of the duplicate check
   let res;
   try { res = await ctx.vision.command(sid, { type: 'main-agent-prompt', text: clean }); } catch (err) { res = { delivered: false, code: 'no-app', error: String(err?.message ?? err) }; }
   const typed = res.delivered && res.state === 'done' && (res.code === 'typed' || res.code === 'typed-unverified');
@@ -201,12 +226,13 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   const verdict = (ctx.limits ?? defaultLimits).check(sid, 'agentJob');
   if (!verdict.ok) return release(g, 'start_agent_job'), refuse(ctx, 'start_agent_job', 'limit', `Nichts gestartet: ${verdict.reason}. Sag das Florian in einem Satz.`);
   const requestId = crypto.randomUUID();
+  const stampedPrompt = stamped(p, await deskStamp(ctx));
   const entry = remember('job', sid, { title: t, prompt: p, requestId, host: host ?? 'auto', at: now });
   const traced = ctx.trace?.();
   const aid = /^a#[0-9a-f]{6}$/.test(traced?.aid ?? '') ? traced.aid : undefined;
   let res;
   try {
-    res = await ctx.hub.call('job.start', { requestId, title: t, prompt: p, spoken: g.spoken.slice(-6).map((e) => String(e.text).slice(0, 2000)), host: host ?? 'auto', ...(aid ? { aid } : {}), provider: /^[a-z0-9]{1,16}$/i.test(g.vt.provider ?? '') ? g.vt.provider : undefined }, { host: 'sandy' });
+    res = await ctx.hub.call('job.start', { requestId, title: t, prompt: stampedPrompt, spoken: g.spoken.slice(-6).map((e) => String(e.text).slice(0, 2000)), host: host ?? 'auto', ...(aid ? { aid } : {}), provider: /^[a-z0-9]{1,16}$/i.test(g.vt.provider ?? '') ? g.vt.provider : undefined }, { host: 'sandy' });
   } catch (err) {
     const msg = String(err?.message ?? err);
     const unclear = msg === TEXT.bridgeSlow || msg === 'unclear'; // the job may well have started

@@ -157,7 +157,7 @@ it('a slow older resolve cannot overwrite a newer context', async () => {
   assert.deepEqual(service.get('a').ids, ['123abc']);
 });
 
-it('failed and invalid replacements clear old context, including late older successes', async () => {
+it('failed and invalid resolves keep the old context, and late older successes still cannot overwrite', async () => {
   let release, clock = 0;
   const service = createArtifactService({ now: () => clock, env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, fetchImpl: async url => {
     if (String(url).includes('000000')) throw Error('offline');
@@ -166,10 +166,10 @@ it('failed and invalid replacements clear old context, including late older succ
   } });
   await service.resolve('a', ['abcdef']); clock = CONTEXT_TTL - 1;
   await assert.rejects(service.resolve('a', ['000000']));
-  assert.deepEqual(service.get('a').ids, []);
+  assert.deepEqual(service.get('a').ids, ['abcdef']);
   const slow = service.resolve('a', ['123abc']);
   await assert.rejects(service.resolve('a', ['abcdef'], 99)); release(); await slow;
-  assert.deepEqual(service.get('a').ids, []);
+  assert.deepEqual(service.get('a').ids, ['abcdef']);
 });
 it('lifecycle metadata survives on items and linked nodes', async () => {
   const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, fetchImpl: async () => Response.json({ items: [{ id: 'abcdef', status: 'retired', superseded_by: 'a#123abc', linked_nodes: [{ id: '123abc', status: 'retired' }] }] }) });
@@ -290,4 +290,76 @@ it('a row cannot expose a card that belongs to another artifact, and the bridge 
   assert(options.length >= 2 && options.every(o => o.timeoutMs > 0 && o.timeoutMs <= 5000));
   const other = createArtifactService({ hub, env: cardEnv, fetchImpl: async () => Response.json({ items: [{ id: 'cccccc', kind: 'panel', title: 'P', refs: [{ kind: 'card', target: 'card:111' }] }], unknown: [] }) });
   assert.equal(await other.refRead('s5', 'cccccc', 0, hub), 'nicht lesbar', 'only kind card rows may read card refs');
+});
+
+// ---- v0.1.7 gw-voice: search by sense, ids and card numbers; resolve merges; context shows the screen ----
+const card = (id, n, title, summary = '') => ({ id, title, summary, kind: 'card', refs: [{ kind: 'card', label: 'Karte', target: `card:${n}` }] });
+const SCREEN = [card('2f622b', 19207, 'Pay stops bei Chutes', 'Zahlungen gestoppt'), card('dbc8f1', 19209, 'Lock the engine: REAX 1.3 Freigabe', 'Entscheidung zur Engine von Reax 1.3'), card('b30fd3', 19210, 'Discord Antwort an Mia', 'Antwort vorbereitet')];
+function searchService({ searchItems = [], fail = false, screen = SCREEN } = {}) {
+  const seen = [];
+  const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, fetchImpl: async (url) => {
+    const u = new URL(String(url)); seen.push(u.pathname + u.search);
+    if (u.pathname === '/v1/search') { if (fail) throw Error('down'); return Response.json({ items: searchItems }); }
+    const ids = u.searchParams.get('ids').split(',');
+    return Response.json({ items: [...screen, ...searchItems].filter(i => ids.includes(i.id)), unknown: [] });
+  } });
+  return { service, seen };
+}
+it('search: a misheard phrase finds the card that is on the screen, first and marked', async () => {
+  const { service } = searchService({ searchItems: [card('111111', 1, 'Unrelated REAX note')] });
+  await service.setScreen('s', { ids: SCREEN.map(c => c.id), frameVersion: 1 });
+  const r = await service.search('s', 'Log the Engine Reax 1.3');
+  assert.equal(r.items[0].id, 'dbc8f1'); assert.equal(r.items[0].auf_dem_bildschirm, true);
+  assert.equal(r.items.find(i => i.id === '111111').auf_dem_bildschirm, false);
+  assert.equal(new Set(r.items.map(i => i.id)).size, r.items.length);
+});
+it('search: a card number and an a# id resolve directly, also when the registry search is down', async () => {
+  const { service, seen } = searchService({ fail: true });
+  await service.setScreen('s', { ids: SCREEN.map(c => c.id), frameVersion: 1 });
+  assert.deepEqual((await service.search('s', 'Karte 19209')).items.map(i => [i.id, i.match]), [['dbc8f1', 'karte']]);
+  assert.deepEqual((await service.search('s', 'a#2f622b')).items.map(i => [i.id, i.match]), [['2f622b', 'id']]);
+  const other = searchService({ fail: true });
+  assert.deepEqual((await other.service.search('x', 'a#b30fd3')).items.map(i => i.id), ['b30fd3'], 'not on the screen: resolved through the registry');
+  assert(seen.some(p => p.startsWith('/v1/search')));
+});
+it('search: no hit never means an empty answer while ids are visible', async () => {
+  const { service } = searchService();
+  await service.setScreen('s', { ids: SCREEN.map(c => c.id), frameVersion: 1 });
+  const r = await service.search('s', 'Quartalsbilanz Hamburg');
+  assert.deepEqual(r.items, []); assert.match(r.hinweis, /Keine Treffer; sichtbar sind: a#2f622b Pay stops/);
+  assert.deepEqual(r.sichtbar.map(v => v.id), ['2f622b', 'dbc8f1', 'b30fd3']);
+  const blank = await searchService().service.search('none', 'Quartalsbilanz');
+  assert.deepEqual(blank, { items: [], unknown: [] });
+});
+it('search: registry down and nothing visible is an error; with visible hits it still answers', async () => {
+  const { service } = searchService({ fail: true });
+  await assert.rejects(service.search('none', 'irgendwas'), /nicht erreichbar/);
+  await service.setScreen('s', { ids: SCREEN.map(c => c.id), frameVersion: 1 });
+  const r = await service.search('s', 'Pay stops');
+  assert.equal(r.items[0].id, '2f622b'); assert.match(r.hinweis, /Registry-Suche war nicht erreichbar/);
+});
+it('fuzzy matching tolerates misheard words and ignores bare words that look like hex', async () => {
+  const { fuzzyScore, significantTokens, directRef, fold } = await import('../src/artifactMatch.js');
+  assert.equal(fold('log'), fold('lock'));
+  assert(fuzzyScore(significantTokens('Karte log the engine'), { title: 'Lock the engine', summary: '' }) > 0.6);
+  assert(fuzzyScore(significantTokens('reax'), { title: 'REAX 1.3', summary: '' }) === 1);
+  assert.equal(fuzzyScore(significantTokens('Kaffee Hamburg'), { title: 'Lock the engine', summary: 'x' }), 0);
+  assert.equal(directRef('facade'), null); assert.deepEqual(directRef('dbc8f1'), { id: 'dbc8f1' });
+  assert.deepEqual(directRef('Karte 19209'), { card: '19209' }); assert.deepEqual(directRef('a#624670'), { id: '624670' });
+});
+it('resolve adds to the session context (newest first, capped); artifact_context also lists the screen ids', async () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: (0xa00000 + i).toString(16), title: `T${i}`, refs: [] }));
+  const service = createArtifactService({ env: { ARTIFACTS_URL: 'https://fake.test', ARTIFACTS_DESK_TOKEN: 'fake' }, fetchImpl: async (url) => {
+    const ids = new URL(String(url)).searchParams.get('ids').split(',');
+    return Response.json({ items: [...many, ...SCREEN].filter(i => ids.includes(i.id)) });
+  } });
+  await service.resolve('m', ['a00000', 'a00001']); await service.resolve('m', ['a00002']);
+  assert.deepEqual(service.get('m').ids, ['a00002', 'a00000', 'a00001']);
+  assert.deepEqual(service.get('m').items.map(i => i.title), ['T2', 'T0', 'T1']);
+  for (let i = 3; i < 12; i++) await service.resolve('m', [many[i].id]);
+  assert.equal(service.get('m').ids.length, 8); assert.equal(service.get('m').ids[0], many[11].id);
+  await service.setScreen('m', { ids: ['dbc8f1'], frameVersion: 1 });
+  const ctxResult = await runTool('artifact_context', {}, { sid: 'm', artifacts: service });
+  assert.match(ctxResult.content, /sichtbar.*dbc8f1.*Lock the engine/s);
+  assert(ctxResult.content.indexOf('sichtbar') < ctxResult.content.indexOf('items'), 'first, so truncation cannot cut it');
 });

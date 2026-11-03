@@ -3,8 +3,10 @@ import { readJson, sendJson } from './http.js';
 import { redact } from './redact.js';
 import { originOk } from './auth.js';
 import { fetchExplainerJson } from './explainer.js';
+import { directRef, fuzzyScore, significantTokens } from './artifactMatch.js';
 
 export const CONTEXT_TTL = 30 * 60_000;
+export const CONTEXT_MAX = 8; // ids kept per session; a new resolve adds in front, the oldest fall off
 export const PRIVATE_REF = 'privater Wert aus reax-private, Zahlen nur in der Earnings-App sichtbar';
 export function artifactId(value) {
   if (typeof value !== 'string') return null;
@@ -25,7 +27,7 @@ export function parseArtifactIds(value) {
 }
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const clip = (v, n = 2000) => redact(String(v ?? '')).slice(0, n);
-const node = (v) => v && typeof v === 'object' ? { id: artifactId(v.id), title: clip(v.title, 300), summary: clip(v.summary), status: clip(v.status, 40), superseded_by: artifactId(v.superseded_by), ...(v.kind ? { kind: clip(v.kind, 60) } : {}) } : null;
+const node = (v) => v && typeof v === 'object' ? { id: artifactId(v.id), title: clip(v.title, 300), summary: clip(v.summary), status: clip(v.status, 40), superseded_by: artifactId(v.superseded_by), ...(v.kind ? { kind: clip(v.kind, 60) } : {}), ...(typeof v.match === 'string' ? { match: clip(v.match, 40) } : {}), ...(Number.isFinite(v.score) ? { score: Math.round(v.score * 100) / 100 } : {}) } : null;
 function cleanItem(v) {
   const item = node(v);
   if (!item?.id) return null;
@@ -94,10 +96,19 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     }));
     return items;
   }
+  const mergeContext = (prior, fresh) => {
+    const ids = [...fresh.ids, ...prior.ids.filter(id => !fresh.ids.includes(id))].slice(0, CONTEXT_MAX);
+    const pool = [...fresh.items, ...prior.items];
+    const items = ids.map(id => pool.find(i => i.id === id)).filter(Boolean);
+    const parents = [...fresh.parents, ...(prior.parents ?? [])].filter((p, i, all) => all.findIndex(q => q.id === p.id) === i).slice(0, 12);
+    return { ids, items, parents, unknown: fresh.unknown ?? [], invalid: fresh.invalid ?? [] };
+  };
   async function resolve(sid, raw, depth = 1) {
     sweep();
-    // Install an empty generation before validation/I/O: replacement failures cannot revive old data.
-    const record = { value: { ids: [], items: [], unknown: [] }, expires: now() + CONTEXT_TTL };
+    // Install a new generation before validation/I/O: an older, slower resolve cannot overwrite it. The context MERGES (newest first, up to
+    // CONTEXT_MAX): reading one more card must not make the session forget the others (a#624670: artifact_context lost two of three).
+    const prior = sessions.get(sid)?.value ?? { ids: [], items: [], unknown: [] };
+    const record = { value: prior, expires: now() + CONTEXT_TTL };
     if (sessions.size >= 1000 && !sessions.has(sid)) sessions.delete(sessions.keys().next().value);
     sessions.set(sid, record);
     const { ids, invalid } = parseArtifactIds(raw);
@@ -118,12 +129,43 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     }
     const value = { ids, ...result, parents, invalid };
     // No awaits after this write: the route waits for resolution before opening voice.
-    if (sessions.get(sid) === record) sessions.set(sid, { value, expires: now() + CONTEXT_TTL });
+    if (sessions.get(sid) === record) sessions.set(sid, { value: mergeContext(prior, { ...value, ids: result.items.map(i => i.id) }), expires: now() + CONTEXT_TTL });
     return structuredClone(value);
   }
-  async function search(q) {
+  const brief = (items) => items.map(i => ({ id: i.id, title: String(i.title ?? '').slice(0, 80) }));
+  /**
+   * Find artifacts for what Florian said: a direct id or card number, then the artifacts visible on his screen (tolerant of misheard words),
+   * then the registry search. Never an empty answer while ids are on the screen.
+   */
+  async function search(sid, q) {
     if (typeof q !== 'string' || !q.trim() || q.length > 300) throw fail('Suchtext muss 1–300 Zeichen lang sein.');
-    return registry(`/v1/search?q=${encodeURIComponent(q.trim())}`);
+    const text = q.trim();
+    const visible = screen(sid).items;
+    const marked = (item, match) => ({ ...item, match: item.match ?? match, auf_dem_bildschirm: visible.some(v => v.id === item.id) });
+    const hits = [];
+    const add = (item) => { if (item?.id && !hits.some(h => h.id === item.id)) hits.push(item); };
+    let unknown = [], registryError = null;
+    const direct = directRef(text);
+    if (direct) {
+      if (direct.card) for (const item of visible) if (item.refs?.some(r => CARD_REF.exec(r.target)?.[1] === direct.card)) add(marked(item, 'karte'));
+      if (direct.id) {
+        const known = visible.find(v => v.id === direct.id);
+        if (known) add(marked(known, 'id'));
+        else try { const r = await registry(`/v1/resolve?ids=${direct.id}&depth=1`); r.items.forEach(i => add(marked(i, 'id'))); unknown = r.unknown; } catch (err) { registryError = err; }
+      }
+    }
+    const tokens = significantTokens(text);
+    visible.map(item => ({ item, score: fuzzyScore(tokens, item) })).filter(x => x.score >= 0.3).sort((a, b) => b.score - a.score)
+      .forEach(({ item, score }) => add({ ...marked(item, 'bildschirm-unscharf'), score: Math.round(score * 100) / 100 }));
+    try {
+      const found = await registry(`/v1/search?q=${encodeURIComponent(direct?.card ?? text)}`);
+      found.items.forEach(i => add(marked(i, 'registry')));
+      unknown = found.unknown.length ? found.unknown : unknown;
+    } catch (err) { registryError = err; }
+    if (!hits.length && registryError && !visible.length) throw registryError;
+    const items = hits.slice(0, 20);
+    if (items.length) return { items, unknown, ...(registryError ? { hinweis: 'Die Registry-Suche war nicht erreichbar; das sind die Treffer vom Bildschirm.' } : {}) };
+    return { items: [], unknown, ...(visible.length ? { hinweis: `Keine Treffer; sichtbar sind: ${brief(visible).map(v => `a#${v.id} ${v.title}`).join('; ')}`, sichtbar: brief(visible) } : {}) };
   }
   async function refRead(sid, id, index, hub) {
     const aid = artifactId(id);
@@ -227,7 +269,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
       if (req.method !== 'GET') { sendJson(res, 405, { error: 'Methode nicht erlaubt.' }); return true; }
       if (url.pathname === '/api/artifacts/launch-config') sendJson(res, 200, { origins: String(env.DESK_TRUSTED_LAUNCH_ORIGINS ?? 'https://bittensor-earnings.lovable.app,https://explainers.app.mintapis.com,https://cards.app.mintapis.com,https://agent-board.app.mintapis.com,https://desk.app.mintapis.com').split(/[,\s]+/).filter(Boolean) });
       else if (url.pathname === '/api/artifacts/resolve') sendJson(res, 200, await resolve(sid, url.searchParams.get('ids'), Number(url.searchParams.get('depth') ?? 1)));
-      else if (url.pathname === '/api/artifacts/search') sendJson(res, 200, await search(url.searchParams.get('q')));
+      else if (url.pathname === '/api/artifacts/search') sendJson(res, 200, await search(sid, url.searchParams.get('q')));
       else sendJson(res, 404, { error: 'Nicht gefunden.' });
       return true;
     }

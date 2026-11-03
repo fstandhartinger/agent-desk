@@ -299,7 +299,8 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
   return {
     open: openTrace, chat, attach, flushAll, bind, unbind, registry,
     configured,
-    lookup: (q) => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}`),
+    lookup: (q, extra = '') => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}${extra}`),
+    recent: (query = '') => registry(`/v1/sessions/recent${query}`),
     remote: async (id) => {
       const [trace, diagnosis] = await Promise.all([registry(`/v1/sessions/${idOf(id)}/trace`), registry(`/v1/sessions/${idOf(id)}/diagnosis`)]);
       return { events: arr(trace), diagnosis: diagnosis?.diagnosis ?? diagnosis };
@@ -351,11 +352,67 @@ export function localDiagnosis(events) {
 
 const diagnosisText = (d) => (typeof d === 'string' ? d : Array.isArray(d) ? d.map(diagnosisText).join('\n') : d && typeof d === 'object' ? (typeof d.what_happened === 'string' ? d.what_happened : typeof d.text === 'string' ? d.text : typeof d.summary === 'string' ? d.summary : JSON.stringify(d)) : '');
 
+// ---- which session did he mean: "letzte", "davor", "10:29", "heute morgen" ----
+const TZ = 'Europe/Berlin';
+const DAY_MS = 86_400_000;
+const berlinParts = (ms) => Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).filter((p) => p.type !== 'literal').map((p) => [p.type, +p.value]));
+/** Epoch ms of a Berlin wall-clock time (day offset from `ms`'s Berlin date). */
+function berlinAt(ms, dayOffset, hour, minute = 0) {
+  const p = berlinParts(ms + dayOffset * DAY_MS);
+  const guess = Date.UTC(p.year, p.month - 1, p.day, hour, minute);
+  const o = berlinParts(guess);
+  return guess - (Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute) - guess);
+}
+export const berlinClock = (ms) => new Intl.DateTimeFormat('de-DE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)).replace(', ', ' ');
+const DAYPART = [[/\b(?:morgens?|früh|frueh)\b/i, 4, 12], [/\bvormittags?\b/i, 8, 12], [/\bmittags?\b/i, 11, 15], [/\bnachmittags?\b/i, 12, 18], [/\babends?\b/i, 17, 24], [/\bnachts?\b/i, 0, 6]];
+
+/**
+ * What a `which` means. {kind:'last'} for "last"/"previous"/"vorherige"/"davor", {kind:'time', at} for "10:29" / "um 10 Uhr",
+ * {kind:'range', from, to} for "heute morgen", "vorhin", "gestern", else {kind:'lookup'} (a#id, hex, slug). Pure; `now` in epoch ms.
+ */
+export function parseWhich(which, now = Date.now()) {
+  const w = String(which ?? '').trim();
+  if (/^(?:last|previous|prev|letzte[nrms]?|zuletzt|vorherige[nrms]?|vorige[nrms]?|davor|die davor|die sitzung davor|vor der aktuellen)$/i.test(w)) return { kind: 'last' };
+  if (/^(?:a\s?#\s?)?[0-9a-f]{6}$/i.test(w)) return { kind: 'lookup' };
+  const clock = /(?:^|\D)([01]?\d|2[0-3])\s*[:.h]\s*([0-5]\d)(?:\D|$)/.exec(w) ?? /\b([01]?\d|2[0-3])\s*uhr\b/i.exec(w);
+  if (clock) {
+    let at = berlinAt(now, 0, +clock[1], +(clock[2] ?? 0));
+    if (at > now + 5 * 60_000 && !/heute/i.test(w)) at -= DAY_MS; // "10:29" said at 09:00 can only mean yesterday
+    if (/gestern/i.test(w)) at = berlinAt(now, -1, +clock[1], +(clock[2] ?? 0));
+    return { kind: 'time', at };
+  }
+  if (/\b(?:vorhin|eben|gerade eben|soeben)\b/i.test(w)) return { kind: 'range', from: now - 3 * 3_600_000, to: now };
+  const day = /\bvorgestern\b/i.test(w) ? -2 : /\bgestern\b/i.test(w) ? -1 : /\bheute\b|\bletzte nacht\b/i.test(w) || DAYPART.some(([re]) => re.test(w)) ? 0 : null;
+  if (day === null) return { kind: 'lookup' };
+  const part = DAYPART.find(([re]) => re.test(w));
+  const [h0, h1] = part ? [part[1], part[2]] : [0, 24];
+  return { kind: 'range', from: berlinAt(now, day, h0), to: Math.min(now, berlinAt(now, day, h1 === 24 ? 23 : h1, h1 === 24 ? 59 : 0)) };
+}
+
+const startOf = (s) => Date.parse(s.started_at ?? s.startedAt ?? s.created_at ?? '');
+const idOfSession = (s) => `a#${String(s.id ?? '').replace(/^a#/, '')}`;
+const candidateLine = (s) => `${idOfSession(s)} ${Number.isFinite(startOf(s)) ? berlinClock(startOf(s)) : '?'}${s.kind ? ` ${s.kind}` : ''}${s.provider ? `/${s.provider}` : ''}${s.title ? ` "${brief(s.title, 60)}"` : ''}`;
+
+/** The sessions the registry lists for a time word, best first; null when the registry has no such list yet (old registry). */
+async function findByTime(spec, service, exclude) {
+  const list = spec.kind === 'time' ? `?limit=12&around=${encodeURIComponent(new Date(spec.at).toISOString())}` : `?limit=40&before=${encodeURIComponent(new Date(spec.to + 60_000).toISOString())}`;
+  let rows;
+  try { rows = arr(await service.recent(list)); } catch (err) { if (err.status === 404) return null; throw err; }
+  const usable = rows.filter((s) => s?.id && idOfSession(s) !== exclude && (!s.kind || ['voice', 'chat', 'text'].includes(s.kind)) && Number.isFinite(startOf(s)));
+  if (spec.kind === 'time') {
+    const span = (s) => { const a = startOf(s), b = Date.parse(s.ended_at ?? '') || a; return spec.at >= a && spec.at <= b ? 0 : Math.min(Math.abs(spec.at - a), Math.abs(spec.at - b)); };
+    return usable.sort((x, y) => span(x) - span(y));
+  }
+  const inside = usable.filter((s) => startOf(s) >= spec.from && startOf(s) <= spec.to).sort((x, y) => startOf(y) - startOf(x));
+  return inside.length ? inside : usable.sort((x, y) => Math.abs(startOf(x) - spec.to) - Math.abs(startOf(y) - spec.to)).map((s) => Object.assign(s, { outside: true }));
+}
+const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.items) ? r.items : Array.isArray(r?.sessions) ? r.sessions : Array.isArray(r?.events) ? r.events : []);
+
 /**
  * The text of the session_trace tool / the lookup route for one session: diagnosis + the last 40 timeline lines.
- * `which`: "current" (the live trace of this conversation, flushed first), "last", or an a#id / hex / slug.
+ * `which`: "current" (the live trace of this conversation, flushed first), "last"/"previous" (the newest OTHER session), "10:29", "heute morgen", "vorhin", "gestern", or an a#id / hex / slug.
  */
-export async function describeSession({ which = 'current', service, current }) {
+export async function describeSession({ which = 'current', service, current, now = Date.now() }) {
   const w = String(which ?? 'current').trim() || 'current';
   let events = [];
   let diagnosis = '';
@@ -372,8 +429,24 @@ export async function describeSession({ which = 'current', service, current }) {
     } else if (service?.configured()) note = ' (noch nicht in der Registry: lokaler Verlauf)';
   } else {
     if (!service?.configured()) return 'Die Registry ist nicht eingerichtet; alte Sitzungen sind nicht abrufbar.';
+    const running = (typeof current === 'function' ? current() : current)?.aid ?? null; // the session being spoken in is never "the last one"
+    const spec = parseWhich(w, now);
     try {
-      const found = await service.lookup(w);
+      let found = null, others = [];
+      if (spec.kind === 'time' || spec.kind === 'range') {
+        const rows = await findByTime(spec, service, running);
+        if (rows === null) return 'Die Registry kennt die Suche nach Uhrzeit noch nicht. Nimm "last" oder die a#-ID der Sitzung.';
+        if (!rows.length) return `Keine Sitzung zu "${brief(w, 40)}" gefunden.`;
+        found = { id: rows[0].id }; others = rows.slice(1, 4);
+        note = ` (${rows[0].outside ? 'nichts im genannten Zeitraum, nächste Sitzung' : 'beste Übereinstimmung'}: ${candidateLine(rows[0])}${others.length ? `; weitere: ${others.map(candidateLine).join('; ')}` : ''})`;
+      } else if (spec.kind === 'last') {
+        found = await service.lookup('last', running ? `&exclude=${encodeURIComponent(running.replace(/^a#/, ''))}` : '');
+        if (running && found?.id && idOfSession(found) === running) { // an old registry ignores exclude: take the newest other one from the list
+          const rows = (await service.recent('?limit=6').then(arr, () => [])).filter((s) => s?.id && idOfSession(s) !== running && (!s.kind || ['voice', 'chat', 'text'].includes(s.kind)));
+          found = rows[0] ? { id: rows[0].id } : null;
+          if (!found) return 'Es gibt keine frühere Sitzung außer der laufenden.';
+        }
+      } else found = await service.lookup(w);
       id = found?.id ? `a#${String(found.id).replace(/^a#/, '')}` : null;
       if (!id) return `Keine Sitzung zu "${brief(w, 40)}" gefunden.`;
       const r = await service.remote(id);
