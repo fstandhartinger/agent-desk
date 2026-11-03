@@ -9,7 +9,7 @@ const wav = (s = 1) => pcmToWav(Buffer.alloc(s * 32000));
 const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await new Promise(r => setTimeout(r, 15)); } throw new Error('timeout'); };
 
 describe('device routes: chunks, captions, device log, device.error', () => {
-  let registry, app, base, token, deviceId, maiMode = 'ok', maiCalls = 0, refuse = false;
+  let registry, app, base, token, deviceId, failDictate = false, maiMode = 'ok', maiCalls = 0, refuse = false;
   const sessions = [], events = [];
   before(async () => {
     registry = await fakeServer((req, res, body) => {
@@ -31,7 +31,7 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     } });
     media.phrases = phrases;
     const dictate = media.dictate;
-    app = createApp({ deviceOptions: { media: { ...media, dictate: async (b, c) => { await c; return { text: 'Diktat', sources: {}, ms: 3, providers: { mai: { ok: true, ms: 3 } }, degraded: false, merged: false, seconds: 1 }; }, phrases } }, traceOptions: { flushMs: 15, firstFlushMs: 15 } });
+    app = createApp({ deviceOptions: { media: { ...media, dictate: async (b, c) => { await c; if (failDictate) throw Object.assign(Object.assign(Error('Kein Transkript rechtzeitig verfügbar.'), { status: 502, code: 'all-providers-failed', providers: { mai: { ok: false, ms: 5, status: 500, reason: 'upstream' } }, seconds: 1 }), { body: { error: 'Kein Transkript rechtzeitig verfügbar.', code: 'all-providers-failed', providers: { mai: { ok: false, ms: 5, status: 500, reason: 'upstream' } } } }); return { text: 'Diktat', sources: {}, ms: 3, providers: { mai: { ok: true, ms: 3 } }, degraded: false, merged: false, seconds: 1 }; }, phrases } }, traceOptions: { flushMs: 15, firstFlushMs: 15 } });
     void dictate;
     base = `http://127.0.0.1:${await listen(app.server)}`;
     const cookie = (await login(base)).cookie;
@@ -56,6 +56,20 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     const result = (await until(() => deviceEvents('dictation.result')[0])).data;
     assert.equal(result.dictationId, 'd-1'); assert.equal(result.index, 2); assert.equal(result.final, true); assert(!('text' in result), 'no dictation text in the log');
     assert.equal(sessions.at(-1).kind, 'device'); assert.match(sessions.at(-1).title, /^Geräteprotokoll \d{1,2} (Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez)$/);
+  });
+
+  it('dictate: all providers failing answers {error, code, providers} and leaves dictation.failed + device.error with the provider status', async () => {
+    failDictate = true;
+    const r = await post('/api/device/dictate', dictateForm({ dictationId: 'f-1', index: 0, final: true }));
+    failDictate = false;
+    assert.equal(r.status, 502);
+    const body = await r.json();
+    assert.equal(body.code, 'all-providers-failed'); assert.equal(body.providers.mai.status, 500);
+    await app.traces.flushAll(1000);
+    const failed = (await until(() => deviceEvents('dictation.failed').find(e => e.data.dictationId === 'f-1'))).data;
+    assert.equal(failed.status, 502); assert.equal(failed.providers.mai.reason, 'upstream'); assert.equal(typeof failed.ms, 'number');
+    const err = (await until(() => deviceEvents('device.error').find(e => e.data.code === 'all-providers-failed'))).data;
+    assert.equal(err.path, '/api/device/dictate'); assert.equal(err.providers.mai.status, 500);
   });
 
   it('chunks of one dictation have their own larger bucket; single clips still stop at 12 per minute', async () => {
