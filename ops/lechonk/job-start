@@ -1,0 +1,78 @@
+#!/bin/bash
+# job-start — start an agent job folder as its own systemd user service, independent of the calling shell/ssh session
+# (fleet-health-review-20261025). Before this, `ssh sandy 'setsid nohup ~/bin/run-claude.sh ... &'` under `timeout`
+# was killed together with the ssh command (exit 124/143; reaxwallet-standing-schedule-20261019 died this way, 25 Oct).
+#
+# usage: job-start <jobdir|jobname> [engine] [--account A|B|C] [--kind work|judgement] [--host sandy|lechonk]
+#                  [--runtime <seconds>] [--no-secrets] [--dry-run]
+#   engine: lead (default, run-lead.sh = Opus lead via quota-pace) | opus | sonnet | haiku (run-claude.sh)
+#           | codex (run-codex.sh gpt-6.1-sol high) | devin (run-devin.sh)
+# The unit is job-<name>.service (transient, --collect); output -> <jobdir>/job-start.log; receipt -> <jobdir>/.job-start.
+# Refuses when that unit is already active or an agent process already works in the folder.
+# On LeChonk the unit would get no secrets (they come only through Sandy's lechonk-job): ~/bin/job-secret-guard refuses
+# the start before anything launches unless the job declares "SECRETS: none" or --no-secrets (reliability N56, 3 Nov 2026).
+# Follow:  systemctl --user status job-<name>   |  tail -f <jobdir>/job-start.log   |  stop: systemctl --user stop job-<name>
+set -euo pipefail
+die() { echo "job-start: $*" >&2; exit 2; }
+[ $# -ge 1 ] || die "usage: job-start <jobdir|jobname> [lead|opus|sonnet|haiku|codex|devin] [--account X] [--kind K] [--host H] [--runtime S] [--no-secrets] [--dry-run]"
+ARG="$1"; shift
+ENGINE=lead; ACCOUNT=""; KIND=""; HOST=""; RUNTIME=86400; DRY=0; NOSEC=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    lead|opus|sonnet|haiku|codex|devin) ENGINE="$1" ;;
+    --account) ACCOUNT="${2:?}"; shift ;;
+    --kind) KIND="${2:?}"; shift ;;
+    --host) HOST="${2:?}"; shift ;;
+    --runtime) RUNTIME="${2:?}"; shift ;;
+    --no-secrets) NOSEC=--no-secrets ;;
+    --dry-run) DRY=1 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift
+done
+case "$ARG" in /*) J="$ARG" ;; *) J="$HOME/jobs/$ARG" ;; esac
+J="$(realpath -e "$J" 2>/dev/null)" || die "no such job folder: $ARG"
+[ -f "$J/PROMPT.md" ] || die "$J has no PROMPT.md"
+case "$ACCOUNT" in ""|A|B|C) ;; *) die "--account must be A, B or C" ;; esac
+case "$KIND" in ""|work|judgement) ;; *) die "--kind must be work or judgement" ;; esac
+case "$HOST" in ""|sandy|lechonk) ;; *) die "--host must be sandy or lechonk" ;; esac
+[[ "$RUNTIME" =~ ^[0-9]+$ ]] || die "--runtime must be seconds"
+NAME="$(basename "$J")"
+UNIT="job-${NAME:0:100}"
+
+if systemctl --user is-active --quiet "$UNIT.service" || systemctl --user is-active --quiet "$NAME.service"; then
+  die "$UNIT (or $NAME.service) is already running"
+fi
+for p in $(pgrep -f 'claude -p|codex exec|devin|run-claude.sh|run-codex.sh|run-lead.sh' || true); do
+  [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$J" ] && die "an agent process (PID $p) already works in $J"
+done
+systemctl --user reset-failed "$UNIT.service" 2>/dev/null || true
+
+case "$ENGINE" in
+  lead)   CMD=("$HOME/bin/run-lead.sh" "$J" "${KIND:-judgement}") ;;
+  opus)   CMD=("$HOME/bin/run-claude.sh" "$J" opus "${KIND:-judgement}") ;;
+  sonnet|haiku) CMD=("$HOME/bin/run-claude.sh" "$J" "$ENGINE" "${KIND:-work}") ;;
+  codex)  CMD=("$HOME/bin/run-codex.sh" "$J" gpt-6.1-sol high "${KIND:-judgement}") ;;
+  devin)  CMD=("$HOME/bin/run-devin.sh" "$J" "${KIND:-judgement}") ;;
+esac
+SETENV=(--setenv=HOME="$HOME" --setenv=PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/usr/bin:/bin"
+        --setenv=ANTHROPIC_API_KEY= --setenv=OPENAI_API_KEY= --setenv=LANG=en_US.UTF-8)
+[ -n "$ACCOUNT" ] && SETENV+=(--setenv=CLAUDE_ACCOUNT="$ACCOUNT")
+[ -n "$HOST" ] && SETENV+=(--setenv=JOB_HOST="$HOST")
+# The guard sees exactly the unit's environment (systemd-run --user passes nothing else on).
+GUARDENV=(); for e in "${SETENV[@]}"; do GUARDENV+=("${e#--setenv=}"); done
+[ -n "${JOB_SECRET_GUARD_HOST:-}" ] && GUARDENV+=("JOB_SECRET_GUARD_HOST=$JOB_SECRET_GUARD_HOST")   # fixtures only
+GUARD="${JOB_SECRET_GUARD:-$HOME/bin/job-secret-guard}"
+if [ "${JOB_SECRET_GUARD_HOST:-$(hostname -s)}" = lechonk ]; then   # fail closed on LeChonk: no guard, no start
+  [ -x "$GUARD" ] || die "job-secret-guard missing on LeChonk; not starting a job that would have no secrets"
+  env -i "${GUARDENV[@]}" "$GUARD" "$J" $NOSEC || exit 2
+fi
+RUN=(systemd-run --user --unit="$UNIT" --collect --working-directory="$J" -p RuntimeMaxSec="$RUNTIME"
+     -p StandardOutput="append:$J/job-start.log" -p StandardError="append:$J/job-start.log"
+     "${SETENV[@]}" "${CMD[@]}")
+if [ "$DRY" = 1 ]; then printf 'DRY: '; printf '%q ' "${RUN[@]}"; echo; exit 0; fi
+"${RUN[@]}" >/dev/null 2>&1 || die "systemd-run failed for $UNIT"
+STAMP="$(date -u +%FT%TZ)"
+printf '{"unit":"%s.service","engine":"%s","account":"%s","kind":"%s","host":"%s","started_at":"%s","by":"%s"}\n' \
+  "$UNIT" "$ENGINE" "$ACCOUNT" "$KIND" "$HOST" "$STAMP" "${AGENT_BOARD_NAME:-$(whoami)}" > "$J/.job-start"
+echo "job-start: $UNIT.service started ($ENGINE) at $STAMP; log $J/job-start.log; stop: systemctl --user stop $UNIT"
