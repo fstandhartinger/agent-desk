@@ -104,7 +104,7 @@ test('contract: resume, taint and void are sent exactly as the fixture says; a n
   const h2 = setup({ script: [{ name: 'ui_windows', args: {} }, { name: 'done', args: { summary: 'x' } }], app: (w) => (w.op === 'action' && w.seq <= 3 ? { ok: false, code: 'handson', run_state: 'handson' } : ok()) });
   await h2.computer.begin('s1', { text: GOAL, goalArg: '' });
   await until(() => h2.computer.runOf('s1')?.paused);
-  say(h2, 'Mach bitte weiter, ich bin fertig');
+  say(h2, 'Mach bitte weiter');
   await until(() => h2.vision.ofOp('resume').length === 1);
   assert.deepEqual(bare(h2.vision.ofOp('resume')[0]), fx('resume'));
   // void: a misquoted ask

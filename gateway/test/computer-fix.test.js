@@ -55,8 +55,9 @@ test('C: domains in their spoken form, case, punctuation and one leading acknowl
 // ---- B: a real sentence
 test('N2: isGoWord: only a positive go phrase without a negation; the critic\'s five sentences and noise do not resume', () => {
   for (const t of ['ja', 'Ja.', 'weiter', 'okay', 'ok gut', '[Musik]', '(Husten)', 'hm', 'ja ja ja', '', '♪',
-    'Nein, lass das', 'nein das reicht jetzt', 'Warte kurz, ich mache das noch', 'Moment, ich bin noch dran', 'Das Wetter wird morgen schön', 'Mach nicht weiter', 'Nein, mach weiter nicht', 'Stopp, geht nicht weiter']) assert.equal(isGoWord(t), false, t);
-  for (const t of ['Mach weiter bitte', 'Ja, mach einfach weiter.', 'Du kannst jetzt weitermachen', 'Weiter so', 'Es geht weiter', 'Mach jetzt bitte weiter, ich bin fertig', 'Geht weiter']) assert.equal(isGoWord(t), true, t);
+    'Nein, lass das', 'nein das reicht jetzt', 'Warte kurz, ich mache das noch', 'Moment, ich bin noch dran', 'Das Wetter wird morgen schön', 'Mach nicht weiter', 'Nein, mach weiter nicht', 'Stopp, geht nicht weiter',
+    'ich mach selber weiter', 'ich mach jetzt weiter', 'bleiben sie dran, es geht weiter', 'weiter geht\'s nach der werbung', 'if you continue', 'please continue reading', 'wir machen gleich weiter', 'es geht weiter', 'Mach jetzt bitte weiter, ich bin fertig']) assert.equal(isGoWord(t), false, t);
+  for (const t of ['Mach weiter bitte', 'Ja, mach einfach weiter.', 'Du kannst jetzt weitermachen', 'Weiter so', 'Mach jetzt bitte weiter']) assert.equal(isGoWord(t), true, t);
 });
 test('S7: "4 7", "4,7" and "ja 4 7" are the code 47 like "47" and "vier sieben"; three digits and one digit are not', () => {
   for (const t of ['47', '4 7', '4,7', 'ja 4 7', 'Ja, 4 7.', 'vier sieben', 'ja vier sieben', '4 sieben']) assert.deepEqual(parseAnswer(t), { kind: 'digits', digits: '47' }, t);
@@ -125,7 +126,7 @@ test('N2: after hands-on only a positive go phrase resumes, with the resume op (
   assert.equal(h.vision.ofOp('resume').length, 0, 'noise, a bare ja, a "nein" and any other sentence resume nothing');
   assert.equal(h.computer.runOf('s1')?.ended, false, 'during hands-on a "nein" does not end the run either');
   assert.equal(h.model.calls.length, calls);
-  say(h, 'Mach bitte weiter, ich bin fertig');
+  say(h, 'Mach bitte weiter');
   await until(() => ended(h));
   assert.equal(h.vision.ofOp('resume').length, 1);
   assert.equal(h.vision.ofOp('start').length, 1, 'no second start: resume adds no scope');
@@ -151,7 +152,7 @@ test('B: the 25-step stop resumes with the resume op too', async () => {
   say(h, 'ja');
   await flush();
   assert.equal(h.vision.ofOp('resume').length, 0);
-  say(h, 'Ja bitte, mach einfach weiter');
+  say(h, 'Ja, mach einfach weiter');
   await until(() => h.vision.ofOp('resume').length === 1);
   await until(() => h.vision.ofOp('action').length > 25);
   assert.equal(h.vision.ofOp('start').length, 1);

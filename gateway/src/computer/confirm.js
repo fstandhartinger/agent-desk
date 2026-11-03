@@ -36,12 +36,13 @@ export const saidExactly = (assistantText, spokenText) => {
 };
 
 /**
- * The go after hands-on or after the 25-step stop (N2): a positive go phrase and no negation anywhere in the sentence. Any other sentence (a video, "warte kurz", "nein, lass das")
- * lifts nothing. "ja", "weiter" or "okay" alone are no go either.
+ * The go after hands-on or after the 25-step stop (N2, S2): the WHOLE sentence is a positive go phrase (at most 4 words, filler words around it allowed) and has no negation.
+ * Any other sentence (a video, "warte kurz", "nein, lass das", "ich mach selber weiter", "es geht weiter") lifts nothing. "ja", "weiter" or "okay" alone are no go either.
  */
-const GO = /(?:^| )(?:mach(?: \S+){0,2} weiter|weiter ?machen|weiter so|geht weiter|es geht weiter|weiter geht s|(?:du )?kannst (?:\S+ ){0,2}weitermachen|fahr(?:e)? fort|setz(?:e)? fort|go on|keep going|continue)(?= |$)/;
-const NEGATION = /(?:^| )(?:nein|nee|nö|no|nicht|kein\p{L}*|nie|niemals|ohne|stopp?\p{L}*|halt|warte\p{L}*|moment|abbrech\p{L}*|abbruch|aufhör\p{L}*|lass|bloß|später|don|never)(?= |$)/u;
-export const isGoWord = (text) => { const t = norm(text); return GO.test(t) && !NEGATION.test(t); };
+const FILL = '(?:bitte|jetzt|einfach|ruhig|dann|ok|okay|ja|so|gerne)';
+const GO = new RegExp(`^(?:${FILL} )*(?:mach(?: ${FILL})* weiter|weiter ?machen|weiter so|du kannst (?:${FILL} )*weitermachen|fahr(?:e)? fort|setz(?:e)? fort|go on|keep going|continue)(?: ${FILL})*$`);
+const NEGATION = /(?:^| )(?:nein|nee|nö|no|nicht|kein\p{L}*|nie|niemals|ohne|stopp?\p{L}*|halt|warte\p{L}*|moment|abbrech\p{L}*|abbruch|aufhör\p{L}*|lass|bloß|später|don|never|ich|selber|selbst|wir)(?= |$)/u;
+export const isGoWord = (text) => { const t = norm(text); return t.split(' ').length <= 4 && GO.test(t) && !NEGATION.test(t); };
 
 const DIGIT = { null: '0', zero: '0', eins: '1', ein: '1', eine: '1', zwei: '2', zwo: '2', drei: '3', vier: '4', fünf: '5', fuenf: '5', sechs: '6', sieben: '7', acht: '8', neun: '9' };
 const NO = /^(?:nein|no|nee|nö|stopp?|abbrechen|abbruch|nicht|lass das|bloß nicht|halt)\b/;
