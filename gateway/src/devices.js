@@ -258,7 +258,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       await registry('/v1/dictionary', { term: to, replace_from: [from], source: 'learned' }); dict = null;
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen/clear' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* ignored */ null))?.why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* body missing or malformed: no reason given */ null))?.why);
       sendJson(res, 200, artifacts.clearScreen(target[1], record.deviceId));
     } else if (target && target[2] === 'frame' && req.method === 'POST') {
       rate(`frame:${record.deviceId}`, 30);
@@ -276,7 +276,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       rate(`cmdresult:${record.deviceId}`, 60);
       sendJson(res, 200, vision.commandResult(cmdResult[1], record, cmdResult[2], await readJson(req, 2048)));
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* ignored */ null))?.why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* body missing or malformed: no reason given */ null))?.why);
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
@@ -321,15 +321,15 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const box = body.bbox;
       if (!box || ['x', 'y', 'w', 'h'].some(k => !Number.isSafeInteger(box[k]) || Math.abs(box[k]) > 100000) || box.w <= 0 || box.h <= 0) throw fail('Ungültiger Bildausschnitt.');
       // v0.1.4 may still send noImage: then only the ids (with their titles) are known, never an empty "Element(e) ()"
-      const titles = body.noImage && ids.length ? await artifacts.visibleTitles(ids).catch(() => /* ignored */ []) : [];
+      const titles = body.noImage && ids.length ? await artifacts.visibleTitles(ids).catch(() => /* registry unavailable: no titles */ []) : [];
       const summary = body.noImage
         ? (titles.length ? `Markiert ist ${titles.map(item => `a#${item.id} (${item.title})`).join('; ')}.` : 'Florian hat etwas markiert; vom Bild kam nichts an.')
         : await limited(record, 'highlight', () => media.highlight(crop, context, { x: box.x, y: box.y, w: box.w, h: box.h }, ids));
       // ids read by the model in or next to the mark count only when the registry knows them
       const read = idsInText(summary).filter(id => !ids.includes(id));
-      const known = read.length ? await artifacts.visibleTitles(read).catch(() => /* ignored */ []) : [];
+      const known = read.length ? await artifacts.visibleTitles(read).catch(() => /* registry unavailable: no titles */ []) : [];
       const all = [...ids, ...known.map(item => item.id)];
-      const background = all.length ? await artifacts.visibleTitles(all).catch(() => /* ignored */ []) : [];
+      const background = all.length ? await artifacts.visibleTitles(all).catch(() => /* registry unavailable: no titles */ []) : [];
       const marked = { beschreibung: summary, ids: all.map(id => `a#${id}`), hintergrund: background.map(({ id, title, summary: s }) => ({ id: `a#${id}`, titel: title, kurz: String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 220) })) };
       const data = artifactData(marked).replace('<artifact_data>', '<artifact_data source="screen">');
       artifacts.contextTurn(target[1], `${MARKER_LEAD}\n${data}`, { screen: true, marker: true });

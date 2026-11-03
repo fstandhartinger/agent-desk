@@ -131,7 +131,7 @@ async function readCapped(body, headers, maxBytes) {
 
 function decode(buffer, contentType) {
   const charset = /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ?? /<meta[^>]{1,300}charset=["']?([\w-]+)/i.exec(buffer.subarray(0, 2048).toString('latin1'))?.[1] ?? 'utf-8';
-  try { return new TextDecoder(charset.toLowerCase()).decode(buffer); } catch { return new TextDecoder('utf-8').decode(buffer); /* ignored */ }
+  try { return new TextDecoder(charset.toLowerCase()).decode(buffer); } catch { return new TextDecoder('utf-8').decode(buffer); /* unknown charset: utf-8 is the fallback */ }
 }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', euro: '€', ndash: '–', mdash: '—', hellip: '…', laquo: '«', raquo: '»', bdquo: '„', ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', copy: '©', reg: '®', middot: '·', bull: '•', eacute: 'é', egrave: 'è', agrave: 'à', ccedil: 'ç' };

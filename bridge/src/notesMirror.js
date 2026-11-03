@@ -98,7 +98,7 @@ export function syncNotes({ root = jobsRoot() } = {}) {
     const rels = await listNotes(root);
     let copied = 0;
     for (let i = 0; i < rels.length; i += BATCH) {
-      const done = await Promise.all(rels.slice(i, i + BATCH).map((rel) => copyIfChanged(root, rel).catch(() => /* ignored */ false)));
+      const done = await Promise.all(rels.slice(i, i + BATCH).map((rel) => copyIfChanged(root, rel).catch(() => /* copy failed: counted as not done */ false)));
       copied += done.filter(Boolean).length;
     }
     const removed = await removeStale(new Set(rels));

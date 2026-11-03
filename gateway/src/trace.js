@@ -249,7 +249,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
           if (!TYPE_RE.test(type)) return;
           foreign += 1;
           push(stamp('client', type, event.data, event.data?.turn, clampTs(event.ts, now())));
-        } catch { /* ignore */ }
+        } catch { /* malformed event: the session must not notice */ }
       },
       /** Events from the Screen Agent (device route): already validated by the caller. */
       external(events, source = 'screen-agent') {
@@ -266,7 +266,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
             foreign += 1;
             push(stamp(source, e.type, e.data, e.turn, e.ts));
           }
-        } catch { /* ignore */ }
+        } catch { /* malformed event: the session must not notice */ }
       },
       flush,
       /** Flushes and ends the trace; the caller need not await it. Never rejects. */

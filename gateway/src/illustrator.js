@@ -1071,7 +1071,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
   const writable = (id) => onBus(id) && (!foreignOwner(id) || id === namedId); // an existing canvas this conversation may update
   const specOf = (id) => (id ? bus.latest().find((e) => e.id === id)?.spec ?? null : null);
   let entityStrikes = 0; // canvas_render answers of this turn rejected for invented names
-  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; /* ignored */ } };
+  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; /* bridge hosts unavailable: none known */ } };
   /** What the agent's own canvas_render may name: the conversation, this turn's tool results, the page, the previous version. */
   const entityCorpus = (previous) => createCorpus({
     rich: [JSON.stringify(page ?? ''), pageFacts(page), previous ? JSON.stringify(previous) : '', ...memory.turnTexts(), ...memory.toolsUsed().map((t) => t.content)].join('\n'),

@@ -176,7 +176,7 @@ const inflight = new Map();
 
 export function jobStart(params, opts = {}) {
   let p;
-  try { p = validate(params); } catch (err) { return Promise.reject(err); /* ignored */ }
+  try { p = validate(params); } catch (err) { return Promise.reject(err); /* rejected with the validation error above */ }
   const hit = inflight.get(p.requestId);
   if (hit) return hit;
   const work = start(p, opts).finally(() => inflight.delete(p.requestId));
