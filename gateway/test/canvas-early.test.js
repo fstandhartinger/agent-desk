@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { setEnv } from './helpers/env.js';
 
+import { DRAW_NOTE } from '../src/illustrator.js';
 setEnv({ DESK_CANVAS_TIMEOUT_MS: '600', DESK_CANVAS_DEBOUNCE_MS: '30', DESK_CANVAS_RESEARCH_MS: '60' });
 const { createCanvasBus: createBus } = await import('../src/canvasBus.js');
 // what live listeners saw (round 10: failed / dropped placeholders leave the replay ring, so the ring alone no longer tells)
@@ -114,7 +115,7 @@ describe('early illustrator', () => {
     ask(s, 'Wie funktioniert die Video-Sendeblockierung?');
     const id = events()[0].id;
     const r = s.draw({ request: 'Mit allen Details aus der Recherche', id: 'anders' });
-    assert.deepEqual(r, { ok: true, id, status: 'zeichne' });
+    assert.deepEqual(r, { ok: true, id, status: 'zeichne', hinweis: DRAW_NOTE });
     assert.equal(events().length, 1, 'no second pending while the early one is running');
     await s.idle();
     const ready = events().filter((e) => e.phase === 'ready');

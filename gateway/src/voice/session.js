@@ -1,7 +1,8 @@
 // Browser side of a voice session: protocol with the web client (docs/SPEC.md "Voice"), tool execution, limits,
 // usage/cost ticks and audit. Provider specifics live in the adapters.
 import { cfg } from '../config.js';
-import { pseudoPathRefusal, resolveToolName } from '../tools.js';
+import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
+import { short } from '../redact.js';
 import { cjkRuns, isGermanText, stripCjk } from '../canvas.js';
 import { buildInstructions } from './instructions.js';
 import { pageUpdateText } from '../pack.js';
@@ -47,6 +48,9 @@ const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its fir
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
+  // Live activity for the dock and the Screen Agent window (v0.1.7): what the desk does right now. Not traced: tool.call / tool.done already are.
+  const activity = (obj) => sendJson({ type: 'activity', ...obj, at: now() });
+  let thoughtFor = 0; // the user turn the 'thinking' activity was sent for
   let adapter = null;
   let artifactBlock = '';
   let unregisterText = null;
@@ -170,6 +174,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     turn.itemId = null;
     sendJson({ type: 'transcript', role, text, final: true });
     if (role === 'user') {
+      activity({ id: `heard-${turnId}`, phase: 'heard', label: short(text, 80) });
       collectUser(text);
       return;
     }
@@ -221,6 +226,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     fillers = 0;
   }
 
+  /** 'Verstanden, denke nach …' once per spoken question, when the provider starts its response (or, without response events, when the question is complete). */
+  function thinking() {
+    if (!turnId || thoughtFor === turnId) return;
+    thoughtFor = turnId;
+    activity({ id: `think-${turnId}`, phase: 'thinking', label: 'Verstanden, denke nach …' });
+  }
+
   /** The assistant starts a NEW answer (nothing of an older one was running): the user's question is complete, no need to wait for more fragments. */
   function assistantStarted() {
     responding = true; // bare audio does not prove an answer is in flight (OpenAI streams audio frames while the user speaks)
@@ -248,6 +260,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     interrupted = false;
     if (!text || closed) return;
     armNoAnswer(text);
+    if (!tracksResponses) thinking();
     viz?.noteTurn({ role: 'user', text });
     canvas?.noteTurn({ role: 'user', text });
     // the question is complete: the early illustrator starts now, in parallel with the agent's answer
@@ -420,6 +433,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
     runningTools += 1;
+    const label = activityLabel(name, args);
+    activity({ id, phase: 'start', tool: name, label });
     sendJson({ ...evt, status: 'start' });
     viz?.noteEvent({ ...evt, status: 'start' });
     canvas?.toolStarted(name);
@@ -434,6 +449,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       for (const w of knownWords(res.content)) known.add(w);
       for (const r of cjkRuns(res.content)) if (cjkKnown.size < 500) cjkKnown.add(r);
       const done = { ...evt, status: 'done', summary: res.summary, ms: now() - t0 };
+      activity({ id, phase: res.ok === false ? 'fail' : 'done', tool: name, label, ms: now() - t0, ...(res.ok === false ? { reason: short(res.summary, 80) } : {}) });
       sendJson(done);
       if (res.event?.type === 'handoff' || res.event?.type === 'claude_proposal' || res.event?.type === 'main_agent_prompt') sendJson(res.event); // handoff_propose / claude_task: same confirm cards as in the text chat; main_agent_prompt: the text to copy when the Screen Agent could not type it
       viz?.noteEvent({ ...done, content: output });
@@ -442,6 +458,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       trace.event('tool.error', { turn: turnId, id, name, ms: now() - t0, error: String(err.message ?? err).slice(0, 300) });
       canvas?.noteTool({ name, args, ok: false, content: '' }); // the drawing stops waiting for this tool
       const failed = { ...evt, status: 'error', summary: String(err.message ?? err).slice(0, 200), ms: now() - t0 };
+      activity({ id, phase: 'fail', tool: name, label, ms: now() - t0, reason: short(err.message ?? err, 80) });
       sendJson(failed);
       viz?.noteEvent(failed);
     }
@@ -520,6 +537,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         pending.overlap = false; // a response that started after the question: what it says belongs to the question
         restartNoAnswer();
         trace.event('response.created', { turn: turnId, id: e.id });
+        thinking();
         break;
       case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
         if (e.gone || /not found/i.test(String(e.message ?? ''))) trace.event('screen.context.gone', { message: String(e.message ?? '').slice(0, 200) }); // the replaced item is already gone: harmless
@@ -586,7 +604,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     artifactBlock = deps.artifactInstructions?.() ?? '';
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
-    canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
+    canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
     adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {

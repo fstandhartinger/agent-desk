@@ -790,7 +790,7 @@ export function qualityError(spec) {
 const EXPLAIN_RE = /\bwie\b|warum|wieso|erklär|zeig|architektur|aufbau|ablauf|funktioniert|wofür|wieviel|wie viel|kosten|geld|ausgaben|vergleich|diagramm|chart|grafik|skizze|übersicht|struktur|frage (?:über|zu|zum|zur)|steuer|rücklage|umwandeln|umwandlung|emission|tranche|wie läuft|was passiert/i;
 const LONG_TURN = 60;
 const REQUEST_RE = /\?|\b(?:frage|ich (?:möchte|will|würde|brauche|bräuchte|suche)|kannst du|könntest du|kann man|bitte|sag(?:e)? mir|gib mir|erzähl|beschreib|hilf|stell(?:e)? (?:mir|dir)|mach(?:e)? (?:mir|mal)|was|welche[rsmn]?|wo|wann|wer|wozu|weshalb)\b/i;
-const CHITCHAT_RE = /^(?:danke|vielen dank|ok(?:ay)?|alles klar|super|prima|gut|hallo|hi|hey|tschüss|ja|nein|genau|stimmt|passt)\b[\s\S]{0,40}$/i;
+export const CHITCHAT_RE = /^(?:danke|vielen dank|ok(?:ay)?|alles klar|super|prima|gut|hallo|hi|hey|tschüss|ja|nein|genau|stimmt|passt)\b[\s\S]{0,40}$/i;
 
 /** True when a finished turn is explanatory enough to be illustrated: the question looks like one, or the answer is long / numeric. */
 /**
@@ -818,6 +818,10 @@ export function isYesNoQuestion(text) {
   if (!t || t.length > 90 || (t.match(/[?.!]/g) ?? []).length > 1 || !t.endsWith('?')) return false;
   return YES_NO_START.test(t) && !YES_NO_BLOCK.test(t);
 }
+
+/** Florian asks for a drawing in so many words ("zeichne das", "mal mir ein Diagramm", "als Skizze"): the value check never skips it. */
+const DRAW_ASK_RE = /\bzeichn\w*|\bmal(?:e|st)?\b[^.!?\n]{0,30}\bauf\b|\bskizzier\w*|\bvisualisier\w*|\bdiagramm|\bgrafik|\bschaubild|\bdraw\b|\bsketch\b/i;
+export const asksForDrawing = (text) => DRAW_ASK_RE.test(String(text ?? '').replace(QUOTED_RE, ' ')) && !wantsNoDrawing(text);
 
 export function isExplanatory(userText, answerText) {
   const user = String(userText ?? '').trim();

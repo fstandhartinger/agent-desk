@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setEnv } from './helpers/env.js';
 
+import { DRAW_NOTE } from '../src/illustrator.js';
 setEnv();
 const { TOOL_DEFS, BRIDGE_TOOLS, runTool, statusText, resolveToolName } = await import('../src/tools.js');
 const { Limits } = await import('../src/limits.js');
@@ -107,7 +108,7 @@ describe('validate() with nested arguments', () => {
     const { ctx } = canvasCtx();
     assert.equal((await runTool('canvas_draw', { request: '  ' }, ctx)).ok, false);
     const r = await runTool('canvas_draw', { request: 'Flussdiagramm vom Versand', kind: 'flow' }, ctx);
-    assert.deepEqual(JSON.parse(r.content), { ok: true, id: 'flussdiagramm-vom-versand', status: 'zeichne' });
+    assert.deepEqual(JSON.parse(r.content), { ok: true, id: 'flussdiagramm-vom-versand', status: 'zeichne', hinweis: DRAW_NOTE });
     ctx.canvas.cancelAll();
   });
 });

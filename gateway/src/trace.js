@@ -372,7 +372,7 @@ const DAYPART = [[/\b(?:morgens?|früh|frueh)\b/i, 4, 12], [/\bvormittags?\b/i, 
  */
 export function parseWhich(which, now = Date.now()) {
   const w = String(which ?? '').trim();
-  if (/^(?:last|previous|prev|letzte[nrms]?|zuletzt|vorherige[nrms]?|vorige[nrms]?|davor|die davor|die sitzung davor|vor der aktuellen)$/i.test(w)) return { kind: 'last' };
+  if (/^(?:(?:die|der|meine|eine)\s+)?(?:(?:last|previous|prev|letzte[nrms]?|zuletzt|vorherige[nrms]?|vorige[nrms]?)(?:\s+(?:sitzung|session))?|(?:sitzung\s+)?davor|vor der aktuellen(?: sitzung)?)$/i.test(w)) return { kind: 'last' };
   if (/^(?:a\s?#\s?)?[0-9a-f]{6}$/i.test(w)) return { kind: 'lookup' };
   const clock = /(?:^|\D)([01]?\d|2[0-3])\s*[:.h]\s*([0-5]\d)(?:\D|$)/.exec(w) ?? /\b([01]?\d|2[0-3])\s*uhr\b/i.exec(w);
   if (clock) {

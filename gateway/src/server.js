@@ -191,7 +191,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
-      createCanvas: ({ emit, page, provider, onFacts, focusedId }) => createCanvasSession({ bus: canvasBus, illustrator, by: 'voice', provider, emit, page, onFacts, focusedId, ctx: { sid, ip, limits } }),
+      createCanvas: ({ emit, page, provider, onFacts, onSkip, focusedId }) => createCanvasSession({ bus: canvasBus, illustrator, by: 'voice', provider, emit, page, onFacts, onSkip, focusedId, ctx: { sid, ip, limits } }),
       sid,
       prewarm: true, // warm the bridge's ledger cache at session start (round 10)
     });

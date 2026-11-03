@@ -8,6 +8,7 @@ setEnv({ DESK_CANVAS_TIMEOUT_MS: '400', DESK_CANVAS_DEBOUNCE_MS: '30' });
 const keepAlive = setInterval(() => {}, 1_000);
 after(() => clearInterval(keepAlive));
 const { createCanvasBus: createBus } = await import('../src/canvasBus.js');
+const { DRAW_NOTE } = await import('../src/illustrator.js');
 // what live listeners saw (round 10: failed / dropped placeholders leave the replay ring, so the ring alone no longer tells)
 const createCanvasBus = () => { const b = createBus(); b.seen = []; b.subscribe((e) => b.seen.push(e)); return b; };
 const { createCanvasSession, createIllustrator, createMemory, deriveSources, groundNumbers, ILLUSTRATOR_TOOLS, SYSTEM_PROMPT } = await import('../src/illustrator.js');
@@ -328,7 +329,7 @@ describe('canvas session', () => {
     const t0 = Date.now();
     const r = s.draw({ request: 'Torte mit 70', kind: 'pie', id: 'mein-geld' });
     assert.ok(Date.now() - t0 < 50);
-    assert.deepEqual(r, { ok: true, id: 'mein-geld', status: 'zeichne' });
+    assert.deepEqual(r, { ok: true, id: 'mein-geld', status: 'zeichne', hinweis: DRAW_NOTE });
     assert.deepEqual(events().map((e) => [e.phase, e.id, e.kind]), [['pending', 'mein-geld', 'pie']]);
     await s.idle();
     assert.deepEqual(events().map((e) => e.phase), ['pending', 'ready']);

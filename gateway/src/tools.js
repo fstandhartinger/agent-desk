@@ -251,6 +251,59 @@ export function statusText(name, args = {}) {
   return STATUS[name]?.(args ?? {}) ?? null;
 }
 
+// Live activity (voice `activity` events, shown in the dock and the Screen Agent window): a static German label per tool. Argument
+// snippets go through redact() and stop at 60 characters; mail, Discord and chat content never appear, only what Florian asked for.
+const snip = (v, n = 60) => short(String(v ?? ''), n);
+const aid = (v) => { const id = String(Array.isArray(v) ? v[0] : v ?? '').trim().replace(/^a#/i, '').toLowerCase(); return /^[0-9a-f]{6}$/.test(id) ? `a#${id}` : null; };
+const last = (p) => snip(String(p ?? '').split('/').filter(Boolean).at(-1) ?? '', 40);
+const ACTIVITY = {
+  screen_context: () => 'Lese den Bildschirm-Kontext',
+  look_at_screen: () => 'Schaue auf den Bildschirm',
+  artifact_context: () => 'Lese den Karten-Kontext',
+  artifact_resolve: ({ ids }) => `Lese Karte ${(Array.isArray(ids) ? ids : [ids]).map(aid).filter(Boolean).slice(0, 2).join(', ') || 'a#…'}${Array.isArray(ids) && ids.length > 2 ? ` und ${ids.length - 2} weitere` : ''}`,
+  artifact_search: ({ q }) => `Suche Karte: ${snip(q, 40)}`,
+  artifact_ref_read: ({ id }) => `Lese Details zu ${aid(id) ?? 'Karte'}`,
+  read_core_doc: ({ name }) => `Lese ${snip(name, 20) || 'Kerndokument'}`,
+  knowledge_read: ({ topic }) => topic ? `Lese Wissen: ${snip(topic, 40)}` : 'Lese das Wissensverzeichnis',
+  search_files: ({ query }) => `Suche in Dateien: ${snip(query, 40)}`,
+  read_file: ({ path }) => `Lese Datei ${last(path)}`,
+  decisions_recent: () => 'Lese die letzten Entscheidungen',
+  list_jobs: () => 'Liste die Jobs auf',
+  job_status: ({ name }) => `Prüfe Job ${snip(name, 40)}`,
+  board_threads: () => 'Lese die Board-Threads',
+  board_read: ({ thread }) => `Lese Board-Thread ${snip(thread, 30)}`,
+  board_entry: ({ id }) => `Lese Board-Eintrag ${snip(id, 12)}`,
+  board_search: ({ query }) => `Suche im Board: ${snip(query, 40)}`,
+  chats_search: () => 'Durchsuche die Agenten-Chats',
+  chat_read: () => 'Lese einen Agenten-Chat',
+  explainer_point: () => 'Lese den Erklärpunkt',
+  explainer_context: () => 'Lese das Hintergrunddokument',
+  claude_task: () => 'Bereite die Übergabe an Claude vor',
+  claude_status: () => 'Prüfe die Claude-Sitzungen',
+  output_main_agent_prompt: () => 'Schreibe den Prompt für den Main Agent',
+  start_agent_job: ({ title }) => `Starte Agent-Job: ${snip(title, 40)}`,
+  canvas_draw: ({ request }) => `Zeichne: ${snip(request, 45)}`,
+  canvas_render: ({ title }) => `Zeichne: ${snip(title, 45)}`,
+  ledger_spend: () => 'Hole die Zahlen aus dem Ledger',
+  desk_status: () => 'Prüfe den Live-Status des Desks',
+  session_trace: () => 'Lese das Sitzungsprotokoll',
+  code_outline: ({ path }) => `Lese die Code-Struktur ${last(path)}`.trim(),
+  web_read: ({ url }) => `Lese Webseite ${(() => { try { return new URL(url).hostname; } catch { return ''; } })()}`.trim(),
+  discord_read: () => 'Lese Discord',
+  mail_search: () => 'Suche in den Mails',
+  mail_read: () => 'Lese eine Mail',
+  skills_list: () => 'Liste die Skills auf',
+  skill_read: ({ name }) => `Lese Skill ${snip(name, 30)}`,
+  run_readonly: () => 'Prüfe den Status auf Sandy',
+  handoff_propose: () => 'Bereite eine Übergabe an einen Agenten vor',
+};
+/** The live-activity label of a tool call (German, <= ~70 characters, redacted); an unknown tool is shown by its name. */
+export function activityLabel(name, args = {}) {
+  const label = ACTIVITY[name];
+  if (!label) return snip(name, 40);
+  try { return label(args && typeof args === 'object' ? args : {}).replace(/\s+/g, ' ').trim(); } catch { return snip(name, 40); }
+}
+
 const MAX_NESTED_ITEMS = 200;
 
 /** Checks one value against its schema. Top level is strict (as always); nested values only need the right shape,
