@@ -107,6 +107,30 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const parents = [...fresh.parents, ...(prior.parents ?? [])].filter((p, i, all) => all.findIndex(q => q.id === p.id) === i).slice(0, 12);
     return { ids, items, parents, unknown: fresh.unknown ?? [], invalid: fresh.invalid ?? [] };
   };
+  // Card numbers ("19209", "card:19209") become ids through the screen or the registry search. A pure-digit six-character string is a card
+  // number first and an id only when no card has that number (192090 must not open another card's id).
+  async function cardId(sid, number) {
+    const has = i => i.refs?.some(r => CARD_REF.exec(r.target)?.[1] === number);
+    const onScreen = screen(sid).items.find(has);
+    if (onScreen) return onScreen.id;
+    try { return (await registry(`/v1/search?q=${encodeURIComponent(number)}`)).items.find(has)?.id ?? null; } catch { return null; /* registry down: treated as not found, the caller reports it invalid */ }
+  }
+  async function withCards(sid, raw) {
+    const parts = (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map(p => typeof p === 'string' ? p.trim() : p);
+    const plain = [], cards = [];
+    for (const part of parts) {
+      const m = typeof part === 'string' && /^(?:card:(?:urgent:)?)?([1-9]\d{0,11})$/i.exec(part);
+      if (m) cards.push({ part, number: m[1], asId: m[1].length === 6 && !/^card:/i.test(part) }); else plain.push(part);
+    }
+    const { ids, invalid } = parseArtifactIds(plain);
+    for (const c of cards.slice(0, 8)) {
+      const found = await cardId(sid, c.number);
+      const id = found ?? (c.asId ? c.number : null);
+      if (!id) invalid.push(String(c.part).slice(0, 60)); else if (!ids.includes(id)) ids.push(id);
+    }
+    if (ids.length > 8) throw fail('Höchstens 8 Artefakte pro Anfrage.');
+    return { ids, invalid };
+  }
   async function resolve(sid, raw, depth = 1) {
     sweep();
     // Install a new generation before validation/I/O: an older, slower resolve cannot overwrite it. The context MERGES (newest first, up to
@@ -115,7 +139,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const record = { value: prior, expires: now() + CONTEXT_TTL };
     if (sessions.size >= 1000 && !sessions.has(sid)) sessions.delete(sessions.keys().next().value);
     sessions.set(sid, record);
-    const { ids, invalid } = parseArtifactIds(raw);
+    const { ids, invalid } = await withCards(sid, raw);
     if (![1, 2].includes(depth)) throw fail('depth muss 1 oder 2 sein.');
     const result = ids.length ? await registry(`/v1/resolve?ids=${ids.join(',')}&depth=${depth}`) : { items: [], unknown: [] };
     await expandCards(result.items);
