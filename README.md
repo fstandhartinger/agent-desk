@@ -95,7 +95,7 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
 - `POST /api/device/session/:sid/frame` (scope `screen`): one downscaled jpeg (<= 300 KB, <= 1600 px wide, base64) with
   `{deviceId,frameVersion,process,title,url?,masked,ids,reason:"start|interval|foreground|fresh",commandId?}`; only while a voice
   or chat session of the sid runs (else 409 `no-session`, client stops). Gemini 3.8 Flash turns it into a German description
-  (6 s timeout, in memory only, never logged) that reaches the voice model as passive context (no reply) and the `look_at_screen`
+  (8 s timeout for interval/start/foreground frames, `DESK_VISION_TIMEOUT_MS`; 6 s for the fresh look the voice agent waits for, `DESK_VISION_FRESH_TIMEOUT_MS`; in memory only, never logged; a failure records `ms`, `bytes`, the provider `status` and the reason) that reaches the voice model as passive context (no reply) and the `look_at_screen`
   tool. `GET .../commands` is the 25 s long-poll that delivers `{fresh:true,id}` when the agent calls `look_at_screen`.
   Cost cap: `DESK_VISION_CAP_USD_HOUR` (default 0.60 per sid hour). Full contract: the vision worker's CONTRACT.md.
 - `POST /api/device/session/:sid/highlight`: `{crop,context?,bbox:{x,y,w,h},ids}`. Crop is
@@ -109,16 +109,30 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
   Returns `{ok:true,summary}`; without ready voice returns 409. Only the last five summaries
   remain in the screen context. Images are never persisted or logged.
 - `POST /api/device/dictate`: multipart `audio` (PCM16 WAV, 16 kHz mono, at most 60 s),
-  `context` JSON `{process,fieldBefore,visibleIds,recentTerms}`. Field text is at most 500
+  `context` JSON `{process,fieldBefore,visibleIds,recentTerms}`, optional `chunk` JSON
+  `{dictationId:string<=40,index:int,final:bool}` (a long dictation the app split; only traced, malformed = 400). Field text is at most 500
   characters; at most 20 IDs and 50 recent terms (100 chars each). Groq Whisper large v3,
-  OpenAI `gpt-4o-transcribe` and Gemini 3.8 Flash run in parallel; missing keys skip providers.
-  Gemini reconciles completed variants with dictionary/context when time remains. The
-  2.3-second soft deadline merges available transcripts despite a slow provider; the
-  four-second hard budget includes dictionary and bounded (1500 chars, fenced) visible-title context lookup; on expiry use the first completed valid
-  transcript, abort remaining requests, or return 504 if none completed. Short-clip word-count
+  OpenAI `gpt-4o-transcribe`, Gemini 3.8 Flash and MAI-Transcribe-2 (`microsoft/mai-transcribe-2` over OpenRouter,
+  `OPENROUTER_API_KEY`, about USD 0.10/h) run in parallel; missing keys skip providers. MAI gets a phrase list (dictionary terms,
+  corrected spellings only, then the words of the visible artifact titles, at most 200); a 4xx with a list is retried once without it.
+  Gemini reconciles completed variants with dictionary/context when time remains. The hard budget scales with the audio:
+  `clamp(4 s, 45 s, 4 s + 0.7 s per second of audio)` (including the dictionary and bounded visible-title lookup); the soft wait for the
+  other providers is 2.3 s for clips up to 2 s and grows by 0.25 s per further second. On expiry the first completed valid
+  transcript is used and the remaining requests are aborted. Short-clip word-count
   checks reject implausible output; explicit dictionary `replace_from` corrections apply.
-  Returns `{text,sources:{groq,openai,gemini},ms}` (unavailable sources are null). Audio stays
-  in memory; no uploads are written to disk or logged.
+  Returns `{text,sources:{groq,openai,gemini,mai?},ms,providers:{<name>:{ok,ms,status?,reason?},merge?},degraded,merged,seconds}`
+  (unavailable sources are null; `reason`: `upstream|timeout|empty|implausible|late|unfinished|budget|error`, `status` is the provider's HTTP status,
+  never its body; `degraded`: with two or more providers fewer than two delivered, or the merge failed). When nothing is usable: 502 (all upstream errors) or
+  504 with `{error,code:"all-providers-failed",providers}`; 503 `code:"no-provider"` without keys. Audio stays
+  in memory; no uploads are written to disk or logged. Chunks of one dictation use their own bucket (120/min) instead of the 12/min media bucket.
+- `POST /api/device/caption` (scope `dictate`): live caption, MAI only. Multipart `audio` (PCM16 16 kHz mono, raw samples or a WAV, 0.1 to 12 s),
+  optional `context` JSON `{visibleIds,recentTerms}` (phrases: dictionary + titles of the visible ids + recent terms, titles cached 5 min per device).
+  3 s timeout. Returns `{text,ms,seconds}`. Own limits: 60 requests/device/minute, two in flight per device; the real `usage.cost` goes into the daily Desk cap.
+  `503 {error,code:"no-key"|"mai-down"}` when the key is missing or MAI is down (the app then hides captions); `429` with `code:"budget"|"busy"`.
+  The caption text is never traced; per device a `caption.stats` event (calls, failures, lastStatus, medianMs, costUsd) goes to the device log at most every 60 s.
+- `POST /api/device/log` (scope `screen`): `{events:[{ts?,type:"screen.*"|"hotkey.*"|"client.*",data?}]}`, up to 100 events and 256 KB, 60 requests/device/minute.
+  Events with no session go straight into the device log of the day (see docs/TRACE.md). Timestamps up to 24 h old (retry queue) are kept and marked `data.late`.
+  Answer `{ok,accepted,logged}`. `POST /api/device/session/:sid/trace` takes late events the same way (they go to the device log, answer carries `late:n`).
 - `GET /api/device/dictionary`: registry `{items:[{term,replace_from,...}]}`, cached 5 min.
 - `POST /api/device/dictionary/learn`: `{from,to}`, 1–3 words, Unicode letters and internal
   hyphens only, at most 100 chars each. Writes `{term:to,replace_from:[from],source:"learned"}`
@@ -128,9 +142,12 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
   source=learned rows through the registry. The `/device` page provides delete buttons.
   Learning and deletion invalidate the dictionary cache.
 
+Every failing `/api/device/` request leaves a `device.error {path,method,status,code?,message,ms,bytes}` line (stdout audit and the device log); every
+other HTTP answer >= 400 an `http.error {path,method,status,message?,ms,bytes}` audit line.
+
 Server keys: existing `ARTIFACTS_URL`, `ARTIFACTS_DESK_TOKEN` (read + dict + devices scopes),
-`GOOGLE_API_KEY` (or `GEMINI_API_KEY`) for vision/audio/reconciliation, optional `GROQ_API_KEY`
-and `OPENAI_API_KEY` for the other transcribers. For test endpoints the existing
+`GOOGLE_API_KEY` (or `GEMINI_API_KEY`) for vision/audio/reconciliation, optional `GROQ_API_KEY`,
+`OPENAI_API_KEY` and `OPENROUTER_API_KEY` (MAI-Transcribe-2, also used by captions; `OPENROUTER_BASE_URL` override) for the other transcribers. For test endpoints the existing
 `GOOGLE_BASE_URL`, `OPENAI_BASE_URL` and new `GROQ_BASE_URL` overrides are supported.
 Processors: Google receives highlighted images and enabled dictation audio; Groq and OpenAI
 receive dictation audio when configured. Field context/dictionary reach Google reconciliation.
