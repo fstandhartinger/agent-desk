@@ -154,14 +154,17 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
   }
   const maiCost = (r, duration) => r.cost ?? Math.ceil(r.seconds ?? duration) / 3600 * 0.10;
   /** Live caption: MAI only, 3 s, no retry of the audio. 503 + code when the key is missing or MAI is down (the app then hides captions). Returns {text, ms, seconds, cost, retried}. */
-  async function caption(audio, phrases) {
+  async function caption(audio, phrases, deviceId = 'device') {
     if (!maiKey()) throw Object.assign(deviceError('Untertitel sind nicht eingerichtet.', 503), { code: 'no-key', reason: 'no-key', ms: 0 });
-    if (!limits.check('device-media', 'spend').ok) throw Object.assign(deviceError('Tagesbudget erreicht.', 429), { code: 'budget', reason: 'budget', ms: 0 });
+    // own ledger per device (USD 2/day, 1/hour): captions never draw on the shared cap, so a stuck loop cannot starve dictation or drawings
+    const gate = limits.captionCheck(deviceId);
+    if (!gate.ok) throw Object.assign(deviceError('Untertitel-Budget erreicht.', 429), { code: 'caption-budget', reason: 'caption-budget', ms: 0, retryAfter: gate.retryAfter, scope: gate.scope, body: { error: 'Untertitel-Budget erreicht.', code: 'caption-budget', scope: gate.scope } });
     const started = Date.now();
     try {
       const r = await mai(audio, phrases, AbortSignal.timeout(3000));
-      limits.addCost(maiCost(r, audio.length / 32000));
-      return { text: r.text.trim(), ms: Date.now() - started, seconds: r.seconds ?? Math.round(audio.length / 320) / 100, cost: maiCost(r, audio.length / 32000), retried: r.retried };
+      const cost = maiCost(r, audio.length / 32000);
+      limits.captionAdd(deviceId, cost);
+      return { text: r.text.trim(), ms: Date.now() - started, seconds: r.seconds ?? Math.round(audio.length / 320) / 100, cost, retried: r.retried };
     } catch (err) { throw Object.assign(deviceError('Der Untertitel-Dienst ist gerade nicht erreichbar.', 503), { code: 'mai-down', reason: reasonOf(err), upstream: err.upstream, ms: Date.now() - started }); }
   }
   async function dictate(audio, context, dictionary) {

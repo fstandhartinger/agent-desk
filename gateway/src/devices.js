@@ -45,6 +45,21 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if (++entry.n > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
   }
+  // chunks of one dictation: at most 60, the index must grow, and a device may start only a few dictations per hour (a looping app rotating ids)
+  const chunkIds = new Map();
+  function chunkGate(deviceId, { dictationId, index }) {
+    const time = now(), key = `${deviceId}:${dictationId}`;
+    for (const [k, v] of chunkIds) if (v.until <= time) chunkIds.delete(k);
+    let e = chunkIds.get(key);
+    if (!e) {
+      const started = [...chunkIds.entries()].filter(([k]) => k.startsWith(`${deviceId}:`)).length;
+      if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600 });
+      e = { n: 0, last: -1, until: time + 3600_000 }; chunkIds.set(key, e);
+    }
+    if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation' });
+    if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing' });
+    e.last = index;
+  }
   const verified = new Map();
   const busy = new Set(); let inFlight = 0;
   async function limited(record, kind, work) {
@@ -148,8 +163,8 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     capBusy.set(record.deviceId, (capBusy.get(record.deviceId) ?? 0) + 1); capInFlight++;
     try {
       const phrases = await captionPhrases(record.deviceId, ctx);
-      try { const r = await media.caption(buffer, phrases); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost }); return { text: r.text, ms: r.ms, seconds: r.seconds }; }
-      catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: { error: err.message, code: err.code ?? 'caption-failed' } }); }
+      try { const r = await media.caption(buffer, phrases, record.deviceId); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost }); return { text: r.text, ms: r.ms, seconds: r.seconds, costUsd: Number(r.cost.toFixed(6)) }; }
+      catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'caption-failed' } }); }
     } finally { capBusy.set(record.deviceId, capBusy.get(record.deviceId) - 1); if (!capBusy.get(record.deviceId)) capBusy.delete(record.deviceId); capInFlight--; }
   }
   async function handle(req, res, url, ctx) {
@@ -204,7 +219,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     ctx.deviceId = record.deviceId;
-    rate(`device:${record.deviceId}`, 120);
+    if (path !== '/api/device/caption') rate(`device:${record.deviceId}`, 120); // captions have their own bucket: 40/min of them must not starve command polls and the trace
     if (path === '/api/device/web-session' && req.method === 'POST') {
       // Recheck the registry even on a warm native cache. Bind the browser session to the device hash so
       // registry revocation also stops Desk HTTP/voice authentication after process restarts.
@@ -256,9 +271,10 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     } else if (target && target[2] === 'briefing' && req.method === 'POST') {
       rate(`briefing:${record.deviceId}`, 30);
       if (!vision.active(target[1])) throw Object.assign(fail('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session' });
+      if (vision.ownedBy && !vision.ownedBy(target[1], record.deviceId)) throw fail('Fremde Sitzung.', 403);
       const body = await readJson(req, 64 * 1024);
       const { commandId, ...device } = body;
-      sendJson(res, 200, briefing.deviceIn(target[1], device, commandId));
+      sendJson(res, 200, briefing.deviceIn(target[1], device, commandId, { blocked: artifacts.screen(target[1]).window?.blocked === true }));
     } else if (target && target[2] === 'trace' && req.method === 'POST') {
       rate(`trace:${record.deviceId}`, 60);
       const events = traceEvents((await readJson(req, 256 * 1024)).events);
@@ -311,7 +327,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const dctx = dictateContext(raw);
       const chunk = form.has('chunk') ? chunkInfo(form.get('chunk')) : null;
       // the chunks of one long dictation come in a burst: their own, larger bucket instead of the 12/min of single clips
-      if (chunk) rate(`chunk:${record.deviceId}`, 120); else rate(`media:${record.deviceId}`, 12);
+      if (chunk) { rate(`chunk:${record.deviceId}`, 120); chunkGate(record.deviceId, chunk); } else rate(`media:${record.deviceId}`, 12);
       const buffer = Buffer.from(await audio.arrayBuffer());
       wavDuration(buffer);
       const result = await limited(record, chunk ? `dictate:${chunk.dictationId}` : 'dictate', async () => {

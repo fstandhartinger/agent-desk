@@ -70,13 +70,15 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function state(sid) {
     let S = states.get(sid);
     if (!S) {
-      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [] };
+      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), devices: new Set(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [] };
       states.set(sid, S);
       sweeper ??= setInterval(sweep, 15_000).unref();
     }
     return S;
   }
   const active = sid => { const S = states.get(sid); return Boolean(S && (S.handles.size || S.chatUntil > now())); };
+  /** false when this session already talks to other devices only: one device must not push text into another device's session. */
+  const ownedBy = (sid, deviceId) => { const S = states.get(sid); return !S?.devices.size || S.devices.has(deviceId); };
   const attached = sid => { const S = states.get(sid); return Boolean(S && active(sid) && (S.polls.size || now() - S.lastSeen < ATTACHED_MS)); };
   function sweep() {
     for (const [sid, S] of states) {
@@ -183,7 +185,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     if (!active(sid)) throw noSession();
     const S = state(sid), key = record.deviceId;
     if (frameVersion < (S.newest.get(key) ?? -1)) throw Object.assign(deviceError('Veralteter Bildschirm-Frame.', 409), { code: 'stale-frame' });
-    S.newest.set(key, frameVersion);
+    S.newest.set(key, frameVersion); S.devices.add(key);
     S.noPicture = null; // a frame ends the "no picture" state
     seen(sid);
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
@@ -257,6 +259,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     if (!active(sid)) throw noSession();
     const S = state(sid), key = record.deviceId;
     S.polls.get(key)?.resolve({ fresh: false });
+    S.devices.add(key);
     seen(sid);
     return new Promise(resolve => {
       const cmd = S.queue.find(c => c.expires > now());
@@ -386,5 +389,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, requestBriefing, look, chatBlock, snapshot, _states: states };
+  return { attach, touchChat, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, requestBriefing, look, chatBlock, snapshot, _states: states };
 }
