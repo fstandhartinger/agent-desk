@@ -582,12 +582,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(startTimer);
     const verdict = limits.check(sid, 'voice');
     if (!verdict.ok) {
+      trace?.event('session.refused', { reason: 'limit', retryAfter: verdict.retryAfter ?? null, message: verdict.reason });
       sendJson({ type: 'error', message: `Voice-Limit erreicht${verdict.retryAfter ? ` (erneut in ${Math.ceil(verdict.retryAfter / 60)} min)` : ''}` });
       finish('limit');
       return;
     }
     if (!apiKey) {
       const err = unavailableError(provider, { status: 401 });
+      trace?.event('provider.error', { message: String(err.message ?? '').slice(0, 300), status: 401, code: 'no-key', provider });
       sendJson({ type: 'error', message: err.message, fallback: err.fallback });
       finish('no-key');
       return;
@@ -596,7 +598,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     // Server-side page context (points/timeline/context.json/deepdive): nothing the browser sent except slug, t, sceneId and pointId is
     // trusted once it loads; without a loader or on failure the browser's own page object is used as before.
     if (deps.loadPage && page?.slug) {
-      const loaded = await Promise.race([deps.loadPage(page).catch(() => null), new Promise((resolve) => setTimeout(resolve, PAGE_LOAD_MS, null))]);
+      const loaded = await Promise.race([deps.loadPage(page).catch((err) => { trace?.event('page.load_failed', { slug: page.slug, message: String(err?.message ?? err).slice(0, 120) }); return null; }), new Promise((resolve) => setTimeout(resolve, PAGE_LOAD_MS, null))]);
       if (closed) return;
       if (loaded) page = loaded;
       else audit({ action: 'voice.page.fallback', detail: `${provider} slug=${page.slug}` });
@@ -614,15 +616,16 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
-    if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {});
+    if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {}); // prewarm only: the first real call reports its own failure
     tickTimer = setInterval(tick, USAGE_TICK_MS);
     capTimer = setTimeout(() => {
+      trace?.event('session.hard_cap', { ms: HARD_CAP_MS });
       sendJson({ type: 'error', message: 'Voice-Sitzung nach 30 Minuten beendet' });
       finish('hard-cap');
     }, HARD_CAP_MS);
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
     trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
-    Promise.resolve(trace.ready).then((info) => { if (info?.aid) sendJson({ type: 'session', aid: info.aid }); }).catch(() => {});
+    Promise.resolve(trace.ready).then((info) => { if (info?.aid) sendJson({ type: 'session', aid: info.aid }); }).catch(() => {}); // ready never rejects; the id is a courtesy
   }
 
   /**
@@ -633,7 +636,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   async function updatePage(raw) {
     if (!deps.loadPage || !raw?.slug || raw.slug !== page?.slug || now() - pageUpdateAt < 1000) return;
     pageUpdateAt = now();
-    const loaded = await deps.loadPage(raw).catch(() => null);
+    const loaded = await deps.loadPage(raw).catch((err) => { trace?.event('page.load_failed', { slug: raw.slug, message: String(err?.message ?? err).slice(0, 120) }); return null; });
     if (!loaded || closed) return;
     const changed = loaded.pointId !== page?.pointId;
     page = loaded;
@@ -735,8 +738,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       return;
     }
     let msg;
-    try { msg = JSON.parse(data.toString()); } catch { return; }
-    if (msg.type === 'start' && !adapter) begin(msg).catch(() => finish('start-failed'));
+    try { msg = JSON.parse(data.toString()); } catch { trace?.event('client.bad_message', { bytes: data.length }); return; }
+    if (msg.type === 'start' && !adapter) begin(msg).catch((err) => { trace?.event('session.error', { reason: 'start-failed', message: String(err?.message ?? err).slice(0, 200) }); finish('start-failed'); });
     else if (msg.type === 'page' && adapter) updatePage(msg.page);
     else if (msg.type === 'focus') canvas?.setFocus?.(focusOf(msg).focusedId); // round 11: the canvas the browser shows now
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {

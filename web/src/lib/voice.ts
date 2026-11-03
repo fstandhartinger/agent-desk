@@ -4,6 +4,7 @@ import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
 import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
+import { drainClientErrors } from './clientError';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
 import type { ActivityEvent, ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
 import type { ProviderId } from './status';
@@ -96,7 +97,7 @@ export class VoiceSession {
       this.ctx = new AudioContext({ sampleRate: 24000, latencyHint: 'interactive' });
       this.ctx.createMediaStreamSource(this.stream!); // throws on engines that cannot mix rates
     } catch {
-      await this.ctx?.close().catch(() => {});
+      await this.ctx?.close().catch(() => /* ignored */ {});
       this.ctx = new AudioContext({ latencyHint: 'interactive' });
     }
     const ctx = this.ctx;
@@ -268,7 +269,15 @@ export class VoiceSession {
     else if (this.pending.length < 50) this.pending.push(e);
   }
 
+  /** True when the event went out on an open socket (it is not queued: the caller keeps it otherwise). */
+  eventNow(type: string, data: unknown): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ type: 'client_event', event: { ts: Date.now(), type, data } }));
+    return true;
+  }
+
   private flushEvents() {
+    for (const { ts, data } of drainClientErrors()) this.sendJson({ type: 'client_event', event: { ts, type: 'error', data } });
     for (const event of this.pending.splice(0)) this.sendJson({ type: 'client_event', event });
   }
 
@@ -323,7 +332,7 @@ export class VoiceSession {
     this.mic = this.player = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
-    void this.ctx?.close().catch(() => {});
+    void this.ctx?.close().catch(() => /* ignored */ {});
     this.ctx = null;
     levels.mic = levels.speaker = 0;
   }

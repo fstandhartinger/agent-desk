@@ -113,7 +113,7 @@ export class BridgeHub extends EventEmitter {
   #seedSessions(conn) {
     this.call('claude.list', {}, { host: conn.host, timeoutMs: 10_000 })
       .then((result) => { for (const session of result?.sessions ?? []) trackSession(conn, session); })
-      .catch(() => {});
+      .catch(() => /* ignored */ {});
   }
 
   /** The host a call without explicit host goes to: the first connected host of the route that announced the method. */

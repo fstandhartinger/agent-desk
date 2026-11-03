@@ -27,7 +27,7 @@ export function mirrorStatus() {
 }
 
 async function entries(dir) {
-  try { return await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  try { return await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; /* absent */ }
 }
 
 /** Every note file of the job view as [relative path]: <job>/<file> and <job>/<dir>/<file>. */
@@ -57,7 +57,7 @@ async function copyIfChanged(root, rel) {
   const src = path.join(root, rel);
   const dst = path.join(MIRROR_DIR, rel);
   let s;
-  try { s = await fs.promises.lstat(src); } catch { return false; }
+  try { s = await fs.promises.lstat(src); } catch { return false; /* absent */ }
   if (!s.isFile() || s.size > MAX_BYTES) return false;
   try {
     const d = await fs.promises.stat(dst);
@@ -78,7 +78,7 @@ async function removeStale(keep) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) {
         await walk(p, r);
-        if (!(await entries(p)).length) await fs.promises.rmdir(p).catch(() => {});
+        if (!(await entries(p)).length) await fs.promises.rmdir(p).catch(() => /* absent */ {});
       } else if (!keep.has(r)) {
         await fs.promises.rm(p, { force: true });
         removed += 1;
@@ -98,7 +98,7 @@ export function syncNotes({ root = jobsRoot() } = {}) {
     const rels = await listNotes(root);
     let copied = 0;
     for (let i = 0; i < rels.length; i += BATCH) {
-      const done = await Promise.all(rels.slice(i, i + BATCH).map((rel) => copyIfChanged(root, rel).catch(() => false)));
+      const done = await Promise.all(rels.slice(i, i + BATCH).map((rel) => copyIfChanged(root, rel).catch(() => /* ignored */ false)));
       copied += done.filter(Boolean).length;
     }
     const removed = await removeStale(new Set(rels));

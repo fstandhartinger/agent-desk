@@ -52,7 +52,7 @@ export async function syncWindowFile(home, { target = 'lechonk', log = () => {},
 /** LeChonk: a warning line when the hash file is missing or older than STALE_MS; null when it is fresh. */
 export function windowFileAgeWarning(home, now = Date.now()) {
   let st;
-  try { st = fs.statSync(windowFile(home)); } catch { return 'secret-windows.json missing: Sandy secret fragments are not guarded on this host'; }
+  try { st = fs.statSync(windowFile(home)); } catch { return 'secret-windows.json missing: Sandy secret fragments are not guarded on this host'; /* absent */ }
   const age = now - st.mtimeMs;
   if (age <= STALE_MS) return null;
   return `secret-windows.json is ${Math.round(age / 3600_000)} h old (> 24 h): the Sandy bridge push may be failing`;

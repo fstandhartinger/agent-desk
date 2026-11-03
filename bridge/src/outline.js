@@ -80,7 +80,7 @@ function shSpecs(text) {
   return out;
 }
 
-const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; /* absent */ } };
 
 function candidates(base, lang) {
   if (lang === 'py') return [`${base}.py`, path.join(base, '__init__.py')];

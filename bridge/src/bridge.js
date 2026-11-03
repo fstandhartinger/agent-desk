@@ -105,7 +105,7 @@ function withTimeout(promise, ms) {
 
 /** Dials the gateway, serves requests, reconnects forever. Returns {close()}. */
 export function startBridge({ url, token, host = 'lechonk' }) {
-  if (host === 'lechonk') void resumeLoginQueue().catch(() => {});
+  if (host === 'lechonk') void resumeLoginQueue().catch((err) => log(`login queue resume failed: ${err?.message ?? err}`));
   let ws = null;
   let closed = false;
   let attempt = 0;
@@ -139,7 +139,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
   function onMessage(raw) {
     lastSeen = Date.now();
     let frame;
-    try { frame = JSON.parse(raw.toString()); } catch { return; }
+    try { frame = JSON.parse(raw.toString()); } catch { log(`unreadable frame (${raw.length} bytes)`); return; }
     if (!frame || typeof frame !== 'object') return;
     if (frame.t === 'ping') send({ t: 'pong' });
     else if (frame.t === 'req' && frame.id !== undefined) handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));

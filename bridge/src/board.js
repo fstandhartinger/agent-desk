@@ -170,7 +170,7 @@ export function entry({ id } = {}) {
     execFile('python3', ['-I', '-c', ENTRY_PY, String(n)], { timeout: 10000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       if (err) return reject(new Error('board entry lookup failed'));
       let row;
-      try { row = JSON.parse(stdout); } catch { return reject(new Error('board entry lookup failed')); }
+      try { row = JSON.parse(stdout); } catch { return reject(new Error('board entry lookup failed')); /* malformed */ }
       if (!row) return reject(new Error(`board entry #${n} not found`));
       resolve({ ...row, author: redact(row.author), thread: redact(row.thread), text: redact(String(row.text).slice(0, 12000)) });
     });

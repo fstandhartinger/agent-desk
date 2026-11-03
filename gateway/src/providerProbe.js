@@ -73,8 +73,8 @@ export async function probeProviders() {
 
 /** Probe now and every 10 minutes; returns the stop function. */
 export function startProviderProbes() {
-  probeProviders().catch(() => {});
-  const timer = setInterval(() => probeProviders().catch(() => {}), INTERVAL_MS);
+  probeProviders().catch(() => /* ignored */ {});
+  const timer = setInterval(() => probeProviders().catch(() => /* ignored */ {}), INTERVAL_MS);
   timer.unref();
   return () => clearInterval(timer);
 }

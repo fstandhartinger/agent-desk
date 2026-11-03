@@ -27,7 +27,8 @@ export const cfg = {
   visionCapUsdHour: () => Number(env('DESK_VISION_CAP_USD_HOUR', '0.6')), // screen vision cost per session hour (sliding window)
   visionPriceIn: () => Number(env('DESK_VISION_PRICE_IN', '0.75')), // USD per 1M tokens, gemini-3.8-flash (2 Nov 2026; doubles 1 Jan 2027)
   visionPriceOut: () => Number(env('DESK_VISION_PRICE_OUT', '3.75')),
-  visionTimeoutMs: () => Number(env('DESK_VISION_TIMEOUT_MS', '6000')),
+  visionTimeoutMs: () => Number(env('DESK_VISION_TIMEOUT_MS', '8000')), // interval / start / foreground frames: nobody waits (3 Nov: 6 s sat on the tail of 3.3-5.9 s)
+  visionFreshTimeoutMs: () => Number(env('DESK_VISION_FRESH_TIMEOUT_MS', '6000')), // a fresh look is awaited by voice (visionFreshWaitMs 5.5 s)
   visionFreshWaitMs: () => Number(env('DESK_VISION_FRESH_WAIT_MS', '5500')),
   allowedModels: () => [cfg.textModel(), ...env('DESK_ALLOWED_MODELS').split(',').map((m) => m.trim()).filter(Boolean)],
   reasoningEffort: () => env('DESK_TEXT_REASONING', 'low'),

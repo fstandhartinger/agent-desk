@@ -1,3 +1,4 @@
+import { reportClientError } from '../lib/clientError';
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { pairingId, pairingCallback } from '../lib/deviceEntry';
@@ -8,7 +9,8 @@ export default function Device() {
   const [pairId] = useState(() => pairingId(location));
   const [invalidPair] = useState(() => new URLSearchParams(location.search).has('pair') && !pairingId(location));
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setErrorText] = useState('');
+  const setError = (text: string) => { setErrorText(text); if (text) reportClientError('device', text); };
   const [busy, setBusy] = useState(false);
   const refresh = async () => {
     const [d, t] = await Promise.all([api<{ devices: DeviceRecord[] }>('/api/device/list'), api<{ items: { term: string }[] }>('/api/device/learned')]);

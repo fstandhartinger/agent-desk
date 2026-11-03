@@ -189,7 +189,7 @@ export function parseJSON(text) {
   const a = s.indexOf('{');
   const b = s.lastIndexOf('}');
   if (a < 0 || b <= a) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
+  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; /* malformed */ }
 }
 
 /** Everything the model may draw from (the previous spec aside): the facts guardSpec() checks numbers against. */

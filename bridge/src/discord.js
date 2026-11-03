@@ -47,7 +47,7 @@ let chain = Promise.resolve();
 /** One Discord call at a time inside this process (home-browser-call additionally flocks across processes). */
 function serialized(fn) {
   const next = chain.then(fn, fn);
-  chain = next.catch(() => {});
+  chain = next.catch(() => {}); // the caller of `next` sees the error; the chain only keeps its order
   return next;
 }
 

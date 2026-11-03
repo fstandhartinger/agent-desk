@@ -200,7 +200,7 @@ function syncIfStale() {
   // The bridge refreshes the mirror on a timer; this covers a bridge started without it (tests, manual runs).
   if (Date.now() - lastKick < 5 * 60_000 || mirrorStatus().syncing) return;
   lastKick = Date.now();
-  if (!mirrorReady() || Date.now() - mirrorStatus().at > 10 * 60_000) syncNotes().catch(() => {});
+  if (!mirrorReady() || Date.now() - mirrorStatus().at > 10 * 60_000) syncNotes().catch((err) => console.warn(`ctx: notes sync failed: ${String(err?.message ?? err).slice(0, 120)}`));
 }
 
 async function rgTier(tier, groups, regex, query, deadline) {
@@ -236,7 +236,7 @@ function allowedHit(file) {
     const real = fs.realpathSync(file);
     const canonical = canonicalOf(file);
     return real.startsWith(fs.realpathSync(MIRROR_DIR) + path.sep) && !isDenied(canonical) ? canonical : null;
-  } catch { return null; }
+  } catch { return null; /* ignored */ }
 }
 
 function jobOf(canonical) {

@@ -224,7 +224,7 @@ const STATUS = {
   board_search: () => 'Ich durchsuche das Board …',
   chats_search: () => 'Ich durchsuche die Chats …',
   chat_read: () => 'Ich lese den Chat …',
-  web_read: ({ url }) => `Ich lese ${(() => { try { return new URL(url).hostname; } catch { return 'die Webseite'; } })()} …`,
+  web_read: ({ url }) => `Ich lese ${(() => { try { return new URL(url).hostname; } catch { return 'die Webseite'; /* unparsable */ } })()} …`,
   discord_read: () => 'Ich schaue in Discord …',
   mail_search: () => 'Ich schaue in die Mails …',
   mail_read: () => 'Ich lese die Mail …',

@@ -81,7 +81,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const traces = createTraceService(traceOptions);
   const devices = createDeviceService({ artifacts, traces, ...deviceOptions });
   attachKnowledge(hub);
-  setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));
+  setAuditSink((line) => hub.call('audit.append', line).catch(() => /* ignored */ {}));
   const canvasBus = createCanvasBus();
   const illustrator = createIllustrator({ bus: canvasBus, hub });
   // A Claude Code session drew something (```desk-canvas block -> bridge event {kind:"canvas", spec}): validate and publish.
@@ -135,9 +135,21 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     return sendJson(res, 404, { error: TEXT.notFound });
   }
 
+  // Central failure log: every HTTP answer >= 400 (the German TEXT table, thrown errors, handler replies) leaves http.error {path,status,ms,bytes}.
+  // /api/device/ has its own richer device.error (devices.js); a missing static file and the logged-out probe of /api/auth/me are routine.
+  const logHttpError = (req, res, t0) => {
+    if (res.statusCode < 400) return;
+    const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith('/api/device/') || (res.statusCode === 404 && !path.startsWith('/api/')) || (res.statusCode === 401 && path === '/api/auth/me')) return;
+    let ip; try { ip = clientIp(req); } catch { /* socket already gone */ }
+    audit({ action: 'http.error', ip, detail: JSON.stringify({ path, method: req.method, status: res.statusCode, ...(res.errorMessage ? { message: res.errorMessage } : {}), ms: Date.now() - t0, bytes: Number(req.headers['content-length']) || 0 }) });
+  };
   const server = http.createServer((req, res) => {
+    const t0 = Date.now();
+    res.on('finish', () => logHttpError(req, res, t0));
     for (const [name, value] of Object.entries(securityHeaders())) res.setHeader(name, value);
     route(req, res).catch((err) => {
+      res.errorMessage = short(String(err?.message ?? err), 120);
       if (!err.status) console.error(`unhandled: ${short(err.stack || err.message, 500)}`);
       if (res.headersSent) return res.end();
       return sendJson(res, err.status || 500, { error: err.status ? short(err.message, 160) : TEXT.internal }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {});
@@ -145,6 +157,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   });
 
   const reject = (socket, status, text) => {
+    audit({ action: 'ws.reject', detail: `${status} ${text}` });
     socket.write(`HTTP/1.1 ${status} ${text}\r\nconnection: close\r\n\r\n`);
     socket.destroy();
   };

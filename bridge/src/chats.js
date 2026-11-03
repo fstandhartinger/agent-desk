@@ -92,7 +92,7 @@ async function rg(args, roots, timeout = 8000) {
 
 function matches(stdout) {
   return stdout.split('\n').filter((l) => l.startsWith('{"type":"match"')).flatMap((l) => {
-    try { return [JSON.parse(l).data]; } catch { return []; }
+    try { return [JSON.parse(l).data]; } catch { return []; /* malformed */ }
   });
 }
 
@@ -200,7 +200,7 @@ async function codexCwd(file) {
       const { bytesRead } = await fd.read(buf, 0, buf.length, 0);
       return /"cwd":"([^"]+)"/.exec(buf.toString('utf8', 0, bytesRead))?.[1] ?? null;
     } finally { await fd.close(); }
-  } catch { return null; }
+  } catch { return null; /* ignored */ }
 }
 
 const jobLabel = (cwd) => (cwd ? cwd.replace(/^\/home\/flori\/jobs\//, '').replace(/^\/home\/flori\/?/, '~/').slice(0, 120) : '');
@@ -220,7 +220,7 @@ function codexText(obj) {
 function hitFromLine(file, kind, raw, terms) {
   if (kind === 'history') {
     let o;
-    try { o = JSON.parse(raw); } catch { return null; }
+    try { o = JSON.parse(raw); } catch { return null; /* malformed */ }
     const text = o.display ?? o.text ?? o.input ?? '';
     const snip = snippetAny(String(text), terms);
     if (!snip) return null;
@@ -229,7 +229,7 @@ function hitFromLine(file, kind, raw, terms) {
   }
   if (kind === 'claude') {
     let o;
-    try { o = JSON.parse(raw); } catch { return null; }
+    try { o = JSON.parse(raw); } catch { return null; /* malformed */ }
     if (o.type !== 'user' && o.type !== 'assistant') return null;
     const snip = snippetAny(messageText(o), terms);
     if (!snip) return null;
@@ -237,7 +237,7 @@ function hitFromLine(file, kind, raw, terms) {
   }
   if (kind === 'codex') {
     let o;
-    try { o = JSON.parse(raw); } catch { return null; }
+    try { o = JSON.parse(raw); } catch { return null; /* malformed */ }
     const t = codexText(o);
     const snip = t ? snippetAny(t.text, terms) : null;
     if (!snip) return null;
@@ -287,7 +287,7 @@ export async function search({ query, agent = 'all', limit = 15 } = {}) {
   const roots = agents.flatMap(chatRoots).filter((r) => fs.existsSync(r));
   const listed = roots.length ? (await rg(['-l', ...base, ...termArgs, '--'], roots, Math.min(left(), 6000))).split('\n').filter(Boolean) : [];
   const stamped = (await Promise.all(listed.filter((f) => !isDenied(f)).map(async (f) => {
-    const st = await fs.promises.stat(f).catch(() => null);
+    const st = await fs.promises.stat(f).catch(() => /* absent */ null);
     return st ? { file: f, mtime: st.mtimeMs } : null;
   }))).filter(Boolean).sort((a, b) => b.mtime - a.mtime);
   // Newest files first, but every agent gets its share of the candidates (Claude would otherwise crowd out the rest).
@@ -338,7 +338,7 @@ export async function search({ query, agent = 'all', limit = 15 } = {}) {
   hits.splice(0, hits.length, ...balance(hits, cap));
 
   if (agents.includes('claude') && Date.now() < deadline) {
-    const outputFiles = (await recentJobDirs(200).catch(() => [])).map((d) => path.join(d, 'OUTPUT.md')).filter((f) => !isDenied(f));
+    const outputFiles = (await recentJobDirs(200).catch(() => /* ignored */ [])).map((d) => path.join(d, 'OUTPUT.md')).filter((f) => !isDenied(f));
     const outputs = outputFiles.length ? matches(await rg(['--json', '--max-count', '2', ...base.slice(0, 4), ...termArgs, '--'], outputFiles, left())) : [];
     for (const m of outputs) {
       if (hits.length >= cap) break;
@@ -348,7 +348,7 @@ export async function search({ query, agent = 'all', limit = 15 } = {}) {
       // a term rg matched but findFirst does not see (case folding) falls back to the line start; a redacted hit is dropped
       const snip = findFirst(raw, terms)[0] >= 0 ? snippetAny(raw, terms) : safeText(raw.slice(0, SNIP_CONTEXT)).trim().slice(0, 260).replace(/(?<!\S)\S*$/, '');
       if (!snip) continue;
-      const mtime = await fs.promises.stat(file).then((s) => s.mtime.toISOString()).catch(() => null);
+      const mtime = await fs.promises.stat(file).then((s) => s.mtime.toISOString()).catch(() => /* absent */ null);
       hits.push({ agent: 'claude', ref: null, source: 'job-output', project: path.basename(path.dirname(file)), sessionId: null, path: toCanonical(file), line: m.line_number, ts: mtime, text: redact(snip) });
     }
   }
@@ -418,7 +418,7 @@ function codexTurns(lines) {
 async function opencodeTurns(file, sessionId) {
   const storage = file.slice(0, file.lastIndexOf(`${path.sep}storage${path.sep}`) + '/storage'.length);
   const msgDir = path.join(storage, 'message', sessionId);
-  const names = (await fs.promises.readdir(msgDir).catch(() => [])).filter((n) => n.endsWith('.json')).sort();
+  const names = (await fs.promises.readdir(msgDir).catch(() => /* absent */ [])).filter((n) => n.endsWith('.json')).sort();
   const msgs = [];
   for (const n of names.slice(0, 2000)) {
     try { msgs.push(JSON.parse(await fs.promises.readFile(path.join(msgDir, n), 'utf8'))); } catch { /* skip */ }
@@ -428,7 +428,7 @@ async function opencodeTurns(file, sessionId) {
   for (const m of msgs) {
     const ts = m.time?.created ? new Date(m.time.created).toISOString() : null;
     const partDir = path.join(storage, 'part', String(m.id ?? ''));
-    const partNames = m.id ? (await fs.promises.readdir(partDir).catch(() => [])).filter((n) => n.endsWith('.json')).sort() : [];
+    const partNames = m.id ? (await fs.promises.readdir(partDir).catch(() => /* absent */ [])).filter((n) => n.endsWith('.json')).sort() : [];
     let any = false;
     for (const n of partNames) {
       let part;
@@ -453,11 +453,11 @@ function allowedChatFile(file) {
   const agent = agentOf(file);
   if (!agent) return false;
   let real;
-  try { real = fs.realpathSync(file); } catch { return false; }
+  try { real = fs.realpathSync(file); } catch { return false; /* absent */ }
   if (isDenied(real)) return false;
   return chatRoots(agent).some((r) => {
     let rr;
-    try { rr = fs.realpathSync(r); } catch { return false; }
+    try { rr = fs.realpathSync(r); } catch { return false; /* absent */ }
     return real.startsWith(rr + path.sep);
   });
 }
@@ -513,7 +513,7 @@ export async function recent({ limit = 10 } = {}) {
       for (const n of names) {
         if (!n.endsWith('.jsonl')) continue;
         const file = path.join(root, p, n);
-        const st = await fs.promises.stat(file).catch(() => null);
+        const st = await fs.promises.stat(file).catch(() => /* absent */ null);
         if (st && !isDenied(file)) files.push({ file, mtime: st.mtime });
       }
     }
@@ -525,7 +525,7 @@ export async function recent({ limit = 10 } = {}) {
       session: sessionName(file),
       sessionId: path.basename(file, '.jsonl'),
       modified: mtime.toISOString(),
-      firstUser: redact(await firstUserText(file).catch(() => '')),
+      firstUser: redact(await firstUserText(file).catch(() => /* ignored */ '')),
     });
   }
   return { sessions };
