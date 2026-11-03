@@ -31,12 +31,12 @@ function skillDir(name) {
 
 export async function list({ query } = {}) {
   const q = String(query ?? '').trim().toLowerCase();
-  const names = (await fs.promises.readdir(SKILLS_DIR()).catch(() => [])).filter((n) => NAME_RE.test(n)).sort();
+  const names = (await fs.promises.readdir(SKILLS_DIR()).catch(() => /* absent */ [])).filter((n) => NAME_RE.test(n)).sort();
   const skills = [];
   for (const name of names) {
     let dir;
     try { dir = skillDir(name); resolveAllowed(path.join(dir, 'SKILL.md')); } catch { continue; }
-    const head = await fs.promises.readFile(path.join(dir, 'SKILL.md'), 'utf8').then((t) => t.slice(0, 4000)).catch(() => null);
+    const head = await fs.promises.readFile(path.join(dir, 'SKILL.md'), 'utf8').then((t) => t.slice(0, 4000)).catch(() => /* absent */ null);
     if (head === null) continue;
     const fm = frontmatter(head);
     const description = redact((fm.description ?? '').slice(0, 300));
@@ -57,7 +57,7 @@ export async function read({ name, file = 'SKILL.md' } = {}) {
   if (!stat.isFile()) throw new Error(NOT_AVAILABLE);
   const text = await fs.promises.readFile(real, 'utf8');
   const references = f === 'SKILL.md'
-    ? (await fs.promises.readdir(path.join(dir, 'references')).catch(() => [])).filter((n) => FILE_RE.test(`references/${n}`)).sort().slice(0, 50)
+    ? (await fs.promises.readdir(path.join(dir, 'references')).catch(() => /* absent */ [])).filter((n) => FILE_RE.test(`references/${n}`)).sort().slice(0, 50)
     : undefined;
   return { name, file: f, text: redact(text.slice(0, MAX_CHARS)), truncated: text.length > MAX_CHARS, references };
 }

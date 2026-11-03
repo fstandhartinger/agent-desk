@@ -11,7 +11,8 @@ import * as ops from './ops.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
-import { cardLink, cardRead } from './notify.js';
+import { cardLink, cardRead, cardsRecent } from './notify.js';
+import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
@@ -82,6 +83,9 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
       'notify.cardRead': cardRead,
+      'notify.cardsRecent': cardsRecent, // start briefing (Sandy only: ~/.notify lives there)
+      'board.recent': board.recent,
+      'state.current': stateCurrent,
       'job.start': jobStart, // voice action: starts a real job; Sandy only
     };
   }
@@ -105,7 +109,7 @@ function withTimeout(promise, ms) {
 
 /** Dials the gateway, serves requests, reconnects forever. Returns {close()}. */
 export function startBridge({ url, token, host = 'lechonk' }) {
-  if (host === 'lechonk') void resumeLoginQueue().catch(() => {});
+  if (host === 'lechonk') void resumeLoginQueue().catch((err) => log(`login queue resume failed: ${err?.message ?? err}`));
   let ws = null;
   let closed = false;
   let attempt = 0;
@@ -139,7 +143,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
   function onMessage(raw) {
     lastSeen = Date.now();
     let frame;
-    try { frame = JSON.parse(raw.toString()); } catch { return; }
+    try { frame = JSON.parse(raw.toString()); } catch { log(`unreadable frame (${raw.length} bytes)`); return; }
     if (!frame || typeof frame !== 'object') return;
     if (frame.t === 'ping') send({ t: 'pong' });
     else if (frame.t === 'req' && frame.id !== undefined) handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));

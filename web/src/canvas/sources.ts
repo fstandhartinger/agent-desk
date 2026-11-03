@@ -12,7 +12,7 @@ export function shortRef(ref: string): string {
       const u = new URL(r);
       const tail = u.pathname.split('/').filter(Boolean).pop();
       return tail ? `${u.hostname} · ${decodeURIComponent(tail)}` : u.hostname;
-    } catch { return r; }
+    } catch { return r; /* ignored */ }
   }
   if (r.includes('/')) {
     const parts = r.replace(/\/+$/, '').split('/');

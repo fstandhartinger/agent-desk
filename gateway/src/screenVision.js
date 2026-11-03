@@ -18,6 +18,8 @@ export const COMMAND_CODES = ['typed', 'typed-unverified', 'no-window', 'no-fore
 export const COMMAND_TIMEOUTS = { received: 6000, done: 40_000, ttl: 8000, keep: 120_000 };
 const ATTACHED_MS = 45_000, CHAT_ACTIVE_MS = 10 * 60_000, COMMAND_TTL_MS = 10_000, POLL_MS = 25_000, HOUR = 3_600_000;
 const SEND_EARLY = 20, SEND_FAST_MS = 5000, SEND_SLOW_MS = 20_000; // context updates: one per 5 s, one per 20 s after 20 (OpenAI instructions only grow)
+/** A registry hiccup while merging screen ids must not fail the frame, but it leaves an event. */
+const softFail = (tr, what) => err => { tr('screen.error', { what, ...(err?.status ? { status: err.status } : {}), message: String(err?.message ?? err).slice(0, 100) }); return null; };
 const noSession = () => Object.assign(deviceError('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session', stop: true });
 const TIME = /\b\d{1,2}:\d{2}(?::\d{2})?\b/g;
 const numbers = t => new Set((String(t).replace(TIME, ' ').match(/\d+(?:[.,]\d+)*/g) ?? []));
@@ -68,13 +70,15 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function state(sid) {
     let S = states.get(sid);
     if (!S) {
-      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map() };
+      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), devices: new Set(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [] };
       states.set(sid, S);
       sweeper ??= setInterval(sweep, 15_000).unref();
     }
     return S;
   }
   const active = sid => { const S = states.get(sid); return Boolean(S && (S.handles.size || S.chatUntil > now())); };
+  /** false when this session already talks to other devices only: one device must not push text into another device's session. */
+  const ownedBy = (sid, deviceId) => { const S = states.get(sid); return !S?.devices.size || S.devices.has(deviceId); };
   const attached = sid => { const S = states.get(sid); return Boolean(S && active(sid) && (S.polls.size || now() - S.lastSeen < ATTACHED_MS)); };
   function sweep() {
     for (const [sid, S] of states) {
@@ -181,13 +185,13 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     if (!active(sid)) throw noSession();
     const S = state(sid), key = record.deviceId;
     if (frameVersion < (S.newest.get(key) ?? -1)) throw Object.assign(deviceError('Veralteter Bildschirm-Frame.', 409), { code: 'stale-frame' });
-    S.newest.set(key, frameVersion);
+    S.newest.set(key, frameVersion); S.devices.add(key);
     S.noPicture = null; // a frame ends the "no picture" state
     seen(sid);
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
     tr('screen.frame', { reason, ids, masked, process: redact(proc), bytes: jpeg.length });
     audit({ action: 'screen.frame', detail: `${reason} v${frameVersion} ${jpeg.length}B masked=${masked}` });
-    if (ids.length || artifacts?.screen(sid).ids.length) noteIds(S, await artifacts?.setScreen(sid, { deviceId: key, ids, window: { process: proc, blocked: false }, frameVersion }).catch(() => null));
+    if (ids.length || artifacts?.screen(sid).ids.length) noteIds(S, await artifacts?.setScreen(sid, { deviceId: key, ids, window: { process: proc, blocked: false }, frameVersion }).catch(softFail(tr, 'setScreen')));
     const out = { ok: true, frameVersion, changed: false, vision: 'ok', ids: [] };
     const cmd = S.queue[0]; if (cmd && cmd.expires > now() && reason !== 'fresh') out.fresh = { id: cmd.id };
     const job = { sid, deviceId: key, frameVersion, proc, title, url, masked, reason, ids, jpeg, commandId: body.commandId };
@@ -211,16 +215,16 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     const { sid, frameVersion, proc, title, url, masked, ids } = job;
     const handles = [...S.handles], tr = (type, data) => handles.forEach(h => h.trace(type, data));
     S.busy++;
-    const prev = S.desc?.text ?? null;
+    const prev = S.desc?.text ?? null, t0 = Date.now();
     try {
-      const r = await media.vision(job.jpeg, { process: proc, title, url, masked, question: S.questions?.get(job.commandId) }, prev, { timeoutMs: cfg.visionTimeoutMs(), lean: job.reason === 'fresh' });
+      const r = await media.vision(job.jpeg, { process: proc, title, url, masked, question: S.questions?.get(job.commandId) }, prev, { timeoutMs: job.reason === 'fresh' ? cfg.visionFreshTimeoutMs() : cfg.visionTimeoutMs(), lean: job.reason === 'fresh' });
       const usd = r.usage.inputTokens / 1e6 * cfg.visionPriceIn() + r.usage.outputTokens / 1e6 * cfg.visionPriceOut();
       S.frames++; S.usd += usd; S.spend.push({ t: now(), usd }); limits.addCost(usd);
       // ids read by the vision model count only after the registry knows them (setScreen keeps just the existing ones)
       const read = deviceIds(r.ids ?? []), extra = read.filter(id => !ids.includes(id));
       let verified = [];
       if (extra.length && active(sid)) {
-        const merged = await artifacts?.setScreen(sid, { deviceId: job.deviceId, ids: [...ids, ...extra].slice(0, 20), window: { process: proc, blocked: false }, frameVersion }).catch(() => null);
+        const merged = await artifacts?.setScreen(sid, { deviceId: job.deviceId, ids: [...ids, ...extra].slice(0, 20), window: { process: proc, blocked: false }, frameVersion }).catch(softFail(tr, 'setScreen.vision-ids'));
         noteIds(S, merged);
         verified = (artifacts?.screen(sid).ids ?? []).filter(id => extra.includes(id));
       }
@@ -235,7 +239,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     } catch (err) {
       if (S.desc) S.desc.old = true;
       const cappedByDay = err.status === 429;
-      tr('screen.vision', { ok: false, error: cappedByDay ? 'tagesbudget' : err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : String(err.message ?? err).slice(0, 120), frameVersion });
+      tr('screen.vision', { ok: false, error: cappedByDay ? 'tagesbudget' : err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : String(err.message ?? err).slice(0, 120), ms: Date.now() - t0, bytes: job.jpeg.length, ...(err.upstream ? { status: err.upstream } : {}), reason: job.reason, frameVersion });
       out.vision = cappedByDay ? 'capped' : 'failed';
     } finally {
       S.busy--; settle(S, job);
@@ -247,7 +251,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function drain(sid, S) {
     const job = S.pendingFrame; S.pendingFrame = null;
     if (!job || !active(sid) || capped(S) || job.frameVersion < (S.desc?.version ?? -1)) return;
-    run(S, job, { ok: true }).catch(() => {});
+    run(S, job, { ok: true }).catch(() => {}); // run() traces its own failures
   }
 
   // --- command channel ---
@@ -255,18 +259,36 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     if (!active(sid)) throw noSession();
     const S = state(sid), key = record.deviceId;
     S.polls.get(key)?.resolve({ fresh: false });
+    S.devices.add(key);
     seen(sid);
     return new Promise(resolve => {
       const cmd = S.queue.find(c => c.expires > now());
       const prompt = takePrompt(S, key);
+      const briefing = takeBriefing(S);
       const done = value => { clearTimeout(timer); if (S.polls.get(key) === entry) S.polls.delete(key); seen(sid); resolve(value); };
       const entry = { resolve: done };
       const timer = setTimeout(() => done({ fresh: false }), ms);
       signal?.addEventListener('abort', () => done({ fresh: false }), { once: true });
       if (prompt) { done({ fresh: false, prompt }); return; }
+      if (briefing) { done({ fresh: false, briefing }); return; }
       if (cmd) { S.queue.splice(S.queue.indexOf(cmd), 1); done({ fresh: true, id: cmd.id, ...(cmd.question ? { question: cmd.question } : {}) }); return; }
       S.polls.set(key, entry);
     });
+  }
+
+  // --- briefing request (item G): `{fresh:false, briefing:{id}}`; the app answers with POST .../briefing {..., commandId:id} ---
+  function takeBriefing(S) {
+    S.briefings = S.briefings.filter(c => c.expires > now());
+    const c = S.briefings.shift();
+    return c ? { id: c.id } : null;
+  }
+  /** true when an app is attached and the request is on its way (handed to a waiting poll or queued for the next one, 8 s). */
+  function requestBriefing(sid, id) {
+    if (!attached(sid)) return false;
+    const S = states.get(sid), target = [...S.polls.values()][0];
+    if (target) target.resolve({ fresh: false, briefing: { id } });
+    else S.briefings.push({ id, expires: now() + T.ttl });
+    return true;
   }
 
   // --- action commands: one prompt to exactly one poller, the app's answer comes back on the result route ---
@@ -367,5 +389,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, look, chatBlock, snapshot, _states: states };
+  return { attach, touchChat, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, requestBriefing, look, chatBlock, snapshot, _states: states };
 }

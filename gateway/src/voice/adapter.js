@@ -68,7 +68,7 @@ export function openSocket(url, headers, { provider, emit: rawEmit, onOpen, onMe
   ws.on('open', onOpen);
   ws.on('message', (data) => { // Gemini sends its JSON as binary frames
     let msg;
-    try { msg = JSON.parse(data.toString()); } catch { return; }
+    try { msg = JSON.parse(data.toString()); } catch { return; /* malformed */ }
     onMessage(msg, emit);
   });
   ws.on('close', (code, reason) => {

@@ -1,15 +1,16 @@
 // Browser side of a voice session: protocol with the web client (docs/SPEC.md "Voice"), tool execution, limits,
 // usage/cost ticks and audit. Provider specifics live in the adapters.
 import { cfg } from '../config.js';
-import { pseudoPathRefusal, resolveToolName } from '../tools.js';
-import { cjkRuns, isGermanText, stripCjk } from '../canvas.js';
+import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
+import { short } from '../redact.js';
+import { asksForDrawing, cjkRuns, isGermanText, stripCjk } from '../canvas.js';
 import { buildInstructions } from './instructions.js';
 import { pageUpdateText } from '../pack.js';
 import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
-import { SETTLE_MS } from '../voiceActions.js';
+import { deskStamp, SETTLE_MS } from '../voiceActions.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -47,6 +48,9 @@ const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its fir
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
+  // Live activity for the dock and the Screen Agent window (v0.1.7): what the desk does right now. Not traced: tool.call / tool.done already are.
+  const activity = (obj) => sendJson({ type: 'activity', ...obj, at: now() });
+  let thoughtFor = 0; // the user turn the 'thinking' activity was sent for
   let adapter = null;
   let artifactBlock = '';
   let unregisterText = null;
@@ -119,6 +123,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let runningTools = 0;
   let detachVision = null;
   let screenHeld = null; // screen context that arrived before the vendor was ready
+  let briefingHeld = null; // the start briefing (item G), same: held until the vendor is ready
+  let detachBriefing = null;
   let muted = false;
   let mutedAt = 0;
   let mutedMs = 0;
@@ -170,6 +176,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     turn.itemId = null;
     sendJson({ type: 'transcript', role, text, final: true });
     if (role === 'user') {
+      activity({ id: `heard-${turnId}`, phase: 'heard', label: short(text, 80) });
       collectUser(text);
       return;
     }
@@ -221,6 +228,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     fillers = 0;
   }
 
+  /** 'Verstanden, denke nach …' once per spoken question, when the provider starts its response (or, without response events, when the question is complete). */
+  function thinking() {
+    if (!turnId || thoughtFor === turnId) return;
+    thoughtFor = turnId;
+    activity({ id: `think-${turnId}`, phase: 'thinking', label: 'Verstanden, denke nach …' });
+  }
+
   /** The assistant starts a NEW answer (nothing of an older one was running): the user's question is complete, no need to wait for more fragments. */
   function assistantStarted() {
     responding = true; // bare audio does not prove an answer is in flight (OpenAI streams audio frames while the user speaks)
@@ -248,6 +262,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     interrupted = false;
     if (!text || closed) return;
     armNoAnswer(text);
+    if (!tracksResponses) thinking();
     viz?.noteTurn({ role: 'user', text });
     canvas?.noteTurn({ role: 'user', text });
     // the question is complete: the early illustrator starts now, in parallel with the agent's answer
@@ -420,6 +435,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
     runningTools += 1;
+    const label = activityLabel(name, args);
+    activity({ id, phase: 'start', tool: name, label });
     sendJson({ ...evt, status: 'start' });
     viz?.noteEvent({ ...evt, status: 'start' });
     canvas?.toolStarted(name);
@@ -434,6 +451,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       for (const w of knownWords(res.content)) known.add(w);
       for (const r of cjkRuns(res.content)) if (cjkKnown.size < 500) cjkKnown.add(r);
       const done = { ...evt, status: 'done', summary: res.summary, ms: now() - t0 };
+      activity({ id, phase: res.ok === false ? 'fail' : 'done', tool: name, label, ms: now() - t0, ...(res.ok === false ? { reason: short(res.summary, 80) } : {}) });
       sendJson(done);
       if (res.event?.type === 'handoff' || res.event?.type === 'claude_proposal' || res.event?.type === 'main_agent_prompt') sendJson(res.event); // handoff_propose / claude_task: same confirm cards as in the text chat; main_agent_prompt: the text to copy when the Screen Agent could not type it
       viz?.noteEvent({ ...done, content: output });
@@ -442,6 +460,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       trace.event('tool.error', { turn: turnId, id, name, ms: now() - t0, error: String(err.message ?? err).slice(0, 300) });
       canvas?.noteTool({ name, args, ok: false, content: '' }); // the drawing stops waiting for this tool
       const failed = { ...evt, status: 'error', summary: String(err.message ?? err).slice(0, 200), ms: now() - t0 };
+      activity({ id, phase: 'fail', tool: name, label, ms: now() - t0, reason: short(err.message ?? err, 80) });
       sendJson(failed);
       viz?.noteEvent(failed);
     }
@@ -466,7 +485,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       adapter.sendToolResult(id, requestedName, output, { stale: true }); // OpenAI/xAI: keep the call/output pairing, no new response
       return;
     }
-    if (pending.active) {
+    if (pending.active && DRAW_TOOLS.has(name) && asksForDrawing(pending.text) && /"status":\s*"zeichne"/.test(output)) {
+      // "zeichne das": the running drawing is the answer; a recovery would add chatter next to it (a question that needs words is not settled here)
+      pending.active = false; pending.settled = turnId; clearTimeout(pending.timer);
+      trace.event('watchdog.settled', { turn: turnId, reason: 'drawing', name });
+    } else if (pending.active) {
       pending.facts.push(`${name}: ${output.slice(0, RECOVERY_FACT_CHARS)}`);
       restartNoAnswer(); // the model now has the results: same clock for its answer (the adapter nudge runs first, this is the last resort)
     }
@@ -483,6 +506,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         sendJson({ type: 'ready', provider, model: e.model });
         trace.event('session.ready', { provider, model: e.model });
         if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
+        if (briefingHeld) { const how = adapter?.setBriefing?.(briefingHeld); briefingHeld = null; trace.event('briefing.context', { how: how ?? 'unsupported', late: true }); }
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
@@ -520,6 +544,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         pending.overlap = false; // a response that started after the question: what it says belongs to the question
         restartNoAnswer();
         trace.event('response.created', { turn: turnId, id: e.id });
+        thinking();
         break;
       case 'screen_error': // the vendor refused the passive screen context: traced only, Florian sees nothing
         if (e.gone || /not found/i.test(String(e.message ?? ''))) trace.event('screen.context.gone', { message: String(e.message ?? '').slice(0, 200) }); // the replaced item is already gone: harmless
@@ -564,12 +589,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(startTimer);
     const verdict = limits.check(sid, 'voice');
     if (!verdict.ok) {
+      trace?.event('session.refused', { reason: 'limit', retryAfter: verdict.retryAfter ?? null, message: verdict.reason });
       sendJson({ type: 'error', message: `Voice-Limit erreicht${verdict.retryAfter ? ` (erneut in ${Math.ceil(verdict.retryAfter / 60)} min)` : ''}` });
       finish('limit');
       return;
     }
     if (!apiKey) {
       const err = unavailableError(provider, { status: 401 });
+      trace?.event('provider.error', { message: String(err.message ?? '').slice(0, 300), status: 401, code: 'no-key', provider });
       sendJson({ type: 'error', message: err.message, fallback: err.fallback });
       finish('no-key');
       return;
@@ -578,7 +605,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     // Server-side page context (points/timeline/context.json/deepdive): nothing the browser sent except slug, t, sceneId and pointId is
     // trusted once it loads; without a loader or on failure the browser's own page object is used as before.
     if (deps.loadPage && page?.slug) {
-      const loaded = await Promise.race([deps.loadPage(page).catch(() => null), new Promise((resolve) => setTimeout(resolve, PAGE_LOAD_MS, null))]);
+      const loaded = await Promise.race([deps.loadPage(page).catch((err) => { trace?.event('page.load_failed', { slug: page.slug, message: String(err?.message ?? err).slice(0, 120) }); return null; }), new Promise((resolve) => setTimeout(resolve, PAGE_LOAD_MS, null))]);
       if (closed) return;
       if (loaded) page = loaded;
       else audit({ action: 'voice.page.fallback', detail: `${provider} slug=${page.slug}` });
@@ -586,25 +613,31 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     artifactBlock = deps.artifactInstructions?.() ?? '';
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
-    canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
+    canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
     adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
       return adapter?.setScreenContext?.(text) ?? 'unsupported';
     } });
+    // Start briefing (item G): its own passive channel (adapter.setBriefing), so it never replaces the screen description.
+    detachBriefing = deps.briefing?.attach(sid, { trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      if (readyAt === null) { briefingHeld = text; return 'held-until-ready'; }
+      return adapter?.setBriefing?.(text) ?? 'unsupported';
+    } });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
-    if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {});
+    if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {}); // prewarm only: the first real call reports its own failure
     tickTimer = setInterval(tick, USAGE_TICK_MS);
     capTimer = setTimeout(() => {
+      trace?.event('session.hard_cap', { ms: HARD_CAP_MS });
       sendJson({ type: 'error', message: 'Voice-Sitzung nach 30 Minuten beendet' });
       finish('hard-cap');
     }, HARD_CAP_MS);
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
     trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
-    Promise.resolve(trace.ready).then((info) => { if (info?.aid) sendJson({ type: 'session', aid: info.aid }); }).catch(() => {});
+    Promise.resolve(trace.ready).then((info) => { if (info?.aid) { sendJson({ type: 'session', aid: info.aid }); void deskStamp(makeCtx(page)).catch(() => /* lookup failed: the first prompt looks it up */ null); } }).catch(() => {}); // ready never rejects; the id is a courtesy
   }
 
   /**
@@ -615,7 +648,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   async function updatePage(raw) {
     if (!deps.loadPage || !raw?.slug || raw.slug !== page?.slug || now() - pageUpdateAt < 1000) return;
     pageUpdateAt = now();
-    const loaded = await deps.loadPage(raw).catch(() => null);
+    const loaded = await deps.loadPage(raw).catch((err) => { trace?.event('page.load_failed', { slug: raw.slug, message: String(err?.message ?? err).slice(0, 120) }); return null; });
     if (!loaded || closed) return;
     const changed = loaded.pointId !== page?.pointId;
     page = loaded;
@@ -643,6 +676,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.close();
     unregisterText?.();
     detachVision?.();
+    detachBriefing?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus
@@ -717,8 +751,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       return;
     }
     let msg;
-    try { msg = JSON.parse(data.toString()); } catch { return; }
-    if (msg.type === 'start' && !adapter) begin(msg).catch(() => finish('start-failed'));
+    try { msg = JSON.parse(data.toString()); } catch { trace?.event('client.bad_message', { bytes: data.length }); return; }
+    if (msg.type === 'start' && !adapter) begin(msg).catch((err) => { trace?.event('session.error', { reason: 'start-failed', message: String(err?.message ?? err).slice(0, 200) }); finish('start-failed'); });
     else if (msg.type === 'page' && adapter) updatePage(msg.page);
     else if (msg.type === 'focus') canvas?.setFocus?.(focusOf(msg).focusedId); // round 11: the canvas the browser shows now
     else if (msg.type === 'text' && adapter && typeof msg.text === 'string') {

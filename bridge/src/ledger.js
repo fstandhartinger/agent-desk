@@ -389,7 +389,7 @@ async function loadBoard() {
 function loadExport() {
   const file = exportPath();
   let st;
-  try { st = fs.statSync(file); } catch { return null; }
+  try { st = fs.statSync(file); } catch { return null; /* absent */ }
   if (exportCache && exportCache.file === file && exportCache.mtimeMs === st.mtimeMs) return exportCache;
   exportCache = { file, mtimeMs: st.mtimeMs, ...parseExport(fs.readFileSync(file, 'utf8')) };
   return exportCache;

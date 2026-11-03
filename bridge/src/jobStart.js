@@ -61,8 +61,8 @@ function validate(p) {
 // ---- durable guard file: one JSON line per event, read on every call ----
 function readLog() {
   let raw = '';
-  try { raw = fs.readFileSync(stateFile(), 'utf8'); } catch { return []; }
-  return raw.split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+  try { raw = fs.readFileSync(stateFile(), 'utf8'); } catch { return []; /* absent */ }
+  return raw.split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; /* malformed */ } });
 }
 function appendLog(entry) {
   const file = stateFile();
@@ -176,7 +176,7 @@ const inflight = new Map();
 
 export function jobStart(params, opts = {}) {
   let p;
-  try { p = validate(params); } catch (err) { return Promise.reject(err); }
+  try { p = validate(params); } catch (err) { return Promise.reject(err); /* rejected with the validation error above */ }
   const hit = inflight.get(p.requestId);
   if (hit) return hit;
   const work = start(p, opts).finally(() => inflight.delete(p.requestId));
@@ -230,7 +230,7 @@ async function start(p, { waitMs = NOTIFY_WAIT_MS, retryAtMs = RETRY_AT_MS } = {
 
   // the card: never lets job.start fail; waits at most waitMs, then finishes in the background
   const detailsPath = path.join(dir, 'CARD-DETAILS.md');
-  try { fs.writeFileSync(detailsPath, detailsFile(view), { mode: 0o644 }); } catch { /* the job runs; the card just fails */ }
+  try { fs.writeFileSync(detailsPath, detailsFile(view), { mode: 0o644 }); } catch (err) { console.warn(`jobStart: CARD-DETAILS.md not written (${err?.code ?? err?.message}); the job runs, the card just fails`); }
   const text = (t) => `✅ ERLEDIGT\nWorum geht's: Job started: ${t}`;
   const record = (r) => {
     const card = CARD_WORD[r.kind];
@@ -255,7 +255,7 @@ async function start(p, { waitMs = NOTIFY_WAIT_MS, retryAtMs = RETRY_AT_MS } = {
         if (last.kind === 'sent' || last.kind === 'queued') { record(last); break; }
       }
     }
-  }).catch(() => {});
+  }).catch((err) => console.warn(`jobStart: card flow failed for ${name}: ${String(err?.message ?? err).slice(0, 120)}`));
   background.add(flow); flow.finally(() => background.delete(flow));
   const early = await Promise.race([first, sleep(waitMs).then(() => null)]);
   return { ...result, card: early ? CARD_WORD[early.kind] : 'pending', ...(early?.cardId ? { cardId: early.cardId } : {}) };

@@ -15,7 +15,7 @@ export function parseLedger(content) {
   const text = String(content ?? '');
   const cut = text.indexOf(SEPARATOR);
   let header;
-  try { header = JSON.parse(cut < 0 ? text : text.slice(0, cut)); } catch { return null; }
+  try { header = JSON.parse(cut < 0 ? text : text.slice(0, cut)); } catch { return null; /* malformed */ }
   if (!header || typeof header !== 'object' || (!Array.isArray(header.totalsEurApprox) && !Array.isArray(header.totals))) return null;
   const rows = [];
   for (const line of (cut < 0 ? '' : text.slice(cut + SEPARATOR.length)).split('\n')) {

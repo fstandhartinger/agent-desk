@@ -83,7 +83,7 @@ function within(dir, p) {
 }
 
 function realOrNull(p) {
-  try { return fs.realpathSync(p); } catch { return null; }
+  try { return fs.realpathSync(p); } catch { return null; /* absent */ }
 }
 
 const inFlat = (dir, p) => p === dir || path.dirname(p) === dir;

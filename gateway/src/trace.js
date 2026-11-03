@@ -12,9 +12,20 @@ const BATCH = 100;
 const FIRST_FLUSH_MS = 3000; // session.ready (the model name) arrives within this window
 const RECENT = 200; // local ring for session_trace "current" when the registry cannot answer
 const CLIENT_CAP = 3000; // client + screen-agent events accepted per session
+const DEVICE_CAP = 20000; // the per-day device log lives all day and takes the app's retry queue too
+const DEVICE_RESERVE = 3000; // of those, only the gateway's own events and *.error / *.failed may use the last 3000: one retry loop must not blind the day
+const CHATTER = /^(?:screen\.frame|screen\.ids|mic\.)/; // dropped first once the log is half full
+const REFUSED_RETRY_MS = 5 * 60_000;
+const URGENT = /\.(?:error|failed)$/;
+let seqBaseLast = 0;
+/** Per-boot start of the seq counters of a device trace: the registry hands the same day session to every restart, and (session, source, seq) is its key. */
+const nextSeqBase = () => (seqBaseLast = Math.max(Date.now() * 1000, seqBaseLast + 1_000_000)); // < 2^53 until the year 2255
+export const LATE_MS = 24 * 3600_000; // a retry queue may deliver events up to a day old
+const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const SOURCES = new Set(['gateway', 'client', 'screen-agent']);
 const TYPE_RE = /^[a-z][a-z0-9_.]{1,47}$/;
 const TEXT_KEYS = new Set(['text', 'question', 'transcript']);
+// a key like `bytes` names a payload only when the value is one: a number is a size (screen.frame / device.error record theirs)
 const BINARY_KEYS = /^(?:audio|pcm|image|img|png|jpe?g|base64|b64|bytes|buffer|crop|context_image|screenshot|data_url|dataurl)$/i;
 const RESULT_KEYS = /^(?:result|results|output|content|body)$/i;
 const DATA_URI = /data:[\w/+.-]{1,60};base64,/i;
@@ -40,7 +51,7 @@ export function clean(value, key = '', depth = 0) {
   if (typeof value === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(value).slice(0, 40)) {
-      if (BINARY_KEYS.test(k)) out[k] = `[ausgelassen${typeof v === 'string' ? `, ${v.length} Zeichen` : ''}]`;
+      if (BINARY_KEYS.test(k) && typeof v !== 'number') out[k] = `[ausgelassen${typeof v === 'string' ? `, ${v.length} Zeichen` : ''}]`;
       else if (RESULT_KEYS.test(k)) out[`${k}Chars`] = typeof v === 'string' ? v.length : JSON.stringify(v ?? null).length;
       else out[redact(k).slice(0, 60)] = clean(v, k, depth + 1);
     }
@@ -76,6 +87,19 @@ export function clampTs(ts, at, slackMs = 5 * 60_000) {
   return new Date(Number.isFinite(t) && Math.abs(t - at) <= slackMs ? t : at).toISOString();
 }
 
+/** A retry-queue timestamp: up to 24 h old it is kept and flagged `late`; anything else (future, older, garbage) is clamped like clampTs. */
+export function lateTs(ts, at) {
+  const t = typeof ts === 'number' ? ts : Date.parse(ts);
+  if (Number.isFinite(t) && t < at - 5 * 60_000 && t >= at - LATE_MS) return { ts: new Date(t).toISOString(), late: true };
+  // older than a day (a weekend's retry queue): stamped now but flagged late with its real time, never shown as a live event
+  if (Number.isFinite(t) && t < at - LATE_MS) return { ts: new Date(at).toISOString(), late: true, origTs: new Date(t).toISOString() };
+  return { ts: clampTs(ts, at), late: false };
+}
+/** The Berlin calendar day (YYYY-MM-DD) of `ms`: the registry's device session changes at Berlin midnight, so the gateway's log must too. */
+export const berlinDay = (ms) => { const p = berlinParts(ms); return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`; };
+/** "Geräteprotokoll 3 Nov" for the Berlin day `day` (YYYY-MM-DD). */
+export const deviceLogTitle = (day) => `Geräteprotokoll ${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function createTraceService({ env = process.env, fetchImpl = fetch, now = Date.now, log = (line) => console.log(line), flushMs = 2000, firstFlushMs = FIRST_FLUSH_MS, chatIdleMs = 15 * 60_000 } = {}) {
@@ -104,7 +128,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     const set = bySid.get(sid) ?? new Set();
     set.add(trace); bySid.set(sid, set);
     const parked = waiting.get(sid);
-    if (parked) { waiting.delete(sid); if (parked.until > now()) trace.external(parked.events, 'screen-agent'); }
+    if (parked) { waiting.delete(sid); clearTimeout(parked.timer); if (parked.until > now()) trace.external(parked.events, 'screen-agent'); else deviceLog(parked.deviceId, parked.events); }
   }
   function unbind(sid, trace) {
     const set = bySid.get(sid);
@@ -125,6 +149,10 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     let started = false;
     let closed = false;
     let fellBack = false;
+    let refused = false;
+    let refusedAt = 0;
+    let capNoted = false;
+    const cap = kind === 'device' ? DEVICE_CAP : CLIENT_CAP;
     let timer = null;
     let inflight = null;
     let turnNo = 0;
@@ -135,8 +163,9 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     const ready = new Promise((resolve) => { resolveReady = resolve; });
     if (!configured()) resolveReady({});
 
+    const seqBase = kind === 'device' ? nextSeqBase() : 0;
     const stamp = (source, type, data, turn, ts) => {
-      seqs[source] = (seqs[source] ?? 0) + 1;
+      seqs[source] = (seqs[source] ?? seqBase) + 1;
       return { seq: seqs[source], ts: ts ?? iso(now()), source, turn: Number.isFinite(turn) ? turn : null, type, data: boundData(data) };
     };
     const push = (rec) => {
@@ -176,13 +205,19 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
           while (buffer.length) {
             if (dropped) { const n = dropped; dropped = 0; buffer.unshift(stamp('gateway', 'trace.dropped', { count: n })); }
             const batch = buffer.slice(0, BATCH);
-            await registry(`/v1/sessions/${aid.slice(2)}/events`, { method: 'POST', body: { events: batch }, timeoutMs: 5000 });
+            const res = await registry(`/v1/sessions/${aid.slice(2)}/events`, { method: 'POST', body: { events: batch }, timeoutMs: 5000 });
             buffer.splice(0, batch.length);
             sent += batch.length;
+            // (session, source, seq) already stored: the events were NOT kept. Leave a marker in the trace instead of losing them silently.
+            if (res?.duplicates > 0) { buffer.push(stamp('gateway', 'trace.duplicates', { count: res.duplicates, batch: batch.length, accepted: res.accepted ?? null })); log(`trace-duplicates ${JSON.stringify({ kind, aid, count: res.duplicates, batch: batch.length })}`); }
           }
           fails = 0;
           return true;
-        } catch { fails = Math.min(fails + 1, 5); if (buffer.length || !aid) arm(); return false; }
+        } catch (err) {
+          // the registry does not know this kind (yet): keep the local audit line, drop the events, stop asking until the next day
+          if (kind === 'device' && !aid && err?.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status)) { refused = true; refusedAt = now(); buffer = []; closed = true; clearTimeout(timer); timer = null; open.delete(self); fallback(`kind-refused-${err.status}`); return true; }
+          fails = Math.min(fails + 1, 5); if (buffer.length || !aid) arm(); return false;
+        }
       })().finally(() => { inflight = null; });
       return inflight;
     }
@@ -208,24 +243,30 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       /** An event the browser sent over the voice socket: {ts,type,data}. */
       client(event) {
         try {
-          if (closed || !event || typeof event !== 'object' || foreign >= CLIENT_CAP) return;
+          if (closed || !event || typeof event !== 'object' || foreign >= cap) return;
           let type = String(event.type ?? '');
           if (!type.startsWith('client.')) type = `client.${type}`;
           if (!TYPE_RE.test(type)) return;
           foreign += 1;
           push(stamp('client', type, event.data, event.data?.turn, clampTs(event.ts, now())));
-        } catch { /* ignore */ }
+        } catch { /* malformed event: the session must not notice */ }
       },
       /** Events from the Screen Agent (device route): already validated by the caller. */
       external(events, source = 'screen-agent') {
         try {
           if (closed || !SOURCES.has(source)) return;
+          const reserve = kind === 'device' ? DEVICE_RESERVE : 0;
           for (const e of events) {
-            if (foreign >= CLIENT_CAP) break;
+            // the gateway's own events and errors may use the reserve; chatter goes first once the log is half full
+            const mine = source === 'gateway' || URGENT.test(e.type);
+            if (foreign >= cap - (mine ? 0 : reserve) || (kind === 'device' && !mine && foreign >= cap / 2 && CHATTER.test(e.type))) {
+              if (!capNoted && foreign >= cap - (mine ? 0 : reserve)) { capNoted = true; push(stamp('gateway', 'trace.capped', { foreign, cap, reserve })); }
+              continue;
+            }
             foreign += 1;
             push(stamp(source, e.type, e.data, e.turn, e.ts));
           }
-        } catch { /* ignore */ }
+        } catch { /* malformed event: the session must not notice */ }
       },
       flush,
       /** Flushes and ends the trace; the caller need not await it. Never rejects. */
@@ -243,6 +284,8 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       get aid() { return aid; },
       get started() { return started; },
       get closed() { return closed; },
+      get refused() { return refused; },
+      get refusedAt() { return refusedAt; },
       get kind() { return kind; },
       nextTurn: () => (turnNo += 1),
       ready,
@@ -271,19 +314,52 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     return entry.trace;
   }
 
-  /** Device route: events of the Screen Agent for the voice (else chat) session of `sid`; parked for 60 s when there is none yet. */
-  function attach(sid, events) {
+  /** Events with no session: one trace of kind "device" per Berlin day and device, created on the first event. */
+  const devlogs = new Map(); // "deviceId:YYYY-MM-DD" -> trace
+  function deviceLog(deviceId, events, source = 'screen-agent') {
+    try {
+      if (!deviceId || !events?.length || !SOURCES.has(source)) return false;
+      const day = berlinDay(now()), key = `${deviceId}:${day}`;
+      for (const [k, t] of devlogs) if (!k.endsWith(`:${day}`)) { devlogs.delete(k); void t.close(); } // yesterday's log ends with the first event of today
+      let trace = devlogs.get(key);
+      if (!trace) {
+        if (devlogs.size >= 100) return false;
+        trace = openTrace({ kind: 'device' });
+        trace.event('session.start', { title: deviceLogTitle(day), client: { device: deviceId } });
+        devlogs.set(key, trace);
+      }
+      if (trace.refused && now() - trace.refusedAt >= REFUSED_RETRY_MS) { devlogs.delete(key); return deviceLog(deviceId, events, source); } // the registry may have been migrated since
+      if (trace.refused || trace.closed) return false;
+      trace.external(events.map((e) => (e.late ? { ...e, data: { ...e.data, late: true, ...(e.origTs ? { origTs: e.origTs } : {}) } } : e)), source);
+      return true;
+    } catch { return false; /* the caller never depends on the log */ }
+  }
+
+  /** Device route: events of the Screen Agent for the voice (else chat) session of `sid`; parked for 60 s when there is none yet, then they go to the device log. */
+  function attach(sid, events, { deviceId } = {}) {
     const set = bySid.get(sid);
     const traces = set ? [...set] : [];
     const target = [...traces].reverse().find((t) => t.kind === 'voice') ?? traces.at(-1);
     if (target) { target.external(events, 'screen-agent'); return true; }
-    for (const [k, v] of waiting) if (v.until <= now()) waiting.delete(k);
-    if (!waiting.has(sid) && waiting.size >= 200) return false;
-    const parked = waiting.get(sid) ?? { events: [], until: 0 };
+    for (const [k, v] of waiting) if (v.until <= now()) expireParked(k);
+    if (!waiting.has(sid) && waiting.size >= 200) { deviceLog(deviceId, events); return false; }
+    const parked = waiting.get(sid) ?? { events: [], until: 0, deviceId };
+    const overflow = parked.events.length + events.length - 200;
+    if (overflow > 0) deviceLog(parked.deviceId ?? deviceId, [...parked.events, ...events].slice(0, overflow)); // the oldest no longer fit
     parked.events = [...parked.events, ...events].slice(-200);
     parked.until = now() + 60_000;
+    parked.deviceId ??= deviceId;
+    clearTimeout(parked.timer);
+    parked.timer = setTimeout(() => expireParked(sid), 60_500);
+    parked.timer.unref?.();
     waiting.set(sid, parked);
     return false;
+  }
+  function expireParked(sid) {
+    const parked = waiting.get(sid);
+    if (!parked) return;
+    waiting.delete(sid); clearTimeout(parked.timer);
+    deviceLog(parked.deviceId, parked.events);
   }
 
   /** SIGTERM: mark and flush every open trace (a redeploy must not lose them). */
@@ -297,9 +373,11 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
   const idOf = (q) => String(q).replace(/^a#/, '');
   const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.events) ? r.events : []);
   return {
-    open: openTrace, chat, attach, flushAll, bind, unbind, registry,
+    open: openTrace, chat, attach, deviceLog, startOf: (sid) => { const set = bySid.get(sid); return set?.size ? Math.min(...[...set].map((t) => t.startedAt)) : null; },
+    flushAll, bind, unbind, registry,
     configured,
-    lookup: (q) => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}`),
+    lookup: (q, extra = '') => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}${extra}`),
+    recent: (query = '') => registry(`/v1/sessions/recent${query}`),
     remote: async (id) => {
       const [trace, diagnosis] = await Promise.all([registry(`/v1/sessions/${idOf(id)}/trace`), registry(`/v1/sessions/${idOf(id)}/diagnosis`)]);
       return { events: arr(trace), diagnosis: diagnosis?.diagnosis ?? diagnosis };
@@ -351,11 +429,67 @@ export function localDiagnosis(events) {
 
 const diagnosisText = (d) => (typeof d === 'string' ? d : Array.isArray(d) ? d.map(diagnosisText).join('\n') : d && typeof d === 'object' ? (typeof d.what_happened === 'string' ? d.what_happened : typeof d.text === 'string' ? d.text : typeof d.summary === 'string' ? d.summary : JSON.stringify(d)) : '');
 
+// ---- which session did he mean: "letzte", "davor", "10:29", "heute morgen" ----
+const TZ = 'Europe/Berlin';
+const DAY_MS = 86_400_000;
+const berlinParts = (ms) => Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).filter((p) => p.type !== 'literal').map((p) => [p.type, +p.value]));
+/** Epoch ms of a Berlin wall-clock time (day offset from `ms`'s Berlin date). */
+function berlinAt(ms, dayOffset, hour, minute = 0) {
+  const p = berlinParts(ms + dayOffset * DAY_MS);
+  const guess = Date.UTC(p.year, p.month - 1, p.day, hour, minute);
+  const o = berlinParts(guess);
+  return guess - (Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute) - guess);
+}
+export const berlinClock = (ms) => new Intl.DateTimeFormat('de-DE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)).replace(', ', ' ');
+const DAYPART = [[/\b(?:morgens?|früh|frueh)\b/i, 4, 12], [/\bvormittags?\b/i, 8, 12], [/\bmittags?\b/i, 11, 15], [/\bnachmittags?\b/i, 12, 18], [/\babends?\b/i, 17, 24], [/\bnachts?\b/i, 0, 6]];
+
+/**
+ * What a `which` means. {kind:'last'} for "last"/"previous"/"vorherige"/"davor", {kind:'time', at} for "10:29" / "um 10 Uhr",
+ * {kind:'range', from, to} for "heute morgen", "vorhin", "gestern", else {kind:'lookup'} (a#id, hex, slug). Pure; `now` in epoch ms.
+ */
+export function parseWhich(which, now = Date.now()) {
+  const w = String(which ?? '').trim();
+  if (/^(?:(?:die|der|meine|eine)\s+)?(?:(?:last|previous|prev|letzte[nrms]?|zuletzt|vorherige[nrms]?|vorige[nrms]?)(?:\s+(?:sitzung|session))?|(?:sitzung\s+)?davor|vor der aktuellen(?: sitzung)?)$/i.test(w)) return { kind: 'last' };
+  if (/^(?:a\s?#\s?)?[0-9a-f]{6}$/i.test(w)) return { kind: 'lookup' };
+  const clock = /(?:^|\D)([01]?\d|2[0-3])\s*[:.h]\s*([0-5]\d)(?:\D|$)/.exec(w) ?? /\b([01]?\d|2[0-3])\s*uhr\b/i.exec(w);
+  if (clock) {
+    let at = berlinAt(now, 0, +clock[1], +(clock[2] ?? 0));
+    if (at > now + 5 * 60_000 && !/heute/i.test(w)) at -= DAY_MS; // "10:29" said at 09:00 can only mean yesterday
+    if (/gestern/i.test(w)) at = berlinAt(now, -1, +clock[1], +(clock[2] ?? 0));
+    return { kind: 'time', at };
+  }
+  if (/\b(?:vorhin|eben|gerade eben|soeben)\b/i.test(w)) return { kind: 'range', from: now - 3 * 3_600_000, to: now };
+  const day = /\bvorgestern\b/i.test(w) ? -2 : /\bgestern\b/i.test(w) ? -1 : /\bheute\b|\bletzte nacht\b/i.test(w) || DAYPART.some(([re]) => re.test(w)) ? 0 : null;
+  if (day === null) return { kind: 'lookup' };
+  const part = DAYPART.find(([re]) => re.test(w));
+  const [h0, h1] = part ? [part[1], part[2]] : [0, 24];
+  return { kind: 'range', from: berlinAt(now, day, h0), to: Math.min(now, berlinAt(now, day, h1 === 24 ? 23 : h1, h1 === 24 ? 59 : 0)) };
+}
+
+const startOf = (s) => Date.parse(s.started_at ?? s.startedAt ?? s.created_at ?? '');
+const idOfSession = (s) => `a#${String(s.id ?? '').replace(/^a#/, '')}`;
+const candidateLine = (s) => `${idOfSession(s)} ${Number.isFinite(startOf(s)) ? berlinClock(startOf(s)) : '?'}${s.kind ? ` ${s.kind}` : ''}${s.provider ? `/${s.provider}` : ''}${s.title ? ` "${brief(s.title, 60)}"` : ''}`;
+
+/** The sessions the registry lists for a time word, best first; null when the registry has no such list yet (old registry). */
+async function findByTime(spec, service, exclude) {
+  const list = spec.kind === 'time' ? `?limit=12&around=${encodeURIComponent(new Date(spec.at).toISOString())}` : `?limit=40&before=${encodeURIComponent(new Date(spec.to + 60_000).toISOString())}`;
+  let rows;
+  try { rows = arr(await service.recent(list)); } catch (err) { if (err.status === 404) return null; throw err; }
+  const usable = rows.filter((s) => s?.id && idOfSession(s) !== exclude && (!s.kind || ['voice', 'chat', 'text'].includes(s.kind)) && Number.isFinite(startOf(s)));
+  if (spec.kind === 'time') {
+    const span = (s) => { const a = startOf(s), b = Date.parse(s.ended_at ?? '') || a; return spec.at >= a && spec.at <= b ? 0 : Math.min(Math.abs(spec.at - a), Math.abs(spec.at - b)); };
+    return usable.sort((x, y) => span(x) - span(y));
+  }
+  const inside = usable.filter((s) => startOf(s) >= spec.from && startOf(s) <= spec.to).sort((x, y) => startOf(y) - startOf(x));
+  return inside.length ? inside : usable.sort((x, y) => Math.abs(startOf(x) - spec.to) - Math.abs(startOf(y) - spec.to)).map((s) => Object.assign(s, { outside: true }));
+}
+const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.items) ? r.items : Array.isArray(r?.sessions) ? r.sessions : Array.isArray(r?.events) ? r.events : []);
+
 /**
  * The text of the session_trace tool / the lookup route for one session: diagnosis + the last 40 timeline lines.
- * `which`: "current" (the live trace of this conversation, flushed first), "last", or an a#id / hex / slug.
+ * `which`: "current" (the live trace of this conversation, flushed first), "last"/"previous" (the newest OTHER session), "10:29", "heute morgen", "vorhin", "gestern", or an a#id / hex / slug.
  */
-export async function describeSession({ which = 'current', service, current }) {
+export async function describeSession({ which = 'current', service, current, now = Date.now() }) {
   const w = String(which ?? 'current').trim() || 'current';
   let events = [];
   let diagnosis = '';
@@ -372,8 +506,24 @@ export async function describeSession({ which = 'current', service, current }) {
     } else if (service?.configured()) note = ' (noch nicht in der Registry: lokaler Verlauf)';
   } else {
     if (!service?.configured()) return 'Die Registry ist nicht eingerichtet; alte Sitzungen sind nicht abrufbar.';
+    const running = (typeof current === 'function' ? current() : current)?.aid ?? null; // the session being spoken in is never "the last one"
+    const spec = parseWhich(w, now);
     try {
-      const found = await service.lookup(w);
+      let found = null, others = [];
+      if (spec.kind === 'time' || spec.kind === 'range') {
+        const rows = await findByTime(spec, service, running);
+        if (rows === null) return 'Die Registry kennt die Suche nach Uhrzeit noch nicht. Nimm "last" oder die a#-ID der Sitzung.';
+        if (!rows.length) return `Keine Sitzung zu "${brief(w, 40)}" gefunden.`;
+        found = { id: rows[0].id }; others = rows.slice(1, 4);
+        note = ` (${rows[0].outside ? 'nichts im genannten Zeitraum, nächste Sitzung' : 'beste Übereinstimmung'}: ${candidateLine(rows[0])}${others.length ? `; weitere: ${others.map(candidateLine).join('; ')}` : ''})`;
+      } else if (spec.kind === 'last') {
+        found = await service.lookup('last', running ? `&exclude=${encodeURIComponent(running.replace(/^a#/, ''))}` : '');
+        if (running && found?.id && idOfSession(found) === running) { // an old registry ignores exclude: take the newest other one from the list
+          const rows = (await service.recent('?limit=6').then(arr, () => [])).filter((s) => s?.id && idOfSession(s) !== running && (!s.kind || ['voice', 'chat', 'text'].includes(s.kind)));
+          found = rows[0] ? { id: rows[0].id } : null;
+          if (!found) return 'Es gibt keine frühere Sitzung außer der laufenden.';
+        }
+      } else found = await service.lookup(w);
       id = found?.id ? `a#${String(found.id).replace(/^a#/, '')}` : null;
       if (!id) return `Keine Sitzung zu "${brief(w, 40)}" gefunden.`;
       const r = await service.remote(id);

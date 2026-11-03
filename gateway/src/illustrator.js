@@ -4,7 +4,7 @@ import { knowledgeLines } from './knowledge.js';
 // takes longer than 25 s and publishes pending / ready / error on the canvas bus. canvas session = the per-conversation
 // wrapper (text chat or one voice session) that tools, auto-illustration and the refusal guard talk to.
 import { audit as defaultAudit } from './audit.js';
-import { asksForSecrets, attachDetail, connectCanvas, detailSpec, ensureSimple, isExplanatory, isMetaAnswer, isYesNoQuestion, normalizeCanvas, parseNumber, refusesToDraw, simpleError, slugify, wantsNoDrawing, wantsWriteAction } from './canvas.js';
+import { asksForDrawing, asksForSecrets, attachDetail, CHITCHAT_RE, connectCanvas, detailSpec, ensureSimple, isExplanatory, isMetaAnswer, isYesNoQuestion, normalizeCanvas, parseNumber, refusesToDraw, simpleError, slugify, wantsNoDrawing, wantsWriteAction } from './canvas.js';
 import { cfg } from './config.js';
 import { deskModelFacts, MODEL_FACT_LINES } from './deskStatus.js';
 import { hostDisplay, hostMentions, KNOWN_HOSTS, modelAllowed, modelTokens } from './proseGuard.js';
@@ -206,6 +206,8 @@ const NUMERIC_KINDS = new Set(['pie', 'bar', 'line', 'sankey']);
 
 export const SYSTEM_PROMPT = `You are the illustrator of Florian's agent desk. You turn a drawing request into ONE CanvasSpec JSON object that the desk renders next to the conversation. Answer with that JSON object only (no prose, no markdown fence).
 
+FIRST decide whether a drawing adds real information value for Florian over the spoken answer. If it does not (a simple fact, a one-number answer, small talk, a yes/no, or the canvas already shows exactly this), answer with ONLY {"skip":true,"reason":"<one short English phrase>"} and nothing else. When in doubt about a real explanation, an architecture, a flow, a comparison or several numbers, draw. Never skip when Florian explicitly asked for a drawing (the request then says so).
+
 Pick the kind that fits what is being explained:
 - flow: a sequence or decision process.  {"kind":"flow","nodes":[{"id","label","detail?","tone?","shape?"}],"edges":[{"from","to","label?","style?"}],"direction":"LR"|"TB"}   shape: box|pill|diamond (decision)|cylinder (data)|person
 - architecture: parts of a system, grouped.  Same as flow plus "groups":[{"id","label","tone?"}] and nodes[].group = a group id. Typical groups: Browser / Gateway (Sandy) / Bridge (LeChonk) / Vendors.
@@ -355,7 +357,7 @@ const base = (p) => String(p ?? '').split('/').filter(Boolean).at(-1) ?? '';
 function headerOf(content) {
   const text = String(content ?? '');
   const cut = text.indexOf('\n---\n');
-  try { return JSON.parse(cut < 0 ? text : text.slice(0, cut)); } catch { return null; }
+  try { return JSON.parse(cut < 0 ? text : text.slice(0, cut)); } catch { return null; /* malformed */ }
 }
 
 /** The sources of the tool calls that were actually used (docs: "sources = the tools/paths actually used"). */
@@ -455,6 +457,15 @@ function parseJsonObject(text) {
   } catch {
     return null;
   }
+}
+
+/** Told to the agent with every canvas_draw result: the illustrator may find the drawing worthless and skip it. */
+export const DRAW_NOTE = 'Ob eine Zeichnung entsteht, entscheidet die Zeichnerin selbst; sage weder "ich zeichne" noch "es gibt keine Zeichnung", kündige nichts an und sprich weiter mit Inhalt.';
+
+/** {skip:true, reason} when the illustrator judged the drawing worthless (value check), else null. */
+function skipOf(content) {
+  const parsed = parseJsonObject(content);
+  return parsed?.skip === true && !parsed.kind && !parsed.nodes ? parsed : null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -595,7 +606,7 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
   // desk: three conversations in parallel no longer cancel each other's drawings. key = lane + id.
   const runs = new Map(); // key -> {ctl, job, cancelled, lane, id}
   const keyOf = (lane, id) => `${lane}\u0000${id}`;
-  const bridgeHosts = () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; } };
+  const bridgeHosts = () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; /* absent */ } };
   let autoSeq = 0;
   const tools = TOOL_DEFS.filter((t) => ILLUSTRATOR_TOOLS.includes(t.name));
 
@@ -630,6 +641,8 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
     const lines = [`Anfrage: ${job.request}`, `Gewünschte Art: ${job.kind ?? 'frei wählen'}`];
     if (job.id) lines.push(`id: ${job.id}${previous ? ' (Update dieser Zeichnung)' : ''}`);
     else lines.push(`id: frei wählen${job.currentId ? `; aktuelle Zeichnung auf der Canvas: "${job.currentId}" (gleiches Thema -> gleiche id, sonst neue id)` : ''}`);
+    const onCanvas = job.currentId && !previous ? bus.latest().find((e) => e.id === job.currentId)?.spec : null;
+    if (onCanvas) lines.push(`Auf der Canvas steht gerade: "${short(onCanvas.title, 80)}" (${onCanvas.kind}, id ${onCanvas.id})`);
     if (job.page?.title) lines.push(`Erklärseite: ${job.page.title}${job.page.point ? `; gewählter Punkt: ${job.page.point.title}` : ''}`);
     const onPage = isPageQuestion(job.question ?? job.memory?.lastUser?.() ?? job.request, job.page) || isPageQuestion(job.request, job.page);
     const facts = onPage ? pageFacts(job.page) : '';
@@ -861,7 +874,24 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
         if (claim) return { error: `the drawing claims that data or a tool is missing ("${short(claim, 80)}"); the desk agent has the data. Draw only what the conversation and the facts show, without any statement about missing data, missing tools or failed lookups` };
         return o.fallback && claimsMissing(o.fallback.spec) ? { ...o, fallback: undefined } : o;
       };
-      let outcome = judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
+      // Value check (item H): the same model call may answer {"skip":true}. Florian's explicit "zeichne das" always draws.
+      const skip = skipOf(answer.content);
+      if (skip) {
+        const explicit = asksForDrawing([job.question, job.memory?.lastUser?.(), job.early || job.by !== 'auto' ? job.request : ''].filter(Boolean).join(' '));
+        if (explicit) {
+          messages.push({ role: 'assistant', content: answer.content }, { role: 'user', content: 'Florian hat die Zeichnung ausdrücklich verlangt: kein skip. Antworte nur mit dem CanvasSpec-JSON.' });
+          answer = await ask({ json: true });
+        } else {
+          if (entry.cancelled) return { ok: false, cancelled: true, id: entry.id };
+          const why = short(String(skip.reason ?? 'kein Mehrwert'), 80);
+          audit({ action: 'canvas.skipped', ip: job.ip, detail: `${job.id ?? entry.id} by=${job.by}${job.early ? ' early' : ''}: ${why} ${Date.now() - started}ms rounds=${rounds}`, cost_usd: Number(costUsd.toFixed(6)) });
+          try { job.onSkip?.({ id: job.id ?? entry.id, reason: why, by: job.by, ms: Date.now() - started }); } catch { /* bookkeeping only */ }
+          settle(job, job.id ?? entry.id);
+          return { ok: true, skipped: true, reason: why, id: job.id ?? entry.id };
+        }
+      }
+      // a second skip after the explicit-draw retry is a rejected answer (the repair round asks once more), never a silent end
+      let outcome = skipOf(answer.content) ? { error: 'a drawing was asked for explicitly: no skip, answer with the CanvasSpec JSON object' } : judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
       if (outcome.error) {
         audit({ action: 'canvas.repair', ip: job.ip, detail: `${entry.id}: ${outcome.error}` });
         const fallback = outcome.fallback;
@@ -975,7 +1005,7 @@ export const conversationKey = (sid, conversationId) => (typeof conversationId =
  * `focusedId` = the canvas the browser shows right now (it sends it with every chat request and voice start / text / focus
  * message); `owned` = the ids this conversation produced in earlier requests; `onOwn(id)` is told every id it produces now.
  */
-export function createCanvasSession({ bus, illustrator, by, provider, emit, page, onFacts, focusedId, owner, owned = [], onOwn, ctx = {}, audit = defaultAudit, debounceMs = () => cfg.canvasDebounceMs(), researchMs = () => cfg.canvasResearchMs() }) {
+export function createCanvasSession({ bus, illustrator, by, provider, emit, page, onFacts, onSkip, focusedId, owner, owned = [], onOwn, ctx = {}, audit = defaultAudit, debounceMs = () => cfg.canvasDebounceMs(), researchMs = () => cfg.canvasResearchMs() }) {
   const memory = createMemory();
   const lane = `${by}${provider ? `-${provider}` : ''}-${(laneSeq += 1)}`; // this conversation's own illustrator queue
   const mine = new Set(); // illustrator run keys started by this session
@@ -1041,7 +1071,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
   const writable = (id) => onBus(id) && (!foreignOwner(id) || id === namedId); // an existing canvas this conversation may update
   const specOf = (id) => (id ? bus.latest().find((e) => e.id === id)?.spec ?? null : null);
   let entityStrikes = 0; // canvas_render answers of this turn rejected for invented names
-  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; } };
+  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; /* bridge hosts unavailable: none known */ } };
   /** What the agent's own canvas_render may name: the conversation, this turn's tool results, the page, the previous version. */
   const entityCorpus = (previous) => createCorpus({
     rich: [JSON.stringify(page ?? ''), pageFacts(page), previous ? JSON.stringify(previous) : '', ...memory.turnTexts(), ...memory.toolsUsed().map((t) => t.content)].join('\n'),
@@ -1070,6 +1100,14 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
     return ownStage() ?? (clientFocus === undefined ? ids[0] ?? null : null);
   }
 
+  /** Why a drawing of this turn would show nothing new (yes/no, small talk), or null. */
+  const noValue = () => {
+    const t = turnUser;
+    if (!t || asksForDrawing(t) || namedId || isDeicticDraw(t)) return null;
+    if (CHITCHAT_RE.test(t) && t.length < 50 && !isExplanatory(t, '')) return 'small-talk';
+    return isYesNoQuestion(t) ? 'yes-no' : null;
+  };
+
   const limitReached = () => Boolean(ctx.limits && ctx.sid && !ctx.limits.check(ctx.sid, 'spend').ok);
 
   function start(job, after) {
@@ -1079,8 +1117,8 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
     // Round 8 (critic r7 F6): what finishes after the next user turn started, or answers another topic, goes to the history only (focus:false)
     const seq = turnSeq;
     const late = (partial) => publish(seq !== turnSeq || job.offTopic ? { ...partial, focus: false } : partial);
-    illustrator.draw({ by, provider, publish: late, memory, page, onFacts, sid: ctx.sid, ip: ctx.ip, limits: ctx.limits, lane, ...job })
-      .catch(() => {})
+    illustrator.draw({ by, provider, publish: late, memory, page, onFacts, onSkip, sid: ctx.sid, ip: ctx.ip, limits: ctx.limits, lane, ...job })
+      .catch(() => /* ignored */ {})
       .finally(() => {
         after?.(); // may start the next run before this one stops counting, so idle() never sees a gap
         pending -= 1;
@@ -1245,6 +1283,16 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
     draw({ request, kind, id }, { auto: isAuto = false } = {}) {
       const text = String(request ?? '').trim();
       if (!text) throw new Error('request must say what to draw');
+      // Value check before any model call (item H): a yes/no or small talk gets no drawing, and the agent is told so it can trust the answer.
+      // Everything subtler is judged by the illustrator itself ({"skip":true}); Florian's explicit "zeichne das" always draws.
+      if (!isAuto && !auto && !early && !forbidden) {
+        const why = noValue();
+        if (why) {
+          try { onSkip?.({ id: null, reason: why, by: 'agent', ms: 0 }); } catch { /* bookkeeping only */ }
+          audit({ action: 'canvas.skipped', ip: ctx.ip, detail: `agent canvas_draw: ${why}` });
+          return { ok: true, skipped: true, status: 'keine Zeichnung nötig', hinweis: 'Keine Zeichnung nötig: sie würde Florian nichts zeigen, was du nicht schon sagst. Erwähne keine Zeichnung und antworte mit Inhalt.' };
+        }
+      }
       if (!isAuto && forbidden) throw new Error('Florian hat für diese Frage keine Zeichnung gewünscht: nicht zeichnen');
       if (limitReached()) throw new Error('the daily cost limit is reached, nothing more can be drawn today');
       const explicit = ownId(validId(id));
@@ -1257,12 +1305,12 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       if (!isAuto && !previousTurn) { toolRan = true; clearTimers(); }
       if (!isAuto && early && drawId === early.id) {
         deferred = { id: drawId, kind, request: text }; // the early run is still drawing this canvas: refine it when it is done
-        return { ok: true, id: drawId, status: 'zeichne' };
+        return { ok: true, id: drawId, status: 'zeichne', hinweis: DRAW_NOTE };
       }
       const off = !isAuto && (offTopic(kind, text, turnUser) || stale || previousTurn);
       publish({ phase: 'pending', id: drawId, kind, ...(isAuto ? { by: 'auto' } : {}), ...(off ? { focus: false } : {}) });
       start({ id: drawId, kind, request: stale ? text : withContext(text), ...(isAuto ? { by: 'auto' } : {}), ...(off ? { offTopic: true } : {}) });
-      return { ok: true, id: drawId, status: 'zeichne' };
+      return { ok: true, id: drawId, status: 'zeichne', ...(isAuto ? {} : { hinweis: DRAW_NOTE }) };
     },
 
     /**

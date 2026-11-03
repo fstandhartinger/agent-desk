@@ -302,7 +302,7 @@ const BODY = {
 export function normalizeCanvas(input, { gate = false } = {}) {
   let spec = input;
   if (typeof spec === 'string') {
-    try { spec = JSON.parse(spec); } catch { return fail('spec is not valid JSON'); }
+    try { spec = JSON.parse(spec); } catch { return fail('spec is not valid JSON'); /* malformed */ }
   }
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return fail('spec must be a JSON object');
   try {
@@ -790,7 +790,7 @@ export function qualityError(spec) {
 const EXPLAIN_RE = /\bwie\b|warum|wieso|erklär|zeig|architektur|aufbau|ablauf|funktioniert|wofür|wieviel|wie viel|kosten|geld|ausgaben|vergleich|diagramm|chart|grafik|skizze|übersicht|struktur|frage (?:über|zu|zum|zur)|steuer|rücklage|umwandeln|umwandlung|emission|tranche|wie läuft|was passiert/i;
 const LONG_TURN = 60;
 const REQUEST_RE = /\?|\b(?:frage|ich (?:möchte|will|würde|brauche|bräuchte|suche)|kannst du|könntest du|kann man|bitte|sag(?:e)? mir|gib mir|erzähl|beschreib|hilf|stell(?:e)? (?:mir|dir)|mach(?:e)? (?:mir|mal)|was|welche[rsmn]?|wo|wann|wer|wozu|weshalb)\b/i;
-const CHITCHAT_RE = /^(?:danke|vielen dank|ok(?:ay)?|alles klar|super|prima|gut|hallo|hi|hey|tschüss|ja|nein|genau|stimmt|passt)\b[\s\S]{0,40}$/i;
+export const CHITCHAT_RE = /^(?:danke|vielen dank|ok(?:ay)?|alles klar|super|prima|gut|hallo|hi|hey|tschüss|ja|nein|genau|stimmt|passt)\b[\s\S]{0,40}$/i;
 
 /** True when a finished turn is explanatory enough to be illustrated: the question looks like one, or the answer is long / numeric. */
 /**
@@ -812,12 +812,16 @@ export function countSentences(text) {
 // A plain yes/no question ("Läuft der Job noch?", "Is the bridge up?"): one short sentence that starts with a verb, asks for no
 // picture, no explanation and no comparison. The early illustrator stays out; the agent can still draw if it wants to.
 const YES_NO_START = /^\s*(?:ist|sind|war|waren|hat|haben|hatte|hatten|kann|kannst|können|könnte|könntest|muss|musst|müssen|soll|sollen|darf|darfst|dürfen|gibt|läuft|laufen|lief|geht|gehen|klappt|stimmt|wird|werden|wurde|wurden|funktioniert|habe|hast|bin|bist|is|are|was|were|does|do|did|has|have|had|can|could|should|will|would|may)\b/i;
-const YES_NO_BLOCK = /zeichn|diagramm|grafik|skizze|chart|bild|visualis|darstell|erklär|beschreib|vergleich|zeig|übersicht|struktur|architektur|aufbau|ablauf|schritt|kosten|ausgaben|\bund\b|\boder\b|\bwarum\b|\bwieso\b|\bwelche|\bwas\b|\bwer\b|\bwann\b|\bwo\b|\bwie (?:viel|lang|oft|groß)|draw|diagram|chart|explain|compare|show|\bwhy\b|\bhow\b|\bwhat\b|\bwhich\b/i;
+const YES_NO_BLOCK = /,|\bflow|pipeline|sequenz|zeitleiste|\bmit\b|\bzwischen\b|zeichn|diagramm|grafik|skizze|chart|bild|visualis|darstell|erklär|beschreib|vergleich|zeig|übersicht|struktur|architektur|aufbau|ablauf|schritt|kosten|ausgaben|\bund\b|\boder\b|\bwarum\b|\bwieso\b|\bwelche|\bwas\b|\bwer\b|\bwann\b|\bwo\b|\bwie (?:viel|lang|oft|groß)|draw|diagram|chart|explain|compare|show|\bwhy\b|\bhow\b|\bwhat\b|\bwhich\b/i;
 export function isYesNoQuestion(text) {
   const t = String(text ?? '').trim();
   if (!t || t.length > 90 || (t.match(/[?.!]/g) ?? []).length > 1 || !t.endsWith('?')) return false;
   return YES_NO_START.test(t) && !YES_NO_BLOCK.test(t);
 }
+
+/** Florian asks for a drawing in so many words ("zeichne das", "mal mir ein Diagramm", "als Skizze"): the value check never skips it. */
+const DRAW_ASK_RE = /\bzeichn\w*|\bmal(?:e|st)?\b[^.!?\n]{0,30}\bauf\b|\bskizzier\w*|\bvisualisier\w*|\bdiagramm|\bgrafik|\bschaubild|\bdraw\b|\bsketch\b/i;
+export const asksForDrawing = (text) => DRAW_ASK_RE.test(String(text ?? '').replace(QUOTED_RE, ' ')) && !wantsNoDrawing(text);
 
 export function isExplanatory(userText, answerText) {
   const user = String(userText ?? '').trim();

@@ -46,7 +46,7 @@ async function statAll(root, filter) {
       try {
         const st = await fs.promises.stat(path.join(root, name));
         return st.isDirectory() ? { name, mtimeMs: st.mtimeMs } : null;
-      } catch { return null; }
+      } catch { return null; /* entry vanished: not listed */ }
     }));
     out.push(...batch.filter(Boolean));
   }
@@ -104,15 +104,15 @@ async function jobIndex() {
     return index.loading;
   };
   if (!index.jobs) await refresh();
-  else if (Date.now() - index.at > INDEX_TTL_MS) refresh().catch(() => {});
+  else if (Date.now() - index.at > INDEX_TTL_MS) refresh().catch((err) => console.warn(`jobs: index refresh failed: ${err?.message ?? err}`));
   return index.jobs;
 }
 
 /** Keeps the index warm while the desk is in use so the first question of a conversation is not the slow one. */
 export function startJobIndexRefresh() {
-  buildIndex().then((jobs) => { index = { ...index, at: Date.now(), jobs }; }).catch(() => {});
+  buildIndex().then((jobs) => { index = { ...index, at: Date.now(), jobs }; }).catch((err) => console.warn(`jobs: first index build failed: ${err?.message ?? err}`));
   const timer = setInterval(() => {
-    if (index.usedAt && Date.now() - index.usedAt < INDEX_IDLE_MS && Date.now() - index.at > INDEX_TTL_MS - 5000) jobIndex().catch(() => {});
+    if (index.usedAt && Date.now() - index.usedAt < INDEX_IDLE_MS && Date.now() - index.at > INDEX_TTL_MS - 5000) jobIndex().catch((err) => console.warn(`jobs: index refresh failed: ${err?.message ?? err}`));
   }, 10_000);
   timer.unref();
   return () => clearInterval(timer);
@@ -138,7 +138,7 @@ export async function list({ filter, activeOnly = false, limit = 30 } = {}) {
 
 async function readJob(name) {
   const dir = path.join(jobsRoot(), name);
-  const st = await fs.promises.stat(dir).catch(() => null);
+  const st = await fs.promises.stat(dir).catch(() => /* absent */ null);
   if (!st?.isDirectory()) return null;
   const state = await readEdge(path.join(dir, 'STATE.md'), 4096, true);
   const result = await readEdge(path.join(dir, 'RESULT.md'), 4096, false);
@@ -167,7 +167,7 @@ async function similarJobs(query) {
   ranked = [...ranked, ...rank(query, names)].sort((a, b) => b.score - a.score).slice(0, 3);
   return Promise.all(ranked.map(async (r) => {
     if (typeof r.item !== 'string') return r;
-    const st = await fs.promises.stat(path.join(root, r.item)).catch(() => null);
+    const st = await fs.promises.stat(path.join(root, r.item)).catch(() => /* absent */ null);
     return st?.isDirectory() ? { ...r, item: await describe(root, { name: r.item, mtimeMs: st.mtimeMs }) } : null;
   })).then((rows) => rows.filter(Boolean));
 }

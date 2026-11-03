@@ -99,7 +99,7 @@ function visit(home, rel, depth, entries, kinds, dirs, stack, statFile) {
   if (held) dirs.set(path.join(home, rel), { rel, depth });
 }
 
-const isFileSync = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+const isFileSync = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; /* absent */ } };
 
 function finishScan(home, kinds, dirs, t0) {
   for (const f of FIXED) { const p = path.join(home, f); if (!kinds.has(p) && isFileSync(p)) kinds.set(p, 'curated'); }
@@ -283,7 +283,7 @@ function publicText(home) {
     const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
     parts.push(execFileSync('git', ['-C', repo, 'config', '--get-regexp', '^remote\\..*\\.url$'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }));
   } catch { /* not a checkout */ }
-  try { parts.push(fs.readFileSync(path.join(home, '.gitconfig'), 'utf8')); } catch { /* none */ }
+  try { parts.push(fs.readFileSync(path.join(home, '.gitconfig'), 'utf8')); } catch { /* file missing: no values from it */ }
   return parts.join('\n');
 }
 
@@ -443,7 +443,7 @@ export function refreshWindowFileIfStale(home) {
   const out = windowFile(home);
   let built = 0;
   try { built = fs.statSync(out).mtimeMs; } catch { /* missing */ }
-  const newest = Math.max(0, ...secretSources(home).map((f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }));
+  const newest = Math.max(0, ...secretSources(home).map((f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; /* absent */ } }));
   if (!newest || built >= newest) return false;
   // Round 5: stores such as ~/.claude.json and session key files change every few minutes without a new value; a new salt
   // would change the file anyway, so compare the value sets and only touch the file when they agree.
@@ -467,7 +467,7 @@ let state = { home: null, stamp: '', checkedAt: 0, list: [], count: 0, sets: [],
 
 function stampOf(files) {
   return files.map((f) => {
-    try { const st = fs.statSync(f); return `${f}:${st.mtimeMs}:${st.size}`; } catch { return ''; }
+    try { const st = fs.statSync(f); return `${f}:${st.mtimeMs}:${st.size}`; } catch { return ''; /* absent */ }
   }).filter(Boolean).join('|');
 }
 

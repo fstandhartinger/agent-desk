@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { WebSocketServer } from 'ws';
 import { setEnv } from './helpers/env.js';
 
+import { DRAW_NOTE } from '../src/illustrator.js';
 setEnv({ DESK_CANVAS_DEBOUNCE_MS: '20', DESK_CANVAS_EARLY: '0' }); // the early illustrator has its own tests (canvas-early.test.js)
 const { createCanvasBus } = await import('../src/canvasBus.js');
 const { createCanvasSession, createIllustrator } = await import('../src/illustrator.js');
@@ -51,7 +52,7 @@ test('canvas_draw from a voice agent: result goes back at once, pending + ready 
   h.emit({ t: 'tool_call', id: 'c1', name: 'canvas_draw', args: { request: 'Torte der Ausgaben mit 165', kind: 'flow', id: 'geld' } });
   await tick(10);
   assert.equal(h.results.length, 1, 'tool result is back although the illustrator is still working');
-  assert.deepEqual(JSON.parse(h.results[0][2]), { ok: true, id: 'geld', status: 'zeichne' });
+  assert.deepEqual(JSON.parse(h.results[0][2]), { ok: true, id: 'geld', status: 'zeichne', hinweis: DRAW_NOTE });
   assert.deepEqual(h.canvasEvents().map((e) => e.phase), ['pending']);
   assert.equal(h.canvasEvents()[0].by, 'voice');
   assert.equal(h.canvasEvents()[0].provider, 'gemini');

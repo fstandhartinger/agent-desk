@@ -75,7 +75,7 @@ function parseArgs(raw) {
 }
 
 /** POST /api/chat → SSE. `session` = {sid, ip, hub, limits}. */
-export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, traces, canvasRegistry = conversationCanvases }) {
+export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, briefing, traces, canvasRegistry = conversationCanvases }) {
   const body = await readJson(req);
   const messages = cleanMessages(body.messages);
   if (!messages) return sendJson(res, 400, { error: TEXT.badMessages });
@@ -132,7 +132,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     canvas?.startTurn();
     canvas?.userTurn(lastUser);
     const ctx = {
-      artifacts, vision, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
+      artifacts, vision, briefing, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
       trace: () => trace, traces, turn,
       chatContext: formatChatContext(messages),
@@ -150,7 +150,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
       given: () => (given.n === ctx.results.length ? given.text : (given = { n: ctx.results.length, text: [givenBase, ...ctx.results].join('\n') }).text),
       proposalTitles: () => [...(ctx.turnProposals?.values() ?? [])].map((p) => p.title).filter(Boolean),
       checkAmounts: () => ctx.results.length > 0, // amounts are checked against the data the model fetched in this turn
-      bridgeHosts: () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; } },
+      bridgeHosts: () => { try { return (hub?.status?.() ?? []).filter((b) => b.connected !== false).map((b) => b.host).filter(Boolean); } catch { return []; /* absent */ } },
     });
     const { text, raw } = await runLoop({ model, convo, ctx, send, viz, totals, signal: abort.signal, german: isGermanText(lastUser) });
     const vizArrived = new Promise((resolve) => { onViz = resolve; });

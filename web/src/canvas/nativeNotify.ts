@@ -2,6 +2,7 @@
 // small drawing window. Pure: the host and the bus event are passed in.
 import { toMs } from './bus';
 import type { CanvasBusEvent } from './types';
+import type { ActivityEvent } from '../lib/types';
 
 export const CANVAS_TITLE_MAX = 80;
 const ANNOUNCED_MAX = 200;
@@ -23,3 +24,21 @@ export function canvasPendingNotifier(host: () => { postMessage(message: unknown
     h.postMessage({ type: 'canvas-pending', title });
   };
 }
+
+// Live activity of the voice session (v0.1.7): the host shows it in the small window. Same channel as canvas-pending.
+const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+/** The WebMessage JSON for the native host: exactly {type,id,phase,label[,tool][,ms][,reason]}. */
+export function activityMessage(e: ActivityEvent) {
+  return {
+    type: 'activity' as const, id: e.id, phase: e.phase, label: text(e.label, 120),
+    ...(typeof e.tool === 'string' ? { tool: text(e.tool, 60) } : {}),
+    ...(typeof e.ms === 'number' && Number.isFinite(e.ms) ? { ms: Math.round(e.ms) } : {}),
+    ...(typeof e.reason === 'string' && e.reason ? { reason: text(e.reason, 120) } : {}),
+  };
+}
+
+/** Forwards an activity event to the native host (nothing in a normal browser). */
+export function forwardActivity(host: () => { postMessage(message: unknown): void } | undefined, e: ActivityEvent) {
+  host()?.postMessage(activityMessage(e));
+}
+

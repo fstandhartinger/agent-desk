@@ -16,13 +16,13 @@ let pool = null;
 function patternsSync(text) {
   if (text.length <= OFFLOAD_FROM) return redactText(text);
   sync ??= createSyncRunner({ preload: [offload.patterns] });
-  try { return sync.run(offload.patterns, 'redactText', [text], offload.budgetMs); } catch { return null; }
+  try { return sync.run(offload.patterns, 'redactText', [text], offload.budgetMs); } catch { return null; /* offload failed: the caller redacts inline */ }
 }
 
 async function patternsAsync(text) {
   if (text.length <= OFFLOAD_FROM) return redactText(text);
   pool ??= createPool({ size: 2, preload: [offload.patterns] });
-  try { return await pool.run(offload.patterns, 'redactText', [text], offload.budgetMs); } catch { return null; }
+  try { return await pool.run(offload.patterns, 'redactText', [text], offload.budgetMs); } catch { return null; /* fail closed */ }
 }
 
 /** Tests: another patterns module / budget (the fail-closed path). Returns a function that restores the defaults. */

@@ -124,7 +124,7 @@ describe('output_main_agent_prompt results', () => {
       resetActions();
       const r = await main(ctx(say, { vision: { delivered: false, code } }), 'Der Text');
       assert.equal(r.ok, false);
-      assert.deepEqual(r.event, { type: 'main_agent_prompt', text: 'Der Text' });
+      assert.deepEqual(r.event, { type: 'main_agent_prompt', text: '[Desk: diese Sitzung a#abcdef; Protokoll: desk-trace a#abcdef]\nDer Text' });
       assert.match(r.content, /Nicht eingetippt/);
     }
   });

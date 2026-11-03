@@ -28,9 +28,9 @@ async function readCapped(file) {
 /** [{slug, title, keywords}] of every topic file. */
 export async function listTopics() {
   let names = [];
-  try { names = (await fs.promises.readdir(topicsDir())).filter((n) => n.endsWith('.md')).sort(); } catch { return []; }
+  try { names = (await fs.promises.readdir(topicsDir())).filter((n) => n.endsWith('.md')).sort(); } catch { return []; /* absent */ }
   return Promise.all(names.map(async (name) => {
-    const head = (await fs.promises.readFile(path.join(topicsDir(), name), 'utf8').catch(() => '')).slice(0, 1500);
+    const head = (await fs.promises.readFile(path.join(topicsDir(), name), 'utf8').catch(() => /* absent */ '')).slice(0, 1500);
     return {
       slug: name.slice(0, -3),
       title: /^#\s+(.+)$/m.exec(head)?.[1]?.trim() ?? name.slice(0, -3),

@@ -200,7 +200,7 @@ export function safeNext(value) {
       u.searchParams.set('a', ids.map(id => id.replace(/^a#/i, '').toLowerCase()).join(','));
       u.searchParams.delete('k');
       return `/?${u.searchParams}`;
-    } catch { return null; }
+    } catch { return null; /* malformed URL: no link */ }
   }
   return typeof value === 'string' && value.length <= 500 && NEXT_PATH.test(value) ? value : null;
 }

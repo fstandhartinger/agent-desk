@@ -162,9 +162,9 @@ export default function ExplainerPanel({ onAsk }: { onAsk: () => void }) {
     const a = audio.current!;
     registerPlayer({
       time: () => a.currentTime,
-      play: () => void a.play().catch(() => {}),
+      play: () => void a.play().catch(() => /* ignored */ {}),
       pause: () => a.pause(),
-      toggle: () => (a.paused ? void a.play().catch(() => {}) : a.pause()),
+      toggle: () => (a.paused ? void a.play().catch(() => /* ignored */ {}) : a.pause()),
       seek,
       paused: () => a.paused,
     });

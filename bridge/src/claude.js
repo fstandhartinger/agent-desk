@@ -70,7 +70,7 @@ function isClaudePid(pid) {
   if (!Number.isInteger(pid) || pid < 2) return false;
   try {
     return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('claude');
-  } catch { return false; }
+  } catch { return false; /* process gone: not claude */ }
 }
 
 function signalGroup(pid, signal) {
@@ -187,7 +187,7 @@ export function createClaude({ emit }) {
   function handleLine(s, line) {
     if (!line.trim()) return;
     let obj;
-    try { obj = JSON.parse(line); } catch { return; }
+    try { obj = JSON.parse(line); } catch { return; /* malformed */ }
     if (obj.type === 'result') s.turn.sawResult = true;
     for (const ev of s.turn.norm.feed(obj)) {
       // The error a SIGINT'd turn reports (error_during_execution) is the requested stop, not a failure.
@@ -211,7 +211,7 @@ export function createClaude({ emit }) {
     else if (!t.sawResult || t.sawError || t.failed) {
       const code = t.child?.exitCode;
       let errText = '';
-      try { errText = fs.readFileSync(t.errFile, 'utf8').trim().slice(-400); } catch { /* none */ }
+      try { errText = fs.readFileSync(t.errFile, 'utf8').trim().slice(-400); } catch { /* file missing: no error text */ }
       if (!t.sawResult) addEvent(s, { kind: 'error', message: redact(`claude exited without a result${code ? ` (exit ${code})` : ''}${errText ? `: ${errText}` : ''}`) });
       state = 'error';
     }
@@ -346,7 +346,7 @@ export function createClaude({ emit }) {
   /** Load sessions from disk; turns whose process is still alive are re-attached, finished ones are drained. */
   function restore() {
     let names = [];
-    try { names = fs.readdirSync(sessionsDir()); } catch { return; }
+    try { names = fs.readdirSync(sessionsDir()); } catch { return; /* absent */ }
     for (const name of names.filter((n) => SID_RE.test(n))) {
       const dir = path.join(sessionsDir(), name);
       let meta;

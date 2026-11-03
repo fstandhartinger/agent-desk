@@ -171,7 +171,7 @@ function seededHistory(): { spec: CanvasSpec; by: string; provider?: string; at:
     const raw = JSON.parse(localStorage.getItem('desk.mock.canvases') ?? 'null');
     if (!Array.isArray(raw)) return null;
     return raw.map((c, i) => ({ spec: c.spec, by: c.by ?? 'text', provider: c.provider, at: new Date(Date.now() - (raw.length - i) * 60_000).toISOString() }));
-  } catch { return null; }
+  } catch { return null; /* ignored */ }
 }
 const canvasHistory: { spec: CanvasSpec; by: string; provider?: string; at: string }[] = seededHistory() ?? [
   { spec: FIXTURES.timeline, by: 'text', at: new Date(Date.now() - 600_000).toISOString() },

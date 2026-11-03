@@ -79,9 +79,9 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const hub = new BridgeHub();
   const artifacts = createArtifactService({ hub });
   const traces = createTraceService(traceOptions);
-  const devices = createDeviceService({ artifacts, traces, ...deviceOptions });
+  const devices = createDeviceService({ artifacts, traces, hub, ...deviceOptions });
   attachKnowledge(hub);
-  setAuditSink((line) => hub.call('audit.append', line).catch(() => {}));
+  setAuditSink((line) => hub.call('audit.append', line).catch(() => /* ignored */ {}));
   const canvasBus = createCanvasBus();
   const illustrator = createIllustrator({ bus: canvasBus, hub });
   // A Claude Code session drew something (```desk-canvas block -> bridge event {kind:"canvas", spec}): validate and publish.
@@ -123,7 +123,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, traces });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, briefing: devices.briefing, traces });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -135,9 +135,21 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     return sendJson(res, 404, { error: TEXT.notFound });
   }
 
+  // Central failure log: every HTTP answer >= 400 (the German TEXT table, thrown errors, handler replies) leaves http.error {path,status,ms,bytes}.
+  // /api/device/ has its own richer device.error (devices.js); a missing static file and the logged-out probe of /api/auth/me are routine.
+  const logHttpError = (req, res, t0) => {
+    if (res.statusCode < 400) return;
+    const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith('/api/device/') || (res.statusCode === 404 && !path.startsWith('/api/')) || (res.statusCode === 401 && path === '/api/auth/me')) return;
+    let ip; try { ip = clientIp(req); } catch { /* socket already gone */ }
+    audit({ action: 'http.error', ip, detail: JSON.stringify({ path, method: req.method, status: res.statusCode, ...(res.errorMessage ? { message: res.errorMessage } : {}), ms: Date.now() - t0, bytes: Number(req.headers['content-length']) || 0 }) });
+  };
   const server = http.createServer((req, res) => {
+    const t0 = Date.now();
+    res.on('finish', () => logHttpError(req, res, t0));
     for (const [name, value] of Object.entries(securityHeaders())) res.setHeader(name, value);
     route(req, res).catch((err) => {
+      res.errorMessage = short(String(err?.message ?? err), 120);
       if (!err.status) console.error(`unhandled: ${short(err.stack || err.message, 500)}`);
       if (res.headersSent) return res.end();
       return sendJson(res, err.status || 500, { error: err.status ? short(err.message, 160) : TEXT.internal }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {});
@@ -145,6 +157,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   });
 
   const reject = (socket, status, text) => {
+    audit({ action: 'ws.reject', detail: `${status} ${text}` });
     socket.write(`HTTP/1.1 ${status} ${text}\r\nconnection: close\r\n\r\n`);
     socket.destroy();
   };
@@ -185,13 +198,14 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
       vision: devices.vision,
+      briefing: devices.briefing,
       registerText: (send) => artifacts.registerVoice(sid, send),
       openTrace: ({ provider }) => (currentTrace = traces.open({ provider, kind: 'voice', sid })),
-      makeCtx: (page) => ({ artifacts, vision: devices.vision, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
+      makeCtx: (page) => ({ artifacts, vision: devices.vision, briefing: devices.briefing, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),
-      createCanvas: ({ emit, page, provider, onFacts, focusedId }) => createCanvasSession({ bus: canvasBus, illustrator, by: 'voice', provider, emit, page, onFacts, focusedId, ctx: { sid, ip, limits } }),
+      createCanvas: ({ emit, page, provider, onFacts, onSkip, focusedId }) => createCanvasSession({ bus: canvasBus, illustrator, by: 'voice', provider, emit, page, onFacts, onSkip, focusedId, ctx: { sid, ip, limits } }),
       sid,
       prewarm: true, // warm the bridge's ledger cache at session start (round 10)
     });

@@ -166,6 +166,8 @@ export function createOpenAI(opts, emit) {
     // So: steer the live model to the new question; the session marks the old chain's tool results stale, which ends the chain.
     /** Passive screen description: instructions.append (the only context channel without a reply; no response.create). It only grows, so the session rate-limits it. */
     setScreenContext: (text) => { send({ type: 'session.instructions.append', event_id: `screen-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
+    /** Start briefing: instructions.append like the screen context (only grows: the briefing goes out once, plus one update when the device part is late). */
+    setBriefing: (text) => { send({ type: 'session.instructions.append', event_id: `screen-brief-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
     interrupt: () => { watchdog.clear(); send({ type: 'session.instructions.append', delegation_id: null, content: 'Florian hat gerade eine neue Frage gestellt. Die Frage davor ist abgebrochen: antworte nur auf die neueste Frage und recherchiere dafür neu.' }); },
     sendToolResult: (id, _name, output, opts) => {
       let out = output;
