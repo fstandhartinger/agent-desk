@@ -133,6 +133,13 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type: 'tool.call' }] }))).status, 400);
   });
 
+  it('log route: every namespace the app emits is accepted, gateway-owned and foreign ones are not', async () => {
+    const ok = ['activity.start', 'app.error', 'briefing.device', 'caption.stats', 'dictation.recover', 'http.fail', 'session.startup', 'telemetry.flush.fail', 'ui.status'];
+    const r = await post('/api/device/log', JSON.stringify({ events: ok.map((type) => ({ type, data: { n: 1 } })) }));
+    assert.equal(r.status, 200); assert.equal((await r.json()).accepted, ok.length);
+    for (const type of ['session.start', 'session.end', 'tool.call', 'gateway.x', 'Activity.start']) assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type }] }))).status, 400, type);
+  });
+
   it('device.error: a failed device request leaves path, status, code, ms and bytes (ids in the path are folded)', async () => {
     const r = await post('/api/device/session/not-a-session/trace', JSON.stringify({ events: [] }));
     assert.equal(r.status, 403);
