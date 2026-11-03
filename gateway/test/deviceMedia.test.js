@@ -85,7 +85,7 @@ it('STT requests carry a vocabulary prompt of corrected terms only, at most 800 
   const media = createDeviceMedia({ env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { prompts.push(opts.body.get('prompt')); return Response.json({ text: 'Hallo' }); } });
   await media.dictate(wav(), ctx, { items }); await new Promise(r => setTimeout(r, 20));
   assert.equal(prompts.length, 2);
-  for (const p of prompts) { assert(p.startsWith('Example, Begriff0, Begriff1')); assert(p.length <= 800 && p.length > 700); assert(!p.includes('Exampel')); assert.equal(p.split(', ').filter(t => t === 'Example').length, 1); }
+  for (const p of prompts) { assert(p.startsWith('Deutsches Diktat. Begriffe: Example, Begriff0, Begriff1')); assert(p.length <= 800 && p.length > 700); assert(!p.includes('Exampel')); assert.equal(p.replace('Deutsches Diktat. Begriffe: ', '').split(', ').filter(t => t === 'Example').length, 1); }
   assert.equal(vocabularyPrompt({}), ''); assert.equal(vocabularyPrompt(null), '');
 });
 it('a slow dictionary is waited for at most 300 ms, then STT goes without prompt', async () => {
@@ -96,7 +96,7 @@ it('a slow dictionary is waited for at most 300 ms, then STT goes without prompt
   assert.deepEqual(prompts, [null]); assert(sentAt >= 250 && sentAt < 700, `sent after ${sentAt} ms`); assert.equal(result.text, 'Hallo');
 });
 it('fast dictionary adds no latency and the overall budget still applies', async () => {
-  const media = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { assert.equal(opts.body.get('prompt'), 'Example'); return Response.json({ text: 'Hallo' }); } });
+  const media = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { assert.equal(opts.body.get('prompt'), 'Deutsches Diktat. Begriffe: Example'); return Response.json({ text: 'Hallo' }); } });
   const result = await media.dictate(wav(), ctx, Promise.resolve({ items: [{ term: 'Example' }] })); assert(result.ms < 50);
   const hung = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: () => new Promise(() => {}) });
   const t = Date.now(); await assert.rejects(hung.dictate(wav(), ctx, new Promise(() => {})), e => e.status === 504); assert(Date.now() - t < 400);

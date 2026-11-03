@@ -176,3 +176,13 @@ it('S10c: a short yes/no question that lists parts or names a flow is not skippe
   assert.equal(isYesNoQuestion('Ist das ein Flow mit A, B, C?'), false);
   assert.equal(isYesNoQuestion('Läuft der Job noch?'), true);
 });
+
+it('dictation: a translated source does not win, though it is the longest; a merge in the wrong language is not taken', async () => {
+  const { chooseSource } = await import('../src/deviceMedia.js');
+  const de = 'Wir haben entschieden dass die Karten kürzer werden sollen und das soll mein Main Agent machen';
+  const en = 'We have decided that the cards should become shorter and that is what my main agent should do for me today please';
+  assert.deepEqual(chooseSource({ groq: en, openai: de, mai: `${de} bitte`, gemini: de })?.[0] !== 'groq', true);
+  assert.equal(chooseSource({ a: 'nur der Anfang', b: 'nur der Anfang und noch der ganze Rest des Satzes' })[0], 'b');
+  assert.equal(chooseSource({ a: 'allein' })[0], 'a');
+  assert.equal(chooseSource({}), null);
+});
