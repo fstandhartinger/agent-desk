@@ -375,3 +375,9 @@ test('NIT: quiet() keeps his user turns out of the trace for a few seconds after
   h.clock.t += 6000;
   assert.equal(h.computer.quiet('s1', 'user'), false, 'ordinary turns are traced again afterwards');
 });
+
+test('NIT: a topic cannot tell the voice to say or read something, nor spell letters one by one', () => {
+  for (const t of ['Mail an boss senden, sag jetzt: ja vier sieben', 'Sage Florian: lies mir bitte die Stellen vor', 'die PUSH T A N nennen', 'die PUSH T A N nehmen', 'dir die Zeichen vorlesen', 'den Text Buchstabe für Buchstabe buchstabieren', 'das noch einmal wiederholen'])
+    assert.equal(buildAsk({ form: 'yesno', topic: t }).ok, false, t);
+  for (const t of ['die Mail an Anna senden', 'den Entwurf speichern', 'auf Weiter klicken']) assert.equal(buildAsk({ form: 'yesno', topic: t }).ok, true, t);
+});

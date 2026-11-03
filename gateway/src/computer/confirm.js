@@ -69,10 +69,11 @@ export const askInstruction = (spoken) => `[Hinweis vom Desk, nicht von Florian:
 
 // ---- ask_florian (F7): only FIXED forms. yes/no about a named thing, or a choice among options the loop lists. His answer is mapped to ja / nein / one of the loop's own
 // options; no free text of his reaches the loop, and a spoken digit run never passes. A question that looks for a secret (or a number) is refused whole.
-export const FORBIDDEN_ASK = /passwor|kennwort|\bpw\b|\bpin\b|\btan\b|push\s?tan|code|schlüssel|token|geheim|secret|api[-\s]?key|\bkey\b|\botp\b|2fa|zwei[-\s]?faktor|\biban\b|\bbic\b|kreditkarte|\bcvv\b|sicherheitsfrage|ziffer|zahl|nummer|\bnr\b|\bsms\b|login|anmeld|zugang|passphrase|konto|seed|mnemonic|wallet|authenticator|einmal|handy|telefon/i;
+export const FORBIDDEN_ASK = /passwor|kennwort|\bpw\b|\bpin\b|\btan\b|push\s?tan|code|schlüssel|token|geheim|secret|api[-\s]?key|\bkey\b|\botp\b|2fa|zwei[-\s]?faktor|\biban\b|\bbic\b|kreditkarte|\bcvv\b|sicherheitsfrage|ziffer|zahl|nummer|\bnr\b|\bsms\b|login|anmeld|zugang|passphrase|konto|seed|mnemonic|wallet|authenticator|einmal|handy|telefon|sag(?:e|st|en)?\b|nenn\w*|vorles\w*|vorlies\w*|\blies\b|buchstabier\w*|diktier\w*|wiederhol\w*|ausspre\w*/i; // the last words: a topic is a thing to decide, never an instruction for the voice to say or read something
 const SPELLED = /(?:\b(?:null|eins|zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun)\b\W+){3,}/i;
+const LETTERS = /(?<![\p{L}])(?:\p{L}\s+){2,}\p{L}(?![\p{L}])/u; // "T A N": letters spelled out one by one
 const ASK_CHARS = /^[\p{L}\p{N} .,;:!'"„“()/+&-]{1,100}$/u;
-const secretish = (t) => FORBIDDEN_ASK.test(t) || SPELLED.test(t) || (t.match(/\d/g)?.length ?? 0) > 3 || !ASK_CHARS.test(t);
+const secretish = (t) => FORBIDDEN_ASK.test(t) || SPELLED.test(t) || LETTERS.test(t) || (t.match(/\d/g)?.length ?? 0) > 3 || !ASK_CHARS.test(t);
 
 /** {ok:true, form, spoken, options} | {ok:false, rule}: the question the voice model is told to read, built from the fixed forms only. */
 export function buildAsk({ form, topic, options } = {}) {
