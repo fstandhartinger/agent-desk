@@ -92,3 +92,28 @@ test('contract: the hotkey confirm is a second result for the original action id
   assert.equal(h.vision.ofOp('confirm').length, 0, 'no digits needed');
   assert.ok(h.session.events.some((e) => e.type === 'computer.confirm.ok' && e.via === 'hotkey'));
 });
+
+test('contract: resume, taint and void are sent exactly as the fixture says; a needs-confirm start result passes the validator', async () => {
+  const SPK = 'Soll ich die Mail an anna@example.org senden?';
+  // taint: a server_read tells the app
+  const h = setup({ script: [{ name: 'server_read', args: { op: 'load' } }, { name: 'done', args: { summary: 'x' } }], app: () => ok(), read: async () => ({ ok: true, host: 'sandy', text: 'load 0.2' }) });
+  await h.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await until(() => ended(h));
+  assert.deepEqual(bare(h.vision.ofOp('taint')[0]), fx('taint'));
+  // resume: after hands-on
+  const h2 = setup({ script: [{ name: 'ui_windows', args: {} }, { name: 'done', args: { summary: 'x' } }], app: (w) => (w.op === 'action' && w.seq <= 3 ? { ok: false, code: 'handson', run_state: 'handson' } : ok()) });
+  await h2.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await until(() => h2.computer.runOf('s1')?.paused);
+  say(h2, 'Mach bitte weiter, ich bin fertig');
+  await until(() => h2.vision.ofOp('resume').length === 1);
+  assert.deepEqual(bare(h2.vision.ofOp('resume')[0]), fx('resume'));
+  // void: a misquoted ask
+  const h3 = setup({ script: [{ name: 'chrome_click', args: { ref: 'e5' } }, { name: 'done', args: { summary: 'x' } }], app: (w) => (w.op === 'action' ? { ok: false, code: 'needs-confirm', class: 'R2', rule: 'send', needs_confirm: { hash: 'a1b2c3d4e5f60718', spoken: SPK } } : { ok: true, code: 'done' }) });
+  await h3.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await until(() => h3.session.said.some((t) => /WÖRTLICH/.test(t)));
+  h3.computer.assistantFinal('s1', 'Etwas ganz anderes.');
+  await until(() => h3.vision.ofOp('void').length === 1);
+  assert.deepEqual(bare(h3.vision.ofOp('void')[0]), fx('void'));
+  // the start result with an ask
+  assert.equal(validateResult({ ok: false, code: 'needs-confirm', class: 'R2', rule: 'run-start', needs_confirm: { hash: 'a1b2c3d4e5f60718', spoken: SPK }, run_state: 'running' }).code, 'needs-confirm');
+});
