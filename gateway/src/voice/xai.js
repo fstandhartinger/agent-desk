@@ -57,7 +57,7 @@ export function translate(msg, state = {}) {
 
 export function createXai(opts, emit) {
   const state = {};
-  let screenId = null, screenSeq = 0;
+  let screenId = null, screenSeq = 0, briefId = null, briefSeq = 0;
   const output = (r) => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: r.id, output: r.output } });
   const watchdog = createWatchdog(opts.watchdogMs ?? (() => cfg.voiceWatchdogMs()), (n) => { send({ type: 'response.create' }); emit({ t: 'watchdog', n }); });
   const batch = new ToolBatch((results) => {
@@ -102,6 +102,14 @@ export function createXai(opts, emit) {
       screenId = `screen_ctx_${++screenSeq}`;
       send({ type: 'conversation.item.create', event_id: `screen-add-${screenSeq}`, item: { id: screenId, type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
       if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-${screenSeq}`, item_id: prev });
+      return 'sent';
+    },
+    /** Start briefing: one conversation item of its own (replaced by id), never response.create; errors carry the screen- prefix, so they stay soft. */
+    setBriefing: (text) => {
+      const prev = briefId;
+      briefId = `briefing_ctx_${++briefSeq}`;
+      send({ type: 'conversation.item.create', event_id: `screen-brief-${briefSeq}`, item: { id: briefId, type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-brief-${briefSeq}`, item_id: prev });
       return 'sent';
     },
     interrupt: () => { watchdog.clear(); send({ type: 'response.cancel' }); }, // a new question while the old answer is still running (the server VAD also cuts audio itself)

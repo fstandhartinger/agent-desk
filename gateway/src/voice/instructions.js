@@ -1,5 +1,5 @@
 // System prompt for the voice agents: same persona and tools as the text agent, tuned for speech.
-import { actionLines, canvasLines, groundingLines, readToolLines, screenLines } from '../prompt.js';
+import { actionLines, canvasLines, briefingLines, groundingLines, readToolLines, screenLines } from '../prompt.js';
 import { knowledgeLines } from '../knowledge.js';
 import { pagePackLines } from '../pack.js';
 
@@ -39,6 +39,7 @@ export function buildInstructions(page, now, { provider, screen = false } = {}) 
     ...readToolLines(),
     ...actionLines(screen),
     ...screenLines(screen),
+    ...briefingLines(),
   ];
   if (provider === 'openai') lines.push(...OPENAI_LINES);
   if (provider === 'gemini') lines.push(...GEMINI_LINES);

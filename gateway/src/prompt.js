@@ -47,6 +47,11 @@ export function screenLines(attached) {
   ];
 }
 
+/** The start briefing (voice and text): a data overview at the start and the tool that refreshes it. */
+export function briefingLines() {
+  return ['Am Anfang hast du einen Überblick. Nutze ihn, wenn Florian "das Thema von vorhin" oder "wie steht es" sagt; "was läuft gerade" -> current_state. Nicht von dir aus vorlesen.'];
+}
+
 /** Voice only: the two action tools (voiceActions.js), exact routing, no confirmation question, and what the canvas looks like on the Screen Agent. */
 export function actionLines(screenAttached = false) {
   return [
