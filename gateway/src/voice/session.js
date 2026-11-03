@@ -123,6 +123,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let runningTools = 0;
   let detachVision = null;
   let screenHeld = null; // screen context that arrived before the vendor was ready
+  let briefingHeld = null; // the start briefing (item G), same: held until the vendor is ready
+  let detachBriefing = null;
   let muted = false;
   let mutedAt = 0;
   let mutedMs = 0;
@@ -500,6 +502,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         sendJson({ type: 'ready', provider, model: e.model });
         trace.event('session.ready', { provider, model: e.model });
         if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
+        if (briefingHeld) { const how = adapter?.setBriefing?.(briefingHeld); briefingHeld = null; trace.event('briefing.context', { how: how ?? 'unsupported', late: true }); }
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
@@ -613,6 +616,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
       return adapter?.setScreenContext?.(text) ?? 'unsupported';
     } });
+    // Start briefing (item G): its own passive channel (adapter.setBriefing), so it never replaces the screen description.
+    detachBriefing = deps.briefing?.attach(sid, { trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      if (readyAt === null) { briefingHeld = text; return 'held-until-ready'; }
+      return adapter?.setBriefing?.(text) ?? 'unsupported';
+    } });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -664,6 +672,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.close();
     unregisterText?.();
     detachVision?.();
+    detachBriefing?.();
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus

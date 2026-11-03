@@ -176,3 +176,42 @@ export function entry({ id } = {}) {
     });
   });
 }
+
+// board.recent: newest entries over all threads, for the start briefing. Same read-only database path as board.entry:
+// `agent-board inbox/read` move the read pointer, this does not.
+const RECENT_PY = `import json,os,sys,sqlite3,urllib.parse
+d=os.environ.get('AGENT_BOARD_DIR') or os.path.expanduser('~/.agent-board')
+db=os.environ.get('AGENT_BOARD_DB') or os.path.join(d,'board.db')
+c=sqlite3.connect('file:'+urllib.parse.quote(os.path.abspath(db),safe='/')+'?mode=ro',uri=True,timeout=10)
+cut,n=sys.argv[1],int(sys.argv[2])
+rows=c.execute('select e.id,t.title,e.author,e.kind,e.created_at,substr(e.body,1,1200) from entries e join threads t on t.id=e.thread_id order by e.id desc limit ?',(n*4,)).fetchall()
+out=[]
+for r in rows:
+ ts=str(r[4] or '').replace(' ','T')
+ if ts[:len(cut)]<cut: continue
+ out.append(dict(zip(['id','thread','author','kind','at','text'],r)))
+ if len(out)>=n: break
+print(json.dumps(out))`;
+
+const RECENT_TEXT = 240;
+
+export function recent({ hours = 6, limit = 40 } = {}) {
+  const h = Math.min(72, Math.max(1, Number(hours) || 6));
+  const n = Math.min(100, Math.max(1, Math.trunc(Number(limit)) || 40));
+  const cut = new Date(Date.now() - h * 3600_000).toISOString().slice(0, 19);
+  return new Promise((resolve, reject) => {
+    execFile('python3', ['-I', '-c', RECENT_PY, cut, String(n)], { timeout: 10000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      let rows;
+      try { rows = JSON.parse(stdout); } catch { rows = null; }
+      if (err || !Array.isArray(rows)) return reject(new Error('board recent lookup failed'));
+      resolve({
+        hours: h,
+        entries: rows.map((r) => ({
+          id: r.id, thread: redact(String(r.thread ?? '')).slice(0, 80), kind: String(r.kind ?? '').slice(0, 20),
+          author: redact(String(r.author ?? '')).slice(0, 60), at: String(r.at ?? '').slice(0, 25),
+          text: redact(String(r.text ?? '').replace(/\s+/g, ' ').trim()).slice(0, RECENT_TEXT),
+        })),
+      });
+    });
+  });
+}

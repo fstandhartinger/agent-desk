@@ -6,6 +6,7 @@ import { cfg } from './config.js';
 import { originOk, readSession, validSessionId, issueCookie } from './auth.js';
 import { readBody, readJson, sendJson, clientIp } from './http.js';
 import { createScreenVision } from './screenVision.js';
+import { createBriefing } from './briefing.js';
 import { lateTs } from './trace.js';
 import { audit } from './audit.js';
 import { short } from './redact.js';
@@ -32,7 +33,7 @@ function chunkInfo(raw) {
 }
 const SCOPES = ['dictate', 'dictionary', 'screen', 'exists'];
 const TTL = 90 * 24 * 3600_000;
-export function createDeviceService({ artifacts, traces, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }) } = {}) {
+export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
   function rate(key, max) {
@@ -213,7 +214,7 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       sendJson(res, 200, { cookie, expiresAt: Math.min(record.expiresAt, now() + 30 * 86400000) });
       return true;
     }
-    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|screen\/private|highlight|trace|frame|commands)$/.exec(path);
+    const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|screen\/private|highlight|trace|frame|commands|briefing)$/.exec(path);
     const cmdResult = /^\/api\/device\/session\/([^/]+)\/commands\/(p[0-9a-f]{16})\/result$/.exec(path);
     const scope = target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' ? 'dictate' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
@@ -252,6 +253,12 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
       if (!Number.isSafeInteger(body.frameVersion) || body.frameVersion < 0 || !body.window || typeof body.window.blocked !== 'boolean' || typeof body.window.process !== 'string' || body.window.process.length > 100) throw fail('Ungültiger Bildschirm-Kontext.');
       sendJson(res, 200, await artifacts.setScreen(target[1], { deviceId: record.deviceId, ids: body.window.blocked ? [] : ids, window: { process: body.window.blocked ? '' : body.window.process, blocked: body.window.blocked }, frameVersion: body.frameVersion }));
+    } else if (target && target[2] === 'briefing' && req.method === 'POST') {
+      rate(`briefing:${record.deviceId}`, 30);
+      if (!vision.active(target[1])) throw Object.assign(fail('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session' });
+      const body = await readJson(req, 64 * 1024);
+      const { commandId, ...device } = body;
+      sendJson(res, 200, briefing.deviceIn(target[1], device, commandId));
     } else if (target && target[2] === 'trace' && req.method === 'POST') {
       rate(`trace:${record.deviceId}`, 60);
       const events = traceEvents((await readJson(req, 256 * 1024)).events);
@@ -327,5 +334,5 @@ export function createDeviceService({ artifacts, traces, env = process.env, now 
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary, authorizeSession, vision, flushCaptionStats: (deviceId) => flushStats(deviceId) };
+  return { route, dictionary, authorizeSession, vision, briefing, flushCaptionStats: (deviceId) => flushStats(deviceId) };
 }

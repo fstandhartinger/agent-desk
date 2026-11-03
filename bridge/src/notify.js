@@ -119,3 +119,36 @@ export async function cardRead({ id } = {}) {
   };
 }
 const MAX_PAGE_BYTES = 512 * 1024;
+
+/**
+ * notify.cardsRecent: Telegram cards of the last hours for the start briefing. Reads ~/.notify/cards/*.json directly
+ * (read-only, no token); the file's mtime is the time. Status line = the first line, headline = "Worum geht's:" line
+ * or the first bold line.
+ */
+export async function cardsRecent({ hours = 12, limit = 20 } = {}) {
+  const h = Math.min(72, Math.max(1, Number(hours) || 12));
+  const n = Math.min(50, Math.max(1, Math.trunc(Number(limit)) || 20));
+  const dir = path.join(HOME, '.notify', 'cards');
+  const since = Date.now() - h * 3600_000;
+  let names;
+  try { names = (await fs.readdir(dir)).filter((f) => /^[1-9]\d{0,11}\.json$/.test(f)); } catch { return { hours: h, cards: [] }; }
+  const stats = (await Promise.all(names.map(async (f) => {
+    try { return { id: f.slice(0, -5), mtime: (await fs.stat(path.join(dir, f))).mtimeMs }; } catch { return null; }
+  }))).filter((x) => x && x.mtime >= since).sort((a, b) => b.mtime - a.mtime).slice(0, n * 3);
+  const cards = [];
+  for (const { id, mtime } of stats) {
+    if (cards.length >= n) break;
+    try {
+      const card = JSON.parse(await readCapped(path.join(dir, `${id}.json`), 65536));
+      const raw = String(card.text ?? '');
+      const lines = (card.parse_mode === 'HTML' ? pageText(raw) : raw).split('\n').map((l) => l.trim()).filter(Boolean);
+      const head = lines.find((l) => /^(?:Worum geht's|Worum geht’s):/i.test(l))?.replace(/^[^:]+:\s*/, '') ?? lines[1] ?? '';
+      cards.push({
+        card: id, at: new Date(mtime).toISOString(), status: redact(lines[0] ?? '').slice(0, 40),
+        headline: redact(head).slice(0, 200), answered: !!card.answered,
+        ...(typeof card.aid === 'string' && /^[0-9a-f]{6}$/i.test(card.aid) ? { aid: `a#${card.aid.toLowerCase()}` } : {}),
+      });
+    } catch { /* unreadable card: skipped */ }
+  }
+  return { hours: h, cards };
+}

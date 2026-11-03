@@ -11,7 +11,8 @@ import * as ops from './ops.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
-import { cardLink, cardRead } from './notify.js';
+import { cardLink, cardRead, cardsRecent } from './notify.js';
+import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
@@ -82,6 +83,9 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
       'notify.cardRead': cardRead,
+      'notify.cardsRecent': cardsRecent, // start briefing (Sandy only: ~/.notify lives there)
+      'board.recent': board.recent,
+      'state.current': stateCurrent,
       'job.start': jobStart, // voice action: starts a real job; Sandy only
     };
   }

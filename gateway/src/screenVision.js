@@ -70,7 +70,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function state(sid) {
     let S = states.get(sid);
     if (!S) {
-      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map() };
+      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [] };
       states.set(sid, S);
       sweeper ??= setInterval(sweep, 15_000).unref();
     }
@@ -261,14 +261,31 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return new Promise(resolve => {
       const cmd = S.queue.find(c => c.expires > now());
       const prompt = takePrompt(S, key);
+      const briefing = takeBriefing(S);
       const done = value => { clearTimeout(timer); if (S.polls.get(key) === entry) S.polls.delete(key); seen(sid); resolve(value); };
       const entry = { resolve: done };
       const timer = setTimeout(() => done({ fresh: false }), ms);
       signal?.addEventListener('abort', () => done({ fresh: false }), { once: true });
       if (prompt) { done({ fresh: false, prompt }); return; }
+      if (briefing) { done({ fresh: false, briefing }); return; }
       if (cmd) { S.queue.splice(S.queue.indexOf(cmd), 1); done({ fresh: true, id: cmd.id, ...(cmd.question ? { question: cmd.question } : {}) }); return; }
       S.polls.set(key, entry);
     });
+  }
+
+  // --- briefing request (item G): `{fresh:false, briefing:{id}}`; the app answers with POST .../briefing {..., commandId:id} ---
+  function takeBriefing(S) {
+    S.briefings = S.briefings.filter(c => c.expires > now());
+    const c = S.briefings.shift();
+    return c ? { id: c.id } : null;
+  }
+  /** true when an app is attached and the request is on its way (handed to a waiting poll or queued for the next one, 8 s). */
+  function requestBriefing(sid, id) {
+    if (!attached(sid)) return false;
+    const S = states.get(sid), target = [...S.polls.values()][0];
+    if (target) target.resolve({ fresh: false, briefing: { id } });
+    else S.briefings.push({ id, expires: now() + T.ttl });
+    return true;
   }
 
   // --- action commands: one prompt to exactly one poller, the app's answer comes back on the result route ---
@@ -369,5 +386,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, look, chatBlock, snapshot, _states: states };
+  return { attach, touchChat, screenInfo, background, active, attached, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, requestBriefing, look, chatBlock, snapshot, _states: states };
 }
