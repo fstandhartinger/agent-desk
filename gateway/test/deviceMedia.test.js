@@ -85,7 +85,7 @@ it('STT requests carry a vocabulary prompt of corrected terms only, at most 800 
   const media = createDeviceMedia({ env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { prompts.push(opts.body.get('prompt')); return Response.json({ text: 'Hallo' }); } });
   await media.dictate(wav(), ctx, { items }); await new Promise(r => setTimeout(r, 20));
   assert.equal(prompts.length, 2);
-  for (const p of prompts) { assert(p.startsWith('Deutsches Diktat. Begriffe: Example, Begriff0, Begriff1')); assert(p.length <= 800 && p.length > 700); assert(!p.includes('Exampel')); assert.equal(p.split(', ').filter(t => t === 'Example').length, 1); }
+  for (const p of prompts) { assert(p.startsWith('Deutsches Diktat. Begriffe: Example, Begriff0, Begriff1')); assert(p.length <= 800 && p.length > 700); assert(!p.includes('Exampel')); assert.equal(p.replace('Deutsches Diktat. Begriffe: ', '').split(', ').filter(t => t === 'Example').length, 1); }
   assert.equal(vocabularyPrompt({}), ''); assert.equal(vocabularyPrompt(null), '');
 });
 it('a slow dictionary is waited for at most 300 ms, then STT goes without prompt', async () => {
