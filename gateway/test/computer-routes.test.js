@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { after, before, it } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { setEnv, login, listen, fakeServer } from './helpers/env.js';
+import fs from 'node:fs';
 import { fakeSession, scriptedModel, until } from './helpers/computer.js';
 
 setEnv({});
@@ -101,6 +102,17 @@ it('a run: the command rides the poll to the device that holds the scope (not to
   await until(() => !computer.isOpen(sid));
   assert.deepEqual(await (await sess(tokenA, 'computer/beat', { run, state: 'running' })).json(), { ok: false, code: 'no-run' });
   assert.equal((await pollB)?.computer, undefined, 'device B got no computer command');
+});
+
+it('the app\'s computer.* trace events are accepted on the session trace and the device log (never page text: the app sends labels and lengths only)', async () => {
+  const FX = JSON.parse(fs.readFileSync(new URL('./fixtures/computer-contract.json', import.meta.url), 'utf8'));
+  const events = FX.traceTypes.map((type) => ({ type, data: { run: `r${'0'.repeat(16)}`, tool: 'ui_click', chars: 5 } }));
+  assert.equal((await sess(tokenA, 'trace', { events })).status, 200);
+  const log = await dev(tokenA, 'log', { events });
+  assert.equal(log.status, 200);
+  assert.equal((await log.json()).accepted, events.length);
+  assert.equal((await dev(tokenA, 'log', { events: [{ type: 'computer', data: {} }] })).status, 400, 'only computer.<name>');
+  assert.equal((await dev(tokenA, 'log', { events: [{ type: 'job.start', data: {} }] })).status, 400, 'other families stay refused');
 });
 
 it('a result body over 512 kB is refused; switching the scope off removes it again', async () => {

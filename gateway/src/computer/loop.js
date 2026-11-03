@@ -19,16 +19,16 @@ export const LOOP_TOOLS = [
   tool('ui_tree', 'Elementbaum eines Fensters (begrenzt). Referenzen gelten nur bis zum nächsten Baum oder einer Navigation.', { window: str('Fenster-Referenz aus ui_windows; ohne: das vorderste') }),
   tool('ui_click', 'Element per Referenz anklicken oder auslösen.', { ref: str('Referenz') }, ['ref']),
   tool('ui_type', 'Text in ein Element tippen (kein Zeilenumbruch, höchstens 2000 Zeichen).', { ref: str('Referenz'), text: str('Text', { maxLength: MAX_TEXT }) }, ['ref', 'text']),
-  tool('key', 'Eine erlaubte Taste: Tab, Pfeile, PageUp/PageDown, Home/End, Esc, Strg+F.', { keys: str('z. B. Tab oder Ctrl+F') }, ['keys']),
-  tool('scroll', 'Scrollen.', { direction: str('up | down | left | right', { enum: ['up', 'down', 'left', 'right'] }), amount: { type: 'integer', description: 'Schritte 1 bis 20', minimum: 1, maximum: 20 } }, ['direction']),
-  tool('window_focus', 'Ein Fenster nach vorn holen.', { ref: str('Fenster-Referenz aus ui_windows') }, ['ref']),
-  tool('screenshot', 'Bild des Bildschirms (nur für dich; schwarz gemachte Bereiche sind "ausgeblendet").'),
+  tool('key', 'Eine erlaubte Taste: Tab, Pfeile, PageUp/PageDown, Home/End, Esc, Strg+F.', { key: str('z. B. Tab oder Ctrl+F') }, ['key']),
+  tool('scroll', 'Scrollen: im Tab (tab aus chrome_tabs) oder im Fenster (window aus ui_windows); ohne beides das vorderste Fenster.', { direction: str('up | down', { enum: ['up', 'down'] }), amount: { type: 'integer', description: 'Schritte 1 bis 10', minimum: 1, maximum: 10 }, tab: str('Tab aus chrome_tabs'), window: str('Fenster-Referenz aus ui_windows') }, ['direction']),
+  tool('window_focus', 'Ein Fenster nach vorn holen.', { window: str('Fenster-Referenz aus ui_windows') }, ['window']),
+  tool('screenshot', 'Bild eines Fensters, ohne Angabe des vordersten (nur für dich; ausgeblendete Bereiche kommen nicht).', { window: str('Fenster-Referenz aus ui_windows') }),
   tool('chrome_tabs', 'Offene Tabs im Chrome: Herkunft und Titel.'),
   tool('chrome_open', 'Eine http(s)-Seite öffnen.', { url: str('http(s)-Adresse') }, ['url']),
-  tool('chrome_snapshot', 'Seitenstruktur des aktiven Tabs mit Referenzen.'),
+  tool('chrome_snapshot', 'Seitenstruktur eines Tabs mit Referenzen.', { tab: str('Tab aus chrome_tabs') }, ['tab']),
   tool('chrome_click', 'Element im Tab per Referenz anklicken.', { ref: str('Referenz aus chrome_snapshot') }, ['ref']),
   tool('chrome_fill', 'Text in ein Feld im Tab schreiben (kein Zeilenumbruch, höchstens 2000 Zeichen).', { ref: str('Referenz'), text: str('Text', { maxLength: MAX_TEXT }) }, ['ref', 'text']),
-  tool('chrome_read', 'Text der Seite oder eines Elements lesen.', { ref: str('Referenz; ohne: ganze Seite') }),
+  tool('chrome_read', 'Text der Seite eines Tabs lesen.', { tab: str('Tab aus chrome_tabs') }, ['tab']),
   tool('server_read', 'Nur lesen auf Sandy, LeChonk und im Agent-Board: Jobs, Board, Quota, Disk, Last, Dienste, Journal.', {
     op: str('Operation', { enum: SERVER_OPS }), name: str('Jobname'), file: str('STATE oder RESULT', { enum: ['STATE', 'RESULT'] }), thread: str('Board-Thread'), query: str('Suchtext'), unit: str('Dienst, z. B. name.service'), job: str('Jobname für das Journal'),
     host: str('sandy oder lechonk', { enum: ['sandy', 'lechonk'] }), filter: str('Filter für list_jobs'), activeOnly: { type: 'boolean' }, limit: { type: 'integer' }, lines: { type: 'integer' }, hours: { type: 'integer' },
@@ -71,14 +71,22 @@ export function checkArgs(name, raw) {
   }
   if ('ref' in args && !REF.test(args.ref)) return bad('ungültige Referenz');
   if ('window' in args && !REF.test(args.window)) return bad('ungültige Referenz');
+  if ('tab' in args && !REF.test(args.tab)) return bad('ungültiger Tab');
   if ((name === 'ui_type' || name === 'chrome_fill') && (args.text.length > MAX_TEXT || CONTROL.test(args.text))) return bad('Text: höchstens 2000 Zeichen, keine Steuerzeichen oder Zeilenumbrüche');
   if (name === 'chrome_open') {
     let u; try { u = new URL(args.url); } catch { return bad('ungültige Adresse'); /* unparsable */ }
     if (!/^https?:$/.test(u.protocol) || args.url.length > 2000 || CONTROL.test(args.url)) return bad('nur http(s)-Adressen');
   }
-  if (name === 'key' && !/^[A-Za-z0-9+ ]{1,40}$/.test(args.keys)) return bad('ungültige Taste');
-  if (name === 'scroll' && args.amount !== undefined && (args.amount < 1 || args.amount > 20)) return bad('amount: 1 bis 20');
+  if (name === 'key' && !/^[A-Za-z0-9+ ]{1,40}$/.test(args.key)) return bad('ungültige Taste');
+  if (name === 'scroll' && args.amount !== undefined && (args.amount < 1 || args.amount > 10)) return bad('amount: 1 bis 10');
   return { ok: true, args };
+}
+
+/** The loop's checked arguments as the app takes them (docs/computer-contract.json): scroll becomes dy (positive = down, 120 per step), the rest passes unchanged. */
+export function toWire(name, args) {
+  if (name !== 'scroll') return { ...args };
+  const { direction, amount, ...rest } = args;
+  return { ...rest, dy: (direction === 'up' ? -1 : 1) * (amount ?? 5) * 120 };
 }
 
 const sanitizeUsage = (u) => ({ in: Number(u?.prompt_tokens) || 0, out: Number(u?.completion_tokens) || 0 });

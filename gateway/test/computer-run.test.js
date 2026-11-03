@@ -28,7 +28,7 @@ test('the loop gets his verbatim final (not the model goal), a fixed prompt, exa
   assert.match(start.id, /^c[0-9a-f]{16}$/);
   // the model saw it, and never the voice model's goal
   const first = h.model.calls[0];
-  assert.equal(first.model, 'anthropic/claude-sonnet-5');
+  assert.equal(first.model, 'anthropic/claude-sonnet-5.5');
   assert.equal(first.messages[0].content, SYSTEM_PROMPT);
   assert.ok(lastUserText(first).includes(JSON.stringify(GOAL)));
   assert.ok(!JSON.stringify(h.model.calls).includes('völlig anderes'));
@@ -88,11 +88,11 @@ test('bad arguments never leave the gateway: control characters, newlines, long 
   const bad = [
     ['ui_type', { ref: 'e1', text: 'hallo\nEnter' }], ['ui_type', { ref: 'e1', text: 'a\u0000b' }], ['ui_type', { ref: 'e1', text: 'x'.repeat(2001) }], ['chrome_fill', { ref: 'e1', text: 'a\rb' }],
     ['chrome_open', { url: 'javascript:alert(1)' }], ['chrome_open', { url: 'data:text/html,<b>' }], ['chrome_open', { url: 'file:///etc/passwd' }], ['chrome_open', { url: 'chrome://settings' }], ['chrome_open', { url: 'nonsense' }],
-    ['key', { keys: 'Win+R' + '\n' }], ['key', {}], ['ui_click', {}], ['ui_click', { ref: 'e1', x: 5 }], ['ui_click', { ref: '../../x' }], ['scroll', { direction: 'sideways' }], ['scroll', { direction: 'up', amount: 99 }],
+    ['key', { key: 'Win+R' + '\n' }], ['key', {}], ['ui_click', {}], ['ui_click', { ref: 'e1', x: 5 }], ['ui_click', { ref: '../../x' }], ['scroll', { direction: 'sideways' }], ['scroll', { direction: 'left' }], ['scroll', { direction: 'up', amount: 99 }], ['chrome_snapshot', {}], ['chrome_read', { ref: 'e1' }], ['window_focus', { ref: 'w1' }], ['ui_tree', { window: '../x' }], ['chrome_snapshot', { tab: 'a b' }],
     ['chrome_eval', { code: '1' }], ['job_start', { prompt: 'x' }], ['board_post', { text: 'x' }], ['ask_florian', { question: 'x'.repeat(300) }],
   ];
   for (const [name, args] of bad) assert.equal(checkArgs(name, args).ok, false, `${name} ${JSON.stringify(args).slice(0, 50)}`);
-  for (const [name, args] of [['ui_type', { ref: 'e1', text: 'Hallo Anna' }], ['chrome_open', { url: 'https://mail.google.com/mail/u/0/#inbox' }], ['key', { keys: 'Ctrl+F' }], ['scroll', { direction: 'down', amount: 3 }], ['ui_tree', {}], ['server_read', { op: 'load' }]]) assert.equal(checkArgs(name, args).ok, true, name);
+  for (const [name, args] of [['ui_type', { ref: 'e1', text: 'Hallo Anna' }], ['chrome_open', { url: 'https://mail.google.com/mail/u/0/#inbox' }], ['key', { key: 'Ctrl+F' }], ['scroll', { direction: 'down', amount: 3 }], ['scroll', { direction: 'up', tab: 'AB12CD34' }], ['window_focus', { window: 'w1' }], ['chrome_snapshot', { tab: 'AB12CD34' }], ['chrome_read', { tab: 'AB12CD34' }], ['screenshot', {}], ['ui_tree', {}], ['server_read', { op: 'load' }]]) assert.equal(checkArgs(name, args).ok, true, name);
 });
 
 test('cost: metered per run and in limits; the allowlist model is pinned and cannot leave it', async () => {
@@ -110,10 +110,11 @@ test('cost: metered per run and in limits; the allowlist model is pinned and can
   assert.deepEqual(cfg.computerModels(), ['anthropic/claude-sonnet-5']);
   assert.equal(cfg.computerModel(), 'anthropic/claude-sonnet-5');
   process.env.DESK_COMPUTER_MODELS = 'anthropic/claude-sonnet-5.5,anthropic/claude-sonnet-5';
-  process.env.DESK_COMPUTER_MODEL = 'anthropic/claude-sonnet-5.5';
-  assert.equal(cfg.computerModel(), 'anthropic/claude-sonnet-5.5');
-  delete process.env.DESK_COMPUTER_MODELS; delete process.env.DESK_COMPUTER_MODEL;
+  process.env.DESK_COMPUTER_MODEL = 'anthropic/claude-sonnet-5';
   assert.equal(cfg.computerModel(), 'anthropic/claude-sonnet-5');
+  delete process.env.DESK_COMPUTER_MODELS; delete process.env.DESK_COMPUTER_MODEL;
+  assert.deepEqual(cfg.computerModels(), ['anthropic/claude-sonnet-5.5']);
+  assert.equal(cfg.computerModel(), 'anthropic/claude-sonnet-5.5');
 });
 
 test('the provider call pins anthropic, denies data collection and refuses a model outside the allowlist', async () => {
@@ -122,10 +123,10 @@ test('the provider call pins anthropic, denies data collection and refuses a mod
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => { seen.push({ url: String(url), body: JSON.parse(init.body) }); return new Response(JSON.stringify({ choices: [{ message: { content: '', tool_calls: [{ id: 'x', function: { name: 'done', arguments: '{"summary":"x"}' } }] } }], usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.003 } }), { status: 200 }); };
   try {
-    const out = await openrouterComplete({ model: 'anthropic/claude-sonnet-5', messages: [{ role: 'user', content: 'x' }] });
+    const out = await openrouterComplete({ model: 'anthropic/claude-sonnet-5.5', messages: [{ role: 'user', content: 'x' }] });
     assert.equal(out.costUsd, 0.003);
     const { provider, model, tools, parallel_tool_calls: par } = seen[0].body;
-    assert.equal(model, 'anthropic/claude-sonnet-5');
+    assert.equal(model, 'anthropic/claude-sonnet-5.5');
     assert.deepEqual(provider.only, ['anthropic']);
     assert.equal(provider.allow_fallbacks, false);
     assert.equal(provider.data_collection, 'deny');
@@ -133,7 +134,7 @@ test('the provider call pins anthropic, denies data collection and refuses a mod
     assert.deepEqual(tools.map((t) => t.function.name), LOOP_TOOL_NAMES);
     await assert.rejects(openrouterComplete({ model: 'deepseek/deepseek-v4.1-flash', messages: [] }), /allowlist/);
     globalThis.fetch = async () => new Response('{}', { status: 429 });
-    await assert.rejects(openrouterComplete({ model: 'anthropic/claude-sonnet-5', messages: [] }), (e) => e.status === 429);
+    await assert.rejects(openrouterComplete({ model: 'anthropic/claude-sonnet-5.5', messages: [] }), (e) => e.status === 429);
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -163,7 +164,7 @@ test('confirm: the assistant says the app text exactly, "ja vier sieben" forward
   assert.equal(conf[0].hash, 'a1b2c3d4e5f60718');
   const types = h.session.events.map((e) => e.type);
   assert.ok(types.indexOf('computer.confirm.ask') < types.indexOf('computer.confirm.ok'));
-  assert.deepEqual(h.session.events.find((e) => e.type === 'computer.confirm.ask'), { type: 'computer.confirm.ask', run: h.vision.sent[0].run, hash: 'a1b2c3d4e5f60718', spoken: SPOKEN });
+  assert.deepEqual(h.session.events.find((e) => e.type === 'computer.confirm.ask'), { type: 'computer.confirm.ask', run: h.vision.sent[0].run, hash: 'a1b2c3d4e5f60718', chars: SPOKEN.length });
   assert.equal(stopReason(h), 'done');
   // the code never passes through the gateway: nothing in anything sent to the voice model or the model looks like it
   assert.ok(!JSON.stringify(h.model.calls).includes('47'));
@@ -338,7 +339,7 @@ test('caps: 10 minutes, USD 1.50 per run, USD 5 per day', async () => {
 });
 
 // ---- heartbeat and life ----
-test('heartbeat: the gateway beats every 3 s; no app beat for 5 s ends the run and tells the app', async () => {
+test('heartbeat: both sides beat every 5 s; no app beat for 15 s ends the run and tells the app', async () => {
   const h = setup({ script: [call('screenshot'), ...Array.from({ length: 20 }, () => call('ui_windows', {}))], app: (w) => new Promise((r) => { if (w.op === 'action') h.hold = () => r(ok()); else r({ ok: true, code: 'done' }); }) });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   const run = h.computer.runOf('s1');
@@ -349,7 +350,7 @@ test('heartbeat: the gateway beats every 3 s; no app beat for 5 s ends the run a
   h.clock.t += BEAT_MS; h.computer.tick();
   assert.equal(h.vision.ofOp('beat').length, 2);
   assert.ok(!ended(h));
-  h.clock.t += 5100; h.computer.tick(); // no beat from the app for more than 5 s
+  h.clock.t += 15_100; h.computer.tick(); // no beat from the app for more than 15 s (three missed)
   assert.equal(ended(h), true);
   assert.equal(stopReason(h), 'no-beat');
   assert.equal(h.vision.ofOp('stop').length, 1);
@@ -458,7 +459,7 @@ test('the start: no capable app, the wrong client, a refusing app and a silent a
 test('trace: intent before the action, typed text as length only; no screenshot, tree, page text, typed text or answer text in ANY event', async () => {
   const SECRET_TYPED = 'GEHEIMER-TEXT-12345', TREE = 'BAUM-INHALT-QWERTZ', PAGE = 'SEITENTEXT-ASDF', SHOT = 'U0hPVFNFTlRJTkVM', ANSWER = 'ANTWORTTEXT-YXCV';
   const h = setup({
-    script: [call('screenshot'), call('ui_tree'), call('chrome_read'), call('ui_type', { ref: 'e1', text: SECRET_TYPED }), call('ask_florian', { question: 'Welche Datei?' }), call('server_read', { op: 'load' }), call('done', { summary: 'fertig' })],
+    script: [call('screenshot'), call('ui_tree'), call('chrome_read', { tab: 'AB12CD34' }), call('ui_type', { ref: 'e1', text: SECRET_TYPED }), call('ask_florian', { question: 'Welche Datei?' }), call('server_read', { op: 'load' }), call('done', { summary: 'fertig' })],
     app: (w) => {
       if (w.op !== 'action') return { ok: true, code: 'done' };
       if (w.tool === 'screenshot') return ok({ result: { jpeg: SHOT, w: 100, h: 50 } });

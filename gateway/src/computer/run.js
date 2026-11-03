@@ -9,10 +9,10 @@ import { limits as defaultLimits } from '../limits.js';
 import { ABOUT } from '../voiceActions.js';
 import { askInstruction, ASK_MS, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
-import { goalForTrace, openrouterComplete, runLoop } from './loop.js';
+import { goalForTrace, openrouterComplete, runLoop, toWire } from './loop.js';
 import { serverRead } from './serverRead.js';
 
-export const BEAT_MS = 3000, BEAT_DEAD_MS = 5000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, STEP_REPORT = 25, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
+export const BEAT_MS = 5000, BEAT_DEAD_MS = 15_000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, STEP_REPORT = 25, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
 export const MAX_QUESTIONS = 3, ANSWER_MS = 60_000, GOAL_CHARS = 1000;
 export const RESULT_CODES = ['done', 'refused', 'needs-confirm', 'stale-ref', 'killed', 'handson', 'unclear', 'no-run', 'denied'];
 const CLASSES = ['R0', 'R1', 'R2', 'R3'];
@@ -140,7 +140,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       s.activity?.({ id: `computer-${R.run}-${seq}`, phase: 'start', tool: 'computer_task', label: `Computer: ${VERB[tool] ?? 'arbeite'}` });
       R.inflight += 1;
       let res;
-      try { res = await vision.computerSend(sid, { id, run: R.run, seq, op: 'action', tool, args }, { waitMs: tool === 'screenshot' ? 20_000 : 30_000, validate: validateResult }); } finally { R.inflight -= 1; touch(); }
+      try { res = await vision.computerSend(sid, { id, run: R.run, seq, op: 'action', tool, args: toWire(tool, args) }, { waitMs: tool === 'screenshot' ? 20_000 : 30_000, validate: validateResult }); } finally { R.inflight -= 1; touch(); }
       R.actions += 1;
       const meta = res?.result && typeof res.result === 'object' ? res.result : {};
       ev('computer.action', { run: R.run, seq, tool, class: res.class, rule: res.rule, ...(typeof meta.target === 'string' ? { target: letters(meta.target, 60) } : {}), ...(typeof meta.domain === 'string' ? { domain: letters(meta.domain.replace(/\./g, ' '), 60).replace(/ /g, '.') } : {}), ...(typeof meta.process === 'string' ? { process: letters(meta.process, 40) } : {}), ...(typeof args?.text === 'string' ? { chars: args.text.length } : {}), ok: res.ok, code: res.code, ms: now() - t0, ...(res.ok ? {} : { reason: res.note ?? res.code }) });
@@ -197,7 +197,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     if (R.asks >= MAX_ASKS) { R.ev('computer.confirm.no', { run: R.run, hash: nc.hash, reason: 'cap' }); R.end('asks-cap'); return { ok: false, code: 'denied', note: 'Zu viele Rückfragen' }; }
     R.asks += 1;
     const P = R.pending = { hash: nc.hash, spoken: nc.spoken, state: 'saying', at: now(), askedAt: 0, expires: 0, deferred: defer() };
-    R.ev('computer.confirm.ask', { run: R.run, hash: nc.hash, spoken: nc.spoken });
+    R.ev('computer.confirm.ask', { run: R.run, hash: nc.hash, chars: nc.spoken.length }); // the spoken text can carry page words (recipient, subject, form values): its length only
     const cmd = vision.computerCommand?.(R.sid, cmdId);
     if (cmd) cmd.late = (late) => P.deferred.resolve({ kind: 'late', body: late }); // the physical hotkey confirmed in the app
     if (!s.say?.(askInstruction(nc.spoken))) P.deferred.resolve({ kind: 'void', reason: 'no-voice' });
@@ -206,6 +206,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.touch();
     const base = { run: R.run, hash: P.hash };
     if (out.kind === 'late') {
+      if (out.body.code === 'needs-confirm') { R.ev('computer.confirm.no', { ...base, via: 'hotkey', reason: 'needs-confirm' }); return { ok: false, code: 'denied', note: 'Die Bestätigung per Taste war keine Ausführung.' }; } // a second result may only report the confirmed action
       R.ev(out.body.ok ? 'computer.confirm.ok' : 'computer.confirm.no', { ...base, via: 'hotkey', ...(out.body.ok ? {} : { reason: out.body.code }) });
       return out.body;
     }
@@ -292,14 +293,14 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   // ---- routes ----
   /** POST .../computer/beat {run, state} from the app. */
   function beat(sid, record, body) {
-    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((k) => !['run', 'state'].includes(k)) || !RUN.test(body.run ?? '') || !RUN_STATES.includes(body.state)) throw bad('Ungültiger Herzschlag.');
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((k) => !['run', 'state', 'why'].includes(k)) || !RUN.test(body.run ?? '') || !RUN_STATES.includes(body.state) || (body.why !== undefined && !/^[a-z0-9:_-]{1,40}$/i.test(body.why))) throw bad('Ungültiger Herzschlag.');
     if (vision.computerDevice?.(sid) !== record.deviceId) throw deviceError('Fremdes Gerät.', 403);
     const R = runs.get(sid);
     if (!R || R.run !== body.run || R.ended) return { ok: false, code: 'no-run' };
     R.appBeatAt = now();
     if (body.state === 'handson') markHandsOn(R);
-    else if (body.state === 'killed') { R.ev('computer.kill', { run: R.run, via: 'app' }); R.end('killed'); }
-    else if (body.state === 'ended') R.end('app-ended');
+    else if (body.state === 'killed') { R.ev('computer.kill', { run: R.run, via: 'app', why: body.why ?? null }); R.end('killed'); }
+    else if (body.state === 'ended') { R.ev('computer.app.ended', { run: R.run, why: body.why ?? null }); R.end('app-ended'); }
     return { ok: true };
   }
 
