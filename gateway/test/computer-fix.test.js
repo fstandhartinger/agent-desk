@@ -10,7 +10,7 @@ import { fakeVision, flush, scriptedModel, setup, until } from './helpers/comput
 
 setEnv({});
 const { isTrigger, checkComputerTrigger } = await import('../src/computer/gate.js');
-const { saidExactly, isRealSentence, buildAsk, mapAnswer, MAX_ASKS } = await import('../src/computer/confirm.js');
+const { saidExactly, isGoWord, parseAnswer, buildAsk, mapAnswer, MAX_ASKS } = await import('../src/computer/confirm.js');
 const { checkArgs, LOOP_TOOLS } = await import('../src/computer/loop.js');
 const { createComputer } = await import('../src/computer/run.js');
 const { cfg } = await import('../src/config.js');
@@ -53,9 +53,15 @@ test('C: domains in their spoken form, case, punctuation and one leading acknowl
 });
 
 // ---- B: a real sentence
-test('B: isRealSentence: noise, ja, weiter, okay do not resume; a sentence does', () => {
-  for (const t of ['ja', 'Ja.', 'weiter', 'okay', 'ok gut', '[Musik]', '(Husten)', 'hm', 'ja ja ja', '', '♪']) assert.equal(isRealSentence(t), false, t);
-  for (const t of ['Mach weiter bitte', 'Ja, mach einfach weiter.', 'Du kannst jetzt weitermachen']) assert.equal(isRealSentence(t), true, t);
+test('N2: isGoWord: only a positive go phrase without a negation; the critic\'s five sentences and noise do not resume', () => {
+  for (const t of ['ja', 'Ja.', 'weiter', 'okay', 'ok gut', '[Musik]', '(Husten)', 'hm', 'ja ja ja', '', '♪',
+    'Nein, lass das', 'nein das reicht jetzt', 'Warte kurz, ich mache das noch', 'Moment, ich bin noch dran', 'Das Wetter wird morgen schön', 'Mach nicht weiter', 'Nein, mach weiter nicht', 'Stopp, geht nicht weiter']) assert.equal(isGoWord(t), false, t);
+  for (const t of ['Mach weiter bitte', 'Ja, mach einfach weiter.', 'Du kannst jetzt weitermachen', 'Weiter so', 'Es geht weiter', 'Mach jetzt bitte weiter, ich bin fertig', 'Geht weiter']) assert.equal(isGoWord(t), true, t);
+});
+test('S7: "4 7", "4,7" and "ja 4 7" are the code 47 like "47" and "vier sieben"; three digits and one digit are not', () => {
+  for (const t of ['47', '4 7', '4,7', 'ja 4 7', 'Ja, 4 7.', 'vier sieben', 'ja vier sieben', '4 sieben']) assert.deepEqual(parseAnswer(t), { kind: 'digits', digits: '47' }, t);
+  for (const t of ['4', '4 4 7', '447', 'ja', 'vier', '4 7 9']) assert.equal(parseAnswer(t).kind, 'other', t);
+  assert.equal(parseAnswer('nein 4 7').kind, 'no');
 });
 
 // ---- F7
@@ -110,19 +116,33 @@ test('F1: a server_read tells the app (op taint) BEFORE the loop sees the data; 
 
 // ---- B: resume
 const handsOnSetup = () => setup({ script: [call('ui_windows'), call('ui_windows'), call('done', { summary: 'x' })], app: (w) => (w.op === 'action' ? ok() : { ok: true, code: 'done' }) });
-test('B: after hands-on only a real sentence resumes, with the resume op (no scope, no start); noise and ja do not', async () => {
+test('N2: after hands-on only a positive go phrase resumes, with the resume op (no scope, no start); noise, ja, "nein" and a video\'s sentence do not', async () => {
   const h = setup({ script: [call('ui_windows'), call('ui_windows'), call('done', { summary: 'x' })], app: (w) => (w.op === 'action' && w.seq <= 3 ? { ok: false, code: 'handson', run_state: 'handson' } : { ok: true, code: 'done', ...(w.op === 'action' ? { class: 'R1', rule: 'x' } : {}) }) });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   await until(() => h.computer.runOf('s1')?.paused);
   const calls = h.model.calls.length;
-  for (const t of ['ja', '[Musik]', 'weiter', 'okay']) { say(h, t); await flush(); }
-  assert.equal(h.vision.ofOp('resume').length, 0, 'noise and a bare ja resume nothing');
+  for (const t of ['ja', '[Musik]', 'weiter', 'okay', 'Nein, lass das', 'Warte kurz, ich mache das noch', 'Das Wetter wird morgen schön und wir fahren los']) { say(h, t); await flush(); }
+  assert.equal(h.vision.ofOp('resume').length, 0, 'noise, a bare ja, a "nein" and any other sentence resume nothing');
+  assert.equal(h.computer.runOf('s1')?.ended, false, 'during hands-on a "nein" does not end the run either');
   assert.equal(h.model.calls.length, calls);
   say(h, 'Mach bitte weiter, ich bin fertig');
   await until(() => ended(h));
   assert.equal(h.vision.ofOp('resume').length, 1);
   assert.equal(h.vision.ofOp('start').length, 1, 'no second start: resume adds no scope');
   assert.equal(h.vision.ofOp('resume')[0].goal, undefined);
+});
+test('N2: at the step stop "nein" and stop words end the run; "warte kurz" and chatter leave it waiting; only a go phrase continues', async () => {
+  const h = setup({ script: Array.from({ length: 40 }, () => call('ui_windows')), app: (w) => (w.op === 'action' ? ok() : { ok: true, code: 'done' }), costUsd: 0.0001 });
+  await h.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await until(() => h.computer.runOf('s1')?.awaitingGo);
+  const actions = h.vision.ofOp('action').length;
+  for (const t of ['Warte kurz, ich mache das noch', 'Moment, ich bin noch dran', 'Das Wetter wird morgen schön und alles']) { say(h, t); await flush(); }
+  assert.equal(h.vision.ofOp('resume').length, 0);assert.equal(h.vision.ofOp('action').length, actions);assert.equal(ended(h), false);
+  say(h, 'Nein, lass das');
+  await until(() => ended(h));
+  assert.equal(stopReason(h), 'voice-stop');
+  assert.equal(h.vision.ofOp('resume').length, 0, 'ending is not resuming');
+  assert.equal(h.vision.ofOp('action').length, actions, 'not one more step after the "nein"');
 });
 test('B: the 25-step stop resumes with the resume op too', async () => {
   const h = setup({ script: Array.from({ length: 40 }, () => call('ui_windows')), app: (w) => (w.op === 'action' ? ok() : { ok: true, code: 'done' }), costUsd: 0.0001 });
@@ -303,6 +323,7 @@ test('caps: NaN, text and negative values fall back to the default; the daily co
   await until(() => a.runOf('s1') === null);
   assert.ok(JSON.parse(fs.readFileSync(file, 'utf8')).usd >= 4.7);
   const b = mk(); // "gateway restart": a new manager reads the file
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ['day.json'], 'no temp file is left behind');
   const again = await b.begin('s1', { text: GOAL, goalArg: '' });
   assert.equal(again.ok, true, 'still below USD 5 after one run');
   await until(() => b.runOf('s1') === null);
@@ -318,4 +339,39 @@ test('checkComputerTrigger carries the new filters (the latest spoken final only
   const e = (text) => ({ text, at: 1_000_000 });
   assert.equal(checkComputerTrigger([e('Er übernimmt die Kosten.')], 1_000_100).ok, false);
   assert.equal(checkComputerTrigger([e('Übernimm den Computer.')], 1_000_100).ok, true);
+});
+
+// ---- NIT: the day file is written atomically (a crash in the middle must not reset the counter)
+test('NIT: the day counter is written to a temp file and renamed over the real one, never written in place', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cday-')), 'day.json');
+  fs.writeFileSync(file, JSON.stringify({ day: '2026-11-03', usd: 1 }));
+  const written = [], renamed = [];
+  const w0 = fs.writeFileSync, r0 = fs.renameSync;
+  fs.writeFileSync = (f, ...a) => { written.push(String(f)); return w0(f, ...a); };
+  fs.renameSync = (a, b) => { renamed.push([String(a), String(b)]); return r0(a, b); };
+  try {
+    const vision = fakeVision(); vision.app = () => ok();
+    const c = createComputer({ vision, hub: {}, now: () => Date.UTC(2026, 10, 3, 12), complete: scriptedModel([call('ui_windows'), call('done', { summary: 'x' })], { costUsd: 0.5 }), tickMs: 1e9, limits: { check: () => ({ ok: true }), addCost() {} }, statePath: file });
+    c.attach('s1', { client: 'screen-agent', say: () => true, trace() {}, activity() {} });
+    await c.begin('s1', { text: GOAL, goalArg: '' });
+    await until(() => c.runOf('s1') === null);
+  } finally { fs.writeFileSync = w0; fs.renameSync = r0; }
+  assert.ok(written.length > 0 && !written.includes(file), 'the real file is never opened for writing');
+  assert.ok(renamed.some(([from, to]) => to === file && from !== file), 'the temp file is renamed over it');
+  assert.ok(JSON.parse(fs.readFileSync(file, 'utf8')).usd >= 1.5);
+});
+// ---- NIT: his answer that grows after the ask ended stays out of the durable trace
+test('NIT: quiet() keeps his user turns out of the trace for a few seconds after an ask answer was taken, even when the run is already over', async () => {
+  const h = setup({ script: [call('chrome_click', { ref: 'e5' }), call('done', { summary: 'x' })], app: (w) => (w.op === 'action' ? R2() : w.op === 'confirm' ? ok({ rule: 'confirmed' }) : { ok: true, code: 'done' }) });
+  await h.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await asked(h);
+  h.computer.assistantFinal('s1', SPOKEN);
+  assert.equal(h.computer.quiet('s1', 'user'), true);
+  h.clock.t += 1000;
+  say(h, 'Ja vier sieben', { started: h.clock.t });
+  await until(() => ended(h));
+  assert.equal(h.computer.quiet('s1', 'user'), true, 'the grown "ja vier sieben noch" arrives after the run ended and is still quiet');
+  assert.equal(h.computer.quiet('s1', 'assistant'), false);
+  h.clock.t += 6000;
+  assert.equal(h.computer.quiet('s1', 'user'), false, 'ordinary turns are traced again afterwards');
 });

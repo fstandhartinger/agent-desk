@@ -36,15 +36,12 @@ export const saidExactly = (assistantText, spokenText) => {
 };
 
 /**
- * Is this a real sentence of his (resume after hands-on or after the 25-step stop)? Not noise ("[Musik]", "(Husten)"), not a bare "ja", "weiter" or
- * "okay": at least two words, one of them more than a filler, eight letters in all.
+ * The go after hands-on or after the 25-step stop (N2): a positive go phrase and no negation anywhere in the sentence. Any other sentence (a video, "warte kurz", "nein, lass das")
+ * lifts nothing. "ja", "weiter" or "okay" alone are no go either.
  */
-const FILLER = new Set(['ja', 'nein', 'ok', 'okay', 'jo', 'jep', 'yes', 'genau', 'gut', 'danke', 'hm', 'hmm', 'mhm', 'äh', 'ähm', 'ne', 'doch', 'bitte', 'weiter', 'klar', 'aha', 'so', 'na', 'also', 'und', 'dann', 'noch', 'mal', 'jetzt']);
-export const isRealSentence = (text) => {
-  const t = norm(String(text ?? '').replace(/[\[(][^\])]{0,40}[\])]/g, ' ').replace(/[♪♫]/g, ' '));
-  const words = t.split(' ').filter(Boolean);
-  return words.length >= 2 && words.some((w) => !FILLER.has(w)) && t.replace(/ /g, '').length >= 8;
-};
+const GO = /(?:^| )(?:mach(?: \S+){0,2} weiter|weiter ?machen|weiter so|geht weiter|es geht weiter|weiter geht s|(?:du )?kannst (?:\S+ ){0,2}weitermachen|fahr(?:e)? fort|setz(?:e)? fort|go on|keep going|continue)(?= |$)/;
+const NEGATION = /(?:^| )(?:nein|nee|nö|no|nicht|kein\p{L}*|nie|niemals|ohne|stopp?\p{L}*|halt|warte\p{L}*|moment|abbrech\p{L}*|abbruch|aufhör\p{L}*|lass|bloß|später|don|never)(?= |$)/u;
+export const isGoWord = (text) => { const t = norm(text); return GO.test(t) && !NEGATION.test(t); };
 
 const DIGIT = { null: '0', zero: '0', eins: '1', ein: '1', eine: '1', zwei: '2', zwo: '2', drei: '3', vier: '4', fünf: '5', fuenf: '5', sechs: '6', sieben: '7', acht: '8', neun: '9' };
 const NO = /^(?:nein|no|nee|nö|stopp?|abbrechen|abbruch|nicht|lass das|bloß nicht|halt)\b/;
@@ -60,7 +57,7 @@ export function parseAnswer(text) {
   if (NO.test(t)) return { kind: 'no' };
   const words = t.split(' ');
   if (['ja', 'jawohl', 'okay', 'ok', 'yes'].includes(words[0])) words.shift();
-  const parts = words.map((w) => (/^\d{2}$/.test(w) ? w : DIGIT[w] ?? null));
+  const parts = words.map((w) => (/^\d{1,2}$/.test(w) ? w : DIGIT[w] ?? null)); // "47", "4 7", "4,7" (the speech-to-text writes it either way)
   if (!parts.length || parts.some((p) => p === null)) return { kind: 'other' }; // every word must be a digit
   const digits = parts.join('');
   if (!/^\d{2}$/.test(digits)) return { kind: 'other' };

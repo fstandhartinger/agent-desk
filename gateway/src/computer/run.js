@@ -8,7 +8,7 @@ import { artifactData } from '../artifacts.js';
 import { deviceError } from '../deviceMedia.js';
 import { limits as defaultLimits } from '../limits.js';
 import { ABOUT } from '../voiceActions.js';
-import { askInstruction, ASK_MS, buildAsk, isRealSentence, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
+import { askInstruction, ASK_MS, buildAsk, isGoWord, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
 import { goalForTrace, openrouterComplete, runLoop, toWire } from './loop.js';
 import { serverRead } from './serverRead.js';
@@ -64,13 +64,14 @@ function loadDay(file) {
 export function createComputer({ vision, hub, limits = defaultLimits, now = Date.now, complete = openrouterComplete, read = serverRead, audit = () => {}, tickMs = 1000, statePath = cfg.computerStatePath() } = {}) {
   const sessions = new Map(); // sid -> {client, say, trace, activity}
   const runs = new Map(); // sid -> run
+  const quietUntil = new Map(); // sid -> epoch ms until which his user turns are traced as length only (an ask answer was just taken)
   const guards = new Map(); // sid -> epoch ms until which the two action tools need the app confirm
   let dayUsd = loadDay(statePath); // the daily counter survives a gateway restart
   let timer = null;
   const dayCost = () => (dayUsd.day === day(now) ? dayUsd.usd : 0);
   const addDay = (usd) => {
     dayUsd = { day: day(now), usd: dayCost() + usd };
-    if (statePath) try { fs.writeFileSync(statePath, JSON.stringify(dayUsd)); } catch (err) { audit({ action: 'computer.day.save-failed', detail: String(err?.code ?? err?.message ?? err).slice(0, 80) }); }
+    if (statePath) try { const tmp = `${statePath}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(dayUsd)); fs.renameSync(tmp, statePath); } catch (err) { audit({ action: 'computer.day.save-failed', detail: String(err?.code ?? err?.message ?? err).slice(0, 80) }); }
   };
 
   function ensureTimer() {
@@ -267,6 +268,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     const text = String(e.text ?? '');
     R.touch();
     const P = R.pending;
+    if (P?.state === 'asked' || R.answer) quietUntil.set(sid, now() + 5000); // a sentence of his that grows after the answer was taken (the code arriving in two pieces, the run already over) stays out of the trace too
     if (P?.state === 'asked') {
       // D: when the vendor sends no speech start, "early" cannot be judged and is not assumed; the code is the real gate. The trace says which case held.
       const known = typeof e.started === 'number' && Number.isFinite(e.started);
@@ -284,8 +286,9 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       a.resolve(m.kind === 'unclear' ? { ok: false, code: 'unclear', note: 'Florians Antwort war nicht eindeutig.' } : { ok: true, code: 'done', result: { antwort: m.kind === 'yes' ? 'ja' : m.kind === 'no' ? 'nein' : m.option } });
       return;
     }
-    if (R.paused || R.awaitingGo) { // B: only a real sentence resumes; the app is told with the `resume` op (no scope)
-      if (!isRealSentence(text)) { R.ev('computer.resume.ignored', { run: R.run, chars: text.length }); return; }
+    if (R.paused || R.awaitingGo) { // B/N2: only a positive go phrase without a negation resumes (the app is told with the `resume` op, no scope); at the step stop "nein" or a stop word ends the run
+      if (R.awaitingGo && (parseAnswer(text).kind === 'no' || isStopWord(text))) { R.ev('computer.step.no', { run: R.run, chars: text.length }); R.end('voice-stop'); return; }
+      if (!isGoWord(text)) { R.ev('computer.resume.ignored', { run: R.run, chars: text.length, after: R.awaitingGo ? 'step-report' : 'handson' }); return; }
       resume(R);
       return;
     }
@@ -406,6 +409,6 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
 
   /** The session asks before it writes a transcript turn to the DURABLE trace: the app's R2 text (recipient, subject, form words, typed text) while it is being said, and
    *  his answers to an ask (the code, or the answer to ask_florian) are traced as their length only. */
-  const quiet = (sid, role) => { const R = hooks(sid); return Boolean(R && (role === 'assistant' ? R.pending?.state === 'saying' : (R.pending?.state === 'asked' || R.answer))); };
+  const quiet = (sid, role) => { const R = hooks(sid); return (role === 'user' && (quietUntil.get(sid) ?? 0) > now()) || Boolean(R && (role === 'assistant' ? R.pending?.state === 'saying' : (R.pending?.state === 'asked' || R.answer))); };
   return { attach, begin, beat, guarded, quiet, assistantFinal, userFinal, userPartial, tick, validateResult, ready: (sid) => Boolean(vision.computerReady?.(sid)), isOpen: (sid) => runs.has(sid), runOf: (sid) => runs.get(sid) ?? null, _runs: runs, _guards: guards, _sessions: sessions };
 }
