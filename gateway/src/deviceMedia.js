@@ -198,7 +198,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     };
     const transcript = async (url, key, model) => {
       if (!dictionarySettled) await settled(dictionaryJob);
-      const prompt = vocabularyPrompt(resolvedDictionary);
+      const prompt = vocabularyPrompt(resolvedDictionary, 772);
       const body = new FormData(); body.set('model', model); body.set('language', 'de'); if (prompt) body.set('prompt', `Deutsches Diktat. Begriffe: ${prompt}`); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
       if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
       limits.addCost(duration / 60 * 0.03);
