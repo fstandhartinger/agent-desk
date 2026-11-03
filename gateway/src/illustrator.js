@@ -460,7 +460,7 @@ function parseJsonObject(text) {
 }
 
 /** Told to the agent with every canvas_draw result: the illustrator may find the drawing worthless and skip it. */
-export const DRAW_NOTE = 'Die Zeichnerin entscheidet selbst, ob die Zeichnung Florian etwas zeigt; kündige sie nicht an und sprich weiter mit Inhalt.';
+export const DRAW_NOTE = 'Ob eine Zeichnung entsteht, entscheidet die Zeichnerin selbst; sage weder "ich zeichne" noch "es gibt keine Zeichnung", kündige nichts an und sprich weiter mit Inhalt.';
 
 /** {skip:true, reason} when the illustrator judged the drawing worthless (value check), else null. */
 function skipOf(content) {
@@ -890,7 +890,8 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
           return { ok: true, skipped: true, reason: why, id: job.id ?? entry.id };
         }
       }
-      let outcome = judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
+      // a second skip after the explicit-draw retry is a rejected answer (the repair round asks once more), never a silent end
+      let outcome = skipOf(answer.content) ? { error: 'a drawing was asked for explicitly: no skip, answer with the CanvasSpec JSON object' } : judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
       if (outcome.error) {
         audit({ action: 'canvas.repair', ip: job.ip, detail: `${entry.id}: ${outcome.error}` });
         const fallback = outcome.fallback;

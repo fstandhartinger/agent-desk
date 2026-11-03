@@ -17,9 +17,10 @@ const { createCanvasSession, createIllustrator, SYSTEM_PROMPT } = await import('
 
 describe('announcements are no answer (a#624670)', () => {
   it('the exact sentences of the incident are promise-only, real answers are not', () => {
-    for (const t of ['Ich zeichne dir das auf.', 'Ich lese den Volltext.', 'Die Suche lieferte nichts.', 'Ich hole die Karte.', 'Ich male dir das gleich.', 'Das kommt gleich.', 'Ich zeichne dir das auf. Ich lese den Volltext.', 'Ich zeichne dir das'])
+    assert.equal(isPromiseOnly('Ich schaue nach. Die Suche lieferte nichts.'), true, 'a failed step next to an announcement');
+    for (const t of ['Ich zeichne dir das auf.', 'Ich lese den Volltext.', 'Ich hole die Karte.', 'Ich male dir das gleich.', 'Das kommt gleich.', 'Ich zeichne dir das auf. Ich lese den Volltext.', 'Ich zeichne dir das'])
       assert.equal(isPromiseOnly(t), true, t);
-    for (const t of ['Ich zeichne dir das auf. Die Karte beschreibt die Freigabe von Reax 1.3.', 'Der Job läuft noch.', 'Ich lese 5 Karten vor.', 'Die Karte sagt, dass die Engine gesperrt wird und dass Florian entscheiden soll.'])
+    for (const t of ['Ich zeichne dir das auf. Die Karte beschreibt die Freigabe von Reax 1.3.', 'Der Job läuft noch.', 'Die Suche lieferte nichts.', 'Ich lese 5 Karten vor.', 'Die Karte sagt, dass die Engine gesperrt wird und dass Florian entscheiden soll.'])
       assert.equal(isPromiseOnly(t), false, t);
   });
 });
@@ -34,7 +35,7 @@ describe('prompt rules', () => {
     assert.match(text, /"Die Suche lieferte nichts" ist verboten/);
   });
   it('only say you draw when canvas_draw runs in the same step', () => {
-    assert.match(canvasLines({ spoken: true }).join('\n'), /Sage nur, dass du zeichnest, wenn du canvas_draw/);
+    assert.match(canvasLines({ spoken: true }).join('\n'), /Rufe canvas_draw .* im selben Schritt auf und kündige es nicht an/);
     assert.match(buildInstructions(null, undefined, { provider: 'xai', screen: true }), /Ankündigung wie "Ich zeichne dir das auf"/);
   });
   it('action tool descriptions: no repo paths from memory, IDs stay IDs', () => {
@@ -255,7 +256,7 @@ describe('illustrator value check', () => {
     const s = session();
     ask(s, 'Läuft der Job noch? Zeichne mir das bitte auf.');
     const r = s.draw({ request: 'Jobstatus' });
-    assert.equal(r.status, 'zeichne'); assert.match(r.hinweis, /entscheidet selbst/);
+    assert.equal(r.status, 'zeichne'); assert.match(r.hinweis, /entscheidet die Zeichnerin selbst/);
     await s.idle();
     assert.ok(seen().some((x) => x.startsWith('ready:')));
   });
@@ -269,5 +270,24 @@ describe('illustrator value check', () => {
     await s.idle();
     assert.equal(bus.latest().find((e) => e.id === first)?.phase, 'ready');
     assert.equal(skipped.length, 1);
+  });
+});
+
+describe('fix-desk M2: only a bare announcement is promise-only', () => {
+  it('the critic\'s five complete answers need no recovery', () => {
+    for (const t of ['Ich zeichne kein Diagramm, weil die Antwort eine Zahl ist.', 'Ich öffne die Karte nicht.', 'Ich lade die Karte gerade nicht, weil sie privat ist.', 'Die Suche ergab keine Treffer.', 'Die Karte kommt gleich, sie heißt Lock the Engine.'])
+      assert.equal(isPromiseOnly(t), false, t);
+  });
+  it('bare announcements stay promise-only', () => {
+    for (const t of ['Ich zeichne dir das auf.', 'Okay, ich schaue kurz nach.', 'Ich öffne die Karte.']) assert.equal(isPromiseOnly(t), true, t);
+  });
+});
+
+describe('fix-desk M3: prompt lines agree, a started drawing answers a draw request', () => {
+  it('no line tells the model to announce the drawing', () => {
+    const all = [...canvasLines({ spoken: true }), ...buildInstructions(null, undefined, { provider: 'xai', screen: true }).split('\n')].join('\n');
+    assert.doesNotMatch(all, /sag kurz 'Ich zeichne dir das auf'/);
+    assert.match(all, /kündige die Zeichnung nicht an/);
+    assert.match(all, /nicht bei Karten auf dem Bildschirm und nicht bei Zeichnungen/);
   });
 });

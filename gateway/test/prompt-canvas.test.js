@@ -6,7 +6,7 @@ import { buildInstructions as voiceInstructions } from '../src/voice/instruction
 const SHARED = [
   'Du hast eine Canvas neben dem Gespräch und kannst darauf jederzeit zeichnen: Flussdiagramme, Architekturdiagramme, Sequenzdiagramme, Torten-, Balken- und Liniendiagramme, Tabellen, Zeitleisten, Sankey und freie SVG-Skizzen.',
   'Sag NIE, dass du nicht zeichnen oder keine Diagramme erstellen kannst.',
-  "Zeichne von dir aus, sobald du einen Ablauf, eine Architektur, einen Vergleich oder Zahlen erklärst — ohne zu fragen. Sprich währenddessen weiter; sag kurz 'Ich zeichne dir das auf'.",
+  "Zeichne von dir aus, sobald du einen Ablauf, eine Architektur, einen Vergleich oder Zahlen erklärst — ohne zu fragen. Sprich währenddessen weiter mit dem Inhalt; kündige die Zeichnung nicht an.",
   'Für Geldfragen hole echte Zahlen mit ledger_spend, für Architektur code_outline/read_file — nie schätzen.',
   'nutze dieselbe id',
 ];

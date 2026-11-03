@@ -3,7 +3,7 @@
 import { cfg } from '../config.js';
 import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
 import { short } from '../redact.js';
-import { cjkRuns, isGermanText, stripCjk } from '../canvas.js';
+import { asksForDrawing, cjkRuns, isGermanText, stripCjk } from '../canvas.js';
 import { buildInstructions } from './instructions.js';
 import { pageUpdateText } from '../pack.js';
 import { estimateCost } from './prices.js';
@@ -485,7 +485,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       adapter.sendToolResult(id, requestedName, output, { stale: true }); // OpenAI/xAI: keep the call/output pairing, no new response
       return;
     }
-    if (pending.active) {
+    if (pending.active && DRAW_TOOLS.has(name) && asksForDrawing(pending.text) && /"status":\s*"zeichne"/.test(output)) {
+      // "zeichne das": the running drawing is the answer; a recovery would add chatter next to it (a question that needs words is not settled here)
+      pending.active = false; pending.settled = turnId; clearTimeout(pending.timer);
+      trace.event('watchdog.settled', { turn: turnId, reason: 'drawing', name });
+    } else if (pending.active) {
       pending.facts.push(`${name}: ${output.slice(0, RECOVERY_FACT_CHARS)}`);
       restartNoAnswer(); // the model now has the results: same clock for its answer (the adapter nudge runs first, this is the last resort)
     }
