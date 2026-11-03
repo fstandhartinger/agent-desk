@@ -4,7 +4,7 @@ import { redact } from './redact.js';
 import { audit } from './audit.js';
 import { originOk } from './auth.js';
 import { fetchExplainerJson } from './explainer.js';
-import { directRef, fuzzyScore, significantTokens } from './artifactMatch.js';
+import { directRef, fuzzyDetail, significantTokens } from './artifactMatch.js';
 
 export const CONTEXT_TTL = 30 * 60_000;
 export const CONTEXT_MAX = 8; // ids kept per session; a new resolve adds in front, the oldest fall off
@@ -182,17 +182,32 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
         else try { const r = await registry(`/v1/resolve?ids=${direct.id}&depth=1`); r.items.forEach(i => add(marked(i, 'id'))); unknown = r.unknown; } catch (err) { registryError = err; }
       }
     }
-    const tokens = significantTokens(text);
-    visible.map(item => ({ item, score: fuzzyScore(tokens, item) })).filter(x => x.score >= 0.3).sort((a, b) => b.score - a.score)
-      .forEach(({ item, score }) => add({ ...marked(item, 'bildschirm-unscharf'), score: Math.round(score * 100) / 100 }));
+    // Screen and registry hits are merged BY SCORE (a registry hit that fits all words beats a partial hit on the screen); a tie goes to the screen.
+    const tokens = significantTokens(text), minimum = tokens.length >= 3 ? 0.5 : 0.3;
+    const round = n => Math.round(n * 100) / 100;
+    const scored = [];
+    for (const item of visible) {
+      const { score, numberMiss } = fuzzyDetail(tokens, item);
+      if (score >= minimum) scored.push({ item: { ...marked(item, 'bildschirm-unscharf'), score: round(score), ...(numberMiss ? { unscharf: true } : {}) }, score, screen: 1 });
+    }
     try {
       const found = await registry(`/v1/search?q=${encodeURIComponent(direct?.card ?? text)}`);
-      found.items.forEach(i => add(marked(i, 'registry')));
+      for (const i of found.items) {
+        const { score, numberMiss } = fuzzyDetail(tokens, i);
+        const s = Number.isFinite(i.score) ? Math.max(i.score, score) : Math.max(score, 0.3);
+        scored.push({ item: { ...marked(i, 'registry'), score: round(s), ...(numberMiss ? { unscharf: true } : {}) }, score: s, screen: 0 });
+      }
       unknown = found.unknown.length ? found.unknown : unknown;
     } catch (err) { registryError = err; }
+    scored.sort((a, b) => b.score - a.score || b.screen - a.screen);
+    const directCount = hits.length;
+    for (const { item } of scored) add(item);
     if (!hits.length && registryError && !visible.length) throw registryError;
     const items = hits.slice(0, 20);
-    if (items.length) return { items, unknown, ...(registryError ? { hinweis: 'Die Registry-Suche war nicht erreichbar; das sind die Treffer vom Bildschirm.' } : {}) };
+    // two hits that are nearly equally good: the model asks or names both instead of picking one
+    const top = scored.filter(s => items.some(i => i.id === s.item.id));
+    const eindeutig = !directCount && top.length > 1 ? top[0].score - top[1].score > 0.1 : true;
+    if (items.length) return { items, unknown, ...(eindeutig ? {} : { eindeutig: false, hinweis: 'Mehrere ähnlich gute Treffer: nenne beide kurz oder frage nach, welche gemeint ist.' }), ...(registryError ? { hinweis: 'Die Registry-Suche war nicht erreichbar; das sind die Treffer vom Bildschirm.' } : {}) };
     return { items: [], unknown, ...(visible.length ? { hinweis: `Keine Treffer; sichtbar sind: ${brief(visible).map(v => `a#${v.id} ${v.title}`).join('; ')}`, sichtbar: brief(visible) } : {}) };
   }
   async function refRead(sid, id, index, hub) {

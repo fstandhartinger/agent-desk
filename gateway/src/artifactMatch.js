@@ -43,14 +43,22 @@ export function significantTokens(text) {
   return out.slice(0, 12);
 }
 
+/** The sound fold only for words of five letters or more: "gold", "cold" and "kolt" are three words, "reax" and "real" too. */
+const soundOf = (word) => {
+  const w = String(word ?? '').toLowerCase();
+  return w.length >= 5 && !/\d/.test(w) ? fold(w) : w.replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 's');
+};
+
 /** How well one query token fits a list of folded words: 1 = same sound, 0.7-0.99 = close, 0 = no. */
 function tokenFit(token, folded) {
-  const t = fold(token);
+  const t = soundOf(token);
   let best = 0;
   for (const w of folded) {
     if (w === t) return 1;
-    if (t.length >= 4 && w.length >= 4 && (w.startsWith(t) || t.startsWith(w))) { best = Math.max(best, 0.85); continue; }
-    if (t.length < 4 || /\d/.test(t)) continue; // short words and numbers must match exactly
+    if (t.length >= 5 && w.length >= 5 && (w.startsWith(t) || t.startsWith(w))) { best = Math.max(best, 0.85); continue; }
+    if (/\d/.test(t)) continue; // numbers must match exactly
+    // short words: the sound fold only with the same first letter and at most two edits ("log"/"lock" yes; "gold"/"cold", "reax"/"real" no)
+    if (t.length < 5 || w.length < 5) { if (t.length >= 3 && t[0] === w[0] && fold(t) === fold(w) && distance(t, w, 2) <= 2) best = Math.max(best, 0.85); continue; }
     const d = distance(t, w, 2);
     const sim = 1 - d / Math.max(t.length, w.length);
     if (d <= 2 && sim >= 0.7) best = Math.max(best, sim);
@@ -59,17 +67,23 @@ function tokenFit(token, folded) {
 }
 
 /** Score 0..1 of a query against title and summary (title counts fully, summary 0.6); also whether at least one token fits well. */
-export function fuzzyScore(tokens, { title = '', summary = '' }) {
-  if (!tokens.length) return 0;
-  const titleWords = wordsOf(title).map(fold);
-  const bodyWords = wordsOf(String(summary).slice(0, 800)).map(fold);
+export function fuzzyScore(tokens, item) { return fuzzyDetail(tokens, item).score; }
+
+/** {score, numberMiss}: a number in the query ("1.2") that neither title nor summary contains cuts the score to 40 % (the 1.3 card is not the 1.2 card). */
+export function fuzzyDetail(tokens, { title = '', summary = '' }) {
+  if (!tokens.length) return { score: 0, numberMiss: false };
+  const titleWords = wordsOf(title).map(soundOf);
+  const bodyWords = wordsOf(String(summary).slice(0, 800)).map(soundOf);
   let sum = 0, strong = 0;
   for (const token of tokens) {
     const fit = Math.max(tokenFit(token, titleWords), 0.6 * tokenFit(token, bodyWords));
     sum += fit;
     if (fit >= 0.7) strong += 1;
   }
-  return strong ? sum / tokens.length : 0;
+  if (!strong) return { score: 0, numberMiss: false };
+  const numbers = tokens.filter(t => /\d/.test(t)), all = new Set([...titleWords, ...bodyWords]);
+  const numberMiss = numbers.some(n => !all.has(soundOf(n)));
+  return { score: (sum / tokens.length) * (numberMiss ? 0.4 : 1), numberMiss };
 }
 
 /** What a query is when it names an artifact directly: {id} for a# / six hex with a digit, {card} for a card number. */

@@ -10,7 +10,7 @@ import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
-import { SETTLE_MS } from '../voiceActions.js';
+import { deskStamp, SETTLE_MS } from '../voiceActions.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -637,7 +637,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }, HARD_CAP_MS);
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
     trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
-    Promise.resolve(trace.ready).then((info) => { if (info?.aid) sendJson({ type: 'session', aid: info.aid }); }).catch(() => {}); // ready never rejects; the id is a courtesy
+    Promise.resolve(trace.ready).then((info) => { if (info?.aid) { sendJson({ type: 'session', aid: info.aid }); void deskStamp(makeCtx(page)).catch(() => /* lookup failed: the first prompt looks it up */ null); } }).catch(() => {}); // ready never rejects; the id is a courtesy
   }
 
   /**
