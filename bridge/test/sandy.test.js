@@ -107,7 +107,7 @@ test('skills.list / skills.read: names validated, files restricted, symlinked sk
 // ---- ops --------------------------------------------------------------------------------------------------------------
 
 test('ops: fixed id -> argv map, unknown ids refused, no shell metacharacters ever reach an argv', () => {
-  assert.deepEqual(Object.keys(ops.COMMANDS).sort(), ['asks_open', 'board_threads', 'disk', 'jobs_running', 'quota_status', 'sched_list']);
+  assert.deepEqual(Object.keys(ops.COMMANDS).sort(), ['asks_open', 'board_threads', 'disk', 'jobs_running', 'load', 'quota_status', 'sched_list', 'units']);
   for (const id of Object.keys(ops.COMMANDS)) {
     const argv = ops.buildArgv(id);
     assert.ok(path.isAbsolute(argv[0]), id);

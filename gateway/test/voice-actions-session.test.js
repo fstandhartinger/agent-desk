@@ -198,11 +198,11 @@ test('the Gemini research cap does not count the action tools', async (t) => {
 
 test('voiceOnly never reaches a provider schema; the text chat gets no voice tools; outside a voice session both refuse', async () => {
   const voiceOnly = TOOL_DEFS.filter((t) => t.voiceOnly).map((t) => t.name);
-  assert.deepEqual(voiceOnly, ['output_main_agent_prompt', 'start_agent_job']);
+  assert.deepEqual(voiceOnly, ['output_main_agent_prompt', 'start_agent_job', 'computer_task']);
   assert.ok(!JSON.stringify(toolsOf(TOOL_DEFS)).includes('voiceOnly'));
   assert.ok(!JSON.stringify(geminiDeclarations(TOOL_DEFS)).includes('voiceOnly'));
   for (const name of voiceOnly) {
-    const r = await runTool(name, name === 'start_agent_job' ? { title: 't', prompt: 'p' } : { text: 'x' }, { audit() {}, hub: { call() { throw new Error('must not be called'); } } });
+    const r = await runTool(name, name === 'start_agent_job' ? { title: 't', prompt: 'p' } : name === 'computer_task' ? { goal: 'x' } : { text: 'x' }, { audit() {}, hub: { call() { throw new Error('must not be called'); } } });
     assert.equal(r.ok, false);
     assert.match(r.content, /nur in einem Sprachgespräch/);
   }

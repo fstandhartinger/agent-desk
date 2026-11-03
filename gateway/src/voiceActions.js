@@ -25,11 +25,11 @@ const START = '(?:start|starte\\w*|los|leg\\w*|schick\\w*|lass\\w*|mach\\w*|erle
 const JOB_STRONG = new RegExp(`\\bagent(?:en)?[\\s-]*j[oa]b|\\b${START}\\b.{0,80}\\b(?:auf|on)\\s+(?:${SERVER})\\b|\\b(?:auf|on)\\s+(?:${SERVER})\\b.{0,80}\\b${START}\\b`, 'i');
 export const JOB_TRIGGER = new RegExp(`\\b${CODE}\\b|${JOB_STRONG.source}`, 'i');
 // A question about the product is no order. "Kannst du das mit Claude Code machen?" is an order, so "kann" is not in the list.
-const ABOUT = /^\s*(?:und\s+)?(?:was|wie|warum|wieso|weshalb|wann|wer|welche\w*|woher|erklär\w*|erzähl\w*)\b/i;
+export const ABOUT = /^\s*(?:und\s+)?(?:was|wie|warum|wieso|weshalb|wann|wer|welche\w*|woher|erklär\w*|erzähl\w*)\b/i;
 
 const TRIGGERS = { output_main_agent_prompt: MAIN_TRIGGER, start_agent_job: JOB_TRIGGER };
 
-const defaultClock = { now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
+export const defaultClock = { now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
 const norm = (t) => String(t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const words = (t) => new Set(norm(t).split(' ').filter(Boolean));
 export function jaccard(a, b) {
@@ -104,13 +104,13 @@ export function checkTrigger(name, spoken, now = Date.now()) {
   return { ok: true, entries };
 }
 export const hasTrigger = (name, spoken, now) => checkTrigger(name, spoken, now).ok;
-const release = (g, name) => { for (const e of g.entries ?? []) if (e.used) delete e.used[name]; };
+export const release = (g, name) => { for (const e of g.entries ?? []) if (e.used) delete e.used[name]; };
 
 /**
  * The shared gate. {ok:true, spoken} when the tool may act now, else a ready {ok:false} tool result.
  * Order: voice session -> not a fragment's / an old question's call -> settle (he may still be talking) -> trigger in his words.
  */
-async function gate(name, ctx, clock) {
+export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigger(name, spoken, now), extraSay = {}) {
   const vt = ctx.voiceTurn;
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
@@ -130,18 +130,18 @@ async function gate(name, ctx, clock) {
   if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); }
   if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
-  const check = checkTrigger(name, spoken, clock.now());
-  if (!check.ok) {
+  const verdict = check(spoken, clock.now());
+  if (!verdict.ok) {
     const say = {
       'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',
       'means-main-agent': 'Nichts gestartet: Florian meint seinen Main Agent, die Claude-Code-Sitzung in VS Code. Rufe stattdessen output_main_agent_prompt auf.',
       used: 'Für diesen Satz ist das schon passiert; kein zweites Mal. Sag nur einen kurzen Satz.',
       question: 'Nichts gestartet: das war eine Frage über Claude Code, kein Auftrag. Beantworte sie.',
     };
-    return { refused: refuse(ctx, name, check.why, say[check.why]) };
+    return { refused: refuse(ctx, name, verdict.why, extraSay[verdict.why] ?? say[verdict.why] ?? 'Nichts passiert.') };
   }
-  for (const e of check.entries) e.used = { ...e.used, [name]: true };
-  return { ok: true, spoken, vt, entries: check.entries };
+  for (const e of verdict.entries) e.used = { ...e.used, [name]: true };
+  return { ok: true, spoken, vt, entries: verdict.entries, text: verdict.text };
 }
 
 // ---- what was done recently in a session (dedupe); an entry is kept while its action is pending ----
@@ -172,9 +172,14 @@ const PROMPT_FAIL = {
   timeout: 'keine Rückmeldung vom Screen Agent, unklar ob etwas getippt wurde',
 };
 
+// During a computer run and for 5 minutes after it, these two tools would need the app's confirm (code on the overlay). That confirm exists only for
+// computer actions, so here they stay closed: text the loop could have influenced must not reach a prompt box or start a job unconfirmed.
+const guardedOut = (g, ctx, name) => { release(g, name); return refuse(ctx, name, 'computer-guard', 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach sind Prompts an den Main Agent und neue Jobs gesperrt. Sag Florian in einem Satz, dass er es danach noch einmal sagen kann.'); };
+
 async function mainPrompt({ text }, ctx, clock) {
   const g = await gate('output_main_agent_prompt', ctx, clock);
   if (g.refused) return g.refused;
+  if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'output_main_agent_prompt');
   const body = String(text ?? '').trim();
   if (!body || body.length > 8000) return release(g, 'output_main_agent_prompt'), out(false, 'Der Text muss 1 bis 8000 Zeichen lang sein. Nichts passiert.');
   const sid = ctx.sid ?? 'desk', now = clock.now();
@@ -211,6 +216,7 @@ const CARD_WORD = { sent: 'gesendet', queued: 'unterwegs', pending: 'unterwegs',
 async function agentJob({ title, prompt, host }, ctx, clock) {
   const g = await gate('start_agent_job', ctx, clock);
   if (g.refused) return g.refused;
+  if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'start_agent_job');
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   const p = String(prompt ?? '').trim();
   if (!t || !p) return release(g, 'start_agent_job'), out(false, 'Titel und Auftrag dürfen nicht leer sein. Nichts gestartet.');

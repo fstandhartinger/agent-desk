@@ -21,7 +21,7 @@ const knowledgeMod = await import('../../bridge/src/knowledge.js');
 
 // chats_search/chat_read/discord_read call the bridge through own handlers (fan-out, host refs, two methods); the
 // 'whatever runTool sends' test below still checks their params against METHOD_PARAMS.
-const GATEWAY_ONLY = new Set(['screen_context', 'look_at_screen', 'current_state', 'artifact_context', 'artifact_resolve', 'artifact_search', 'artifact_ref_read', 'desk_status', 'session_trace', 'explainer_point', 'explainer_context', 'claude_task', 'claude_status', 'output_main_agent_prompt', 'start_agent_job', 'canvas_render', 'canvas_draw', 'web_read', 'handoff_propose', 'chats_search', 'chat_read', 'discord_read']);
+const GATEWAY_ONLY = new Set(['screen_context', 'look_at_screen', 'current_state', 'artifact_context', 'artifact_resolve', 'artifact_search', 'artifact_ref_read', 'desk_status', 'session_trace', 'explainer_point', 'explainer_context', 'claude_task', 'claude_status', 'output_main_agent_prompt', 'start_agent_job', 'computer_task', 'canvas_render', 'canvas_draw', 'web_read', 'handoff_propose', 'chats_search', 'chat_read', 'discord_read']);
 const today = new Date().toISOString().slice(0, 10);
 const sample = (spec) => spec.enum?.[0] ?? ({ string: 'x', integer: 3, boolean: true }[spec.type]);
 const typeOf = (value) => (Number.isInteger(value) ? 'integer' : typeof value);

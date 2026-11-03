@@ -11,6 +11,7 @@ import { proposeHandoff } from './handoff.js';
 import { claudeProposalStore, proposalEvent } from './claudeProposal.js';
 import { describeSession } from './trace.js';
 import { runVoiceAction } from './voiceActions.js';
+import { computerTask } from './computer/tool.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -93,6 +94,8 @@ export const TOOL_DEFS = [
     parameters: obj({ text: str('Der vollständige, eigenständige Prompt (1 bis 8000 Zeichen)', { minLength: 1, maxLength: 8000 }) }, ['text']) },
   { name: 'start_agent_job', voiceOnly: true, description: 'Startet SOFORT einen echten Claude-Code-Job auf den Servern, ohne Bestätigungsklick (Florian will das so). Nur wenn Florian "mit Claude Code" (ohne zu sagen, welche Sitzung) oder "starte einen Agent Job auf Sandy/LeChonk" gesagt hat, sonst passiert nichts. NICHT für Main Agent / Hauptagent / Stabschef: das ist output_main_agent_prompt. Florian bekommt eine Telegram-Karte. Lies den Auftrag nicht vor. Schreibe keine Repo- oder Ordnerpfade aus dem Gedächtnis hinein (nur Pfade, die Florian oder ein Werkzeug genannt hat) und lass "IDs" als "IDs" stehen, benenne nichts um. Die Sitzungs-ID hängt der Desk selbst an.',
     parameters: obj({ title: str('Kurzer ENGLISCHER Jobtitel, höchstens 60 Zeichen, einfache Wörter, keine IDs oder Pfade', { maxLength: 60 }), prompt: str('Die vollständige, eigenständige Aufgabe in Florians Sprache, mit den a#-IDs vom Bildschirm und dem, was entschieden wurde'), host: str('auto (Standard), lechonk oder sandy. Sandy nur, wenn der Job etwas braucht, das nur Sandy hat (Telegram-Karten, Discord-Heimroute, Coolify-Steuerung, GPU-Broker-Schlüssel, Wallets); lechonk, wenn Florian es sagt; sonst auto.', { enum: ['auto', 'lechonk', 'sandy'] }) }, ['title', 'prompt']) },
+  { name: 'computer_task', voiceOnly: true, description: 'Übernimmt Florians Computer (Maus, Tastatur, Chrome) für einen Auftrag, den er gerade gesagt hat: "übernimm den Computer", "steuere", "am Rechner", "für mich klicken", oder ein Satz, der mit "klick", "öffne", "tippe" oder "geh auf" beginnt. Nur dann, sonst passiert nichts; Fragen über das Thema sind kein Auftrag. Ein eigener Agent arbeitet nach Florians WÖRTLICHEM Satz, nicht nach deinem goal. Starte sofort ohne Rückfrage und lies nichts vor. Nur im Screen Agent und nur, wenn Florian die Computer-Steuerung dort erlaubt hat; sonst sagt das Werkzeug es. Fragt der Desk dich später um eine Bestätigung, sprich den Text wörtlich, ohne ein Wort mehr.',
+    parameters: obj({ goal: str('Kurz, worum es geht (wird nur protokolliert)', { maxLength: 200 }) }, ['goal']) },
   // --- end voice actions ---
   { name: 'canvas_draw', async: true, description: 'Draw a visual on the canvas next to the conversation: flow, architecture, sequence, pie, bar, line, table, timeline, sankey or a free SVG sketch. You CAN draw - never say you cannot. Call it on your own, without asking, whenever you explain a flow, an architecture, a comparison or numbers; keep talking meanwhile. Returns at once; a drawing agent builds it in the background (it may read ledger/code/board itself). Describe precisely WHAT to draw, WHICH parts and WHICH numbers from which tools. The drawing is simple by default (at most 5 boxes) with an optional detailed version behind a Details button. Reuse the id to update the same canvas.',
     parameters: obj({ request: str('Precise description: what to draw, which parts/steps/numbers, which source'), kind: str('Preferred kind', { enum: CANVAS_KINDS }), id: str('Slug a-z0-9-; reuse to update an existing canvas') }, ['request']) },
@@ -136,7 +139,7 @@ function READ_TOOL_DEFS() {
 /** Old tool names that still work (exact match only). */
 const NAME_ALIASES = { search_chats: 'chats_search' };
 /** Fuzzy name recovery never lands on these: a misspelt name must not propose a handoff or start/steer a Claude session. */
-const NO_FUZZY_TARGET = new Set(['handoff_propose', 'claude_task', 'output_main_agent_prompt', 'start_agent_job']);
+const NO_FUZZY_TARGET = new Set(['handoff_propose', 'claude_task', 'output_main_agent_prompt', 'start_agent_job', 'computer_task']);
 
 // Recover a unique closest spelling before execution and before emitting UI events.
 // Models invent "search_chunk_placeholder" and the like: mapped to the real tool of the same intent (never to a tool with side effects).
@@ -236,6 +239,7 @@ const STATUS = {
   claude_task: () => 'Ich übergebe das an Claude Code …',
   output_main_agent_prompt: () => 'Ich tippe das ein …',
   start_agent_job: () => 'Ich starte den Job …',
+  computer_task: () => 'Ich übernehme den Computer …',
   claude_status: () => 'Ich prüfe die Claude-Sessions …',
   canvas_draw: () => 'Ich zeichne dir das auf …',
   canvas_render: () => 'Ich zeichne dir das auf …',
@@ -285,6 +289,7 @@ const ACTIVITY = {
   claude_status: () => 'Prüfe die Claude-Sitzungen',
   output_main_agent_prompt: () => 'Schreibe den Prompt für den Main Agent',
   start_agent_job: ({ title }) => `Starte Agent-Job: ${snip(title, 40)}`,
+  computer_task: () => 'Übernehme den Computer',
   canvas_draw: ({ request }) => `Zeichne: ${snip(request, 45)}`,
   canvas_render: ({ title }) => `Zeichne: ${snip(title, 45)}`,
   ledger_spend: () => 'Hole die Zahlen aus dem Ledger',
@@ -537,6 +542,7 @@ export async function runTool(name, args, ctx) {
     const pseudo = pseudoPathRefusal(name, args);
     if (pseudo) return pseudo;
     const clean = validate(def, args);
+    if (name === 'computer_task') return await computerTask(clean, ctx); // trigger, run and trace live in computer/
     if (def.voiceOnly) return await runVoiceAction(name, clean, ctx); // gate, audit, trace and redaction live there
     const started = Date.now();
     let host = 'gateway';

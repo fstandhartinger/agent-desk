@@ -32,6 +32,11 @@ export const cfg = {
   visionFreshWaitMs: () => Number(env('DESK_VISION_FRESH_WAIT_MS', '5500')),
   allowedModels: () => [cfg.textModel(), ...env('DESK_ALLOWED_MODELS').split(',').map((m) => m.trim()).filter(Boolean)],
   reasoningEffort: () => env('DESK_TEXT_REASONING', 'low'),
+  // computer-use loop (item F): exact allowlist, only anthropic ids without a route suffix; DESK_COMPUTER_MODEL cannot leave it
+  computerModels: () => { const ok = env('DESK_COMPUTER_MODELS', 'anthropic/claude-sonnet-5').split(',').map((m) => m.trim()).filter((m) => /^anthropic\/[a-z0-9][a-z0-9.-]*$/.test(m)); return ok.length ? ok : ['anthropic/claude-sonnet-5']; },
+  computerModel: () => { const list = cfg.computerModels(), m = env('DESK_COMPUTER_MODEL').trim(); return list.includes(m) ? m : list[0]; },
+  computerRunUsd: () => Number(env('DESK_COMPUTER_RUN_USD', '1.5')),
+  computerDayUsd: () => Number(env('DESK_COMPUTER_DAY_USD', '5')),
   dailyCapUsd: () => Number(env('DESK_DAILY_USD_CAP', '15')),
   vizGraceMs: () => Number(env('DESK_VIZ_GRACE_MS', '3500')),
   openrouterKey: () => env('OPENROUTER_API_KEY'),

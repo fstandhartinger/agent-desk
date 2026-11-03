@@ -7,6 +7,7 @@ import { originOk, readSession, validSessionId, issueCookie } from './auth.js';
 import { readBody, readJson, sendJson, clientIp } from './http.js';
 import { createScreenVision } from './screenVision.js';
 import { createBriefing } from './briefing.js';
+import { createComputer, validateResult, MAX_RESULT_BYTES } from './computer/run.js';
 import { lateTs } from './trace.js';
 import { audit } from './audit.js';
 import { short } from './redact.js';
@@ -33,7 +34,7 @@ function chunkInfo(raw) {
 }
 const SCOPES = ['dictate', 'dictionary', 'screen', 'exists'];
 const TTL = 90 * 24 * 3600_000;
-export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }) } = {}) {
+export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }), computer = createComputer({ vision, hub, now, audit }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
   function rate(key, max) {
@@ -46,6 +47,10 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     if (++entry.n > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
   }
   const verified = new Map();
+  // The `computer` scope (item F) is switched by the device itself from its tray (POST /api/device/computer {enabled}) and lives here, not in the registry
+  // (the registry knows four scopes). A gateway restart clears it: the app switches it on again. Off by default, always.
+  const computerOn = new Set();
+  const withScopes = record => (computerOn.has(record.deviceId) ? { ...record, scopes: [...record.scopes, 'computer'] } : record);
   const busy = new Set(); let inFlight = 0;
   async function limited(record, kind, work) {
     const key = `${record.deviceId}:${kind}`;
@@ -86,7 +91,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
   // Central failure log: every error of a /api/device/ route leaves device.error {path,status,code,message,ms,bytes} (stdout audit + the device log of the day).
   const errSeen = new Map();
   const dlog = (deviceId, type, data) => traces?.deviceLog?.(deviceId, [{ type, data, ts: new Date(now()).toISOString() }], 'gateway');
-  const SHAPES = [[/\/session\/[^/]+\//, '/session/:sid/'], [/\/commands\/p[0-9a-f]{16}\//, '/commands/:id/'], [/\/revoke\/.+$/, '/revoke/:id'], [/\/learned\/.+$/, '/learned/:term']];
+  const SHAPES = [[/\/session\/[^/]+\//, '/session/:sid/'], [/\/commands\/p[0-9a-f]{16}\//, '/commands/:id/'], [/\/computer\/c[0-9a-f]{16}\//, '/computer/:id/'], [/\/revoke\/.+$/, '/revoke/:id'], [/\/learned\/.+$/, '/learned/:term']];
   function reportError(req, url, ctx, err) {
     const status = Number.isInteger(err?.status) ? err.status : 500;
     let ctxIp; try { ctxIp = clientIp(req); } catch { /* socket already gone */ }
@@ -172,7 +177,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       } else if (path.startsWith('/api/device/revoke/') && req.method === 'DELETE') {
         const id = path.slice('/api/device/revoke/'.length);
         if (!/^[0-9a-f-]{36}$/i.test(id)) throw fail('Ungültiges Gerät.');
-        await registry(`/v1/devices/${id}`, {}, 'DELETE'); verified.clear(); sendJson(res, 200, { ok: true });
+        await registry(`/v1/devices/${id}`, {}, 'DELETE'); verified.clear(); computerOn.delete(id); sendJson(res, 200, { ok: true });
       } else if (path === '/api/device/learned' && req.method === 'GET') {
         sendJson(res, 200, { items: (await dictionary()).items.filter(item => item.source === 'learned') });
       } else if (path.startsWith('/api/device/learned/') && req.method === 'DELETE') {
@@ -204,7 +209,18 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     ctx.deviceId = record.deviceId;
-    rate(`device:${record.deviceId}`, 120);
+    rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // a computer run adds a poll, a beat and a result per step
+    if (path === '/api/device/computer' && req.method === 'POST') {
+      // device token only (no scope: this is how the scope is switched); the answer says what is now on
+      const body = await readJson(req, 512);
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => k !== 'enabled') || typeof body.enabled !== 'boolean') throw fail('Ungültige Angabe.');
+      if (body.enabled) computerOn.add(record.deviceId); else computerOn.delete(record.deviceId);
+      audit({ action: 'device.computer', detail: `${record.deviceId} enabled=${body.enabled}`, actor: 'device' });
+      dlog(record.deviceId, 'device.computer', { enabled: body.enabled });
+      sendJson(res, 200, { ok: true, enabled: body.enabled });
+      return true;
+    }
+    record = withScopes(record);
     if (path === '/api/device/web-session' && req.method === 'POST') {
       // Recheck the registry even on a warm native cache. Bind the browser session to the device hash so
       // registry revocation also stops Desk HTTP/voice authentication after process restarts.
@@ -216,9 +232,11 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     const target = /^\/api\/device\/session\/([^/]+)\/(screen(?:\/clear)?|screen\/private|highlight|trace|frame|commands|briefing)$/.exec(path);
     const cmdResult = /^\/api\/device\/session\/([^/]+)\/commands\/(p[0-9a-f]{16})\/result$/.exec(path);
-    const scope = target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' ? 'dictate' : path.split('/')[3];
+    const computerRes = /^\/api\/device\/session\/([^/]+)\/computer\/(c[0-9a-f]{16})\/result$/.exec(path);
+    const computerBeat = /^\/api\/device\/session\/([^/]+)\/computer\/beat$/.exec(path);
+    const scope = computerRes || computerBeat ? 'computer' : target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' ? 'dictate' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
-    if ((target || cmdResult) && !validSessionId((target ?? cmdResult)[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
+    if ((target || cmdResult || computerRes || computerBeat) && !validSessionId((target ?? cmdResult ?? computerRes ?? computerBeat)[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
     if (path === '/api/device/exists' && req.method === 'GET') {
       const ids = deviceIds(url.searchParams.get('ids') === '' ? [] : (url.searchParams.get('ids') ?? '').split(','));
       const result = ids.length ? await registry(`/v1/exists?ids=${ids.join(',')}`) : { known: [] };
@@ -246,6 +264,12 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     } else if (cmdResult && req.method === 'POST') {
       rate(`cmdresult:${record.deviceId}`, 60);
       sendJson(res, 200, vision.commandResult(cmdResult[1], record, cmdResult[2], await readJson(req, 2048)));
+    } else if (computerRes && req.method === 'POST') {
+      rate(`computerres:${record.deviceId}`, 240);
+      sendJson(res, 200, vision.computerResult(computerRes[1], record, computerRes[2], await readJson(req, MAX_RESULT_BYTES + 8192)));
+    } else if (computerBeat && req.method === 'POST') {
+      rate(`computerbeat:${record.deviceId}`, 120);
+      sendJson(res, 200, computer.beat(computerBeat[1], record, await readJson(req, 512)));
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
       vision.clear(target[1], (await readJson(req, 2048).catch(() => /* ignored */ null))?.why);
       sendJson(res, 200, { ok: true });
@@ -334,5 +358,5 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary, authorizeSession, vision, briefing, flushCaptionStats: (deviceId) => flushStats(deviceId) };
+  return { route, dictionary, authorizeSession, vision, briefing, computer, computerEnabled: id => computerOn.has(id), flushCaptionStats: (deviceId) => flushStats(deviceId) };
 }
