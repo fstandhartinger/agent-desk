@@ -13,6 +13,13 @@ const FIRST_FLUSH_MS = 3000; // session.ready (the model name) arrives within th
 const RECENT = 200; // local ring for session_trace "current" when the registry cannot answer
 const CLIENT_CAP = 3000; // client + screen-agent events accepted per session
 const DEVICE_CAP = 20000; // the per-day device log lives all day and takes the app's retry queue too
+const DEVICE_RESERVE = 3000; // of those, only the gateway's own events and *.error / *.failed may use the last 3000: one retry loop must not blind the day
+const CHATTER = /^(?:screen\.frame|screen\.ids|mic\.)/; // dropped first once the log is half full
+const REFUSED_RETRY_MS = 5 * 60_000;
+const URGENT = /\.(?:error|failed)$/;
+let seqBaseLast = 0;
+/** Per-boot start of the seq counters of a device trace: the registry hands the same day session to every restart, and (session, source, seq) is its key. */
+const nextSeqBase = () => (seqBaseLast = Math.max(Date.now() * 1000, seqBaseLast + 1_000_000)); // < 2^53 until the year 2255
 export const LATE_MS = 24 * 3600_000; // a retry queue may deliver events up to a day old
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const SOURCES = new Set(['gateway', 'client', 'screen-agent']);
@@ -84,9 +91,13 @@ export function clampTs(ts, at, slackMs = 5 * 60_000) {
 export function lateTs(ts, at) {
   const t = typeof ts === 'number' ? ts : Date.parse(ts);
   if (Number.isFinite(t) && t < at - 5 * 60_000 && t >= at - LATE_MS) return { ts: new Date(t).toISOString(), late: true };
+  // older than a day (a weekend's retry queue): stamped now but flagged late with its real time, never shown as a live event
+  if (Number.isFinite(t) && t < at - LATE_MS) return { ts: new Date(at).toISOString(), late: true, origTs: new Date(t).toISOString() };
   return { ts: clampTs(ts, at), late: false };
 }
-/** "Geräteprotokoll 3 Nov" for the UTC day `day` (YYYY-MM-DD). */
+/** The Berlin calendar day (YYYY-MM-DD) of `ms`: the registry's device session changes at Berlin midnight, so the gateway's log must too. */
+export const berlinDay = (ms) => { const p = berlinParts(ms); return `${p.year}-${p.month}-${p.day}`; };
+/** "Geräteprotokoll 3 Nov" for the Berlin day `day` (YYYY-MM-DD). */
 export const deviceLogTitle = (day) => `Geräteprotokoll ${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,6 +150,8 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     let closed = false;
     let fellBack = false;
     let refused = false;
+    let refusedAt = 0;
+    let capNoted = false;
     const cap = kind === 'device' ? DEVICE_CAP : CLIENT_CAP;
     let timer = null;
     let inflight = null;
@@ -150,8 +163,9 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     const ready = new Promise((resolve) => { resolveReady = resolve; });
     if (!configured()) resolveReady({});
 
+    const seqBase = kind === 'device' ? nextSeqBase() : 0;
     const stamp = (source, type, data, turn, ts) => {
-      seqs[source] = (seqs[source] ?? 0) + 1;
+      seqs[source] = (seqs[source] ?? seqBase) + 1;
       return { seq: seqs[source], ts: ts ?? iso(now()), source, turn: Number.isFinite(turn) ? turn : null, type, data: boundData(data) };
     };
     const push = (rec) => {
@@ -191,15 +205,17 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
           while (buffer.length) {
             if (dropped) { const n = dropped; dropped = 0; buffer.unshift(stamp('gateway', 'trace.dropped', { count: n })); }
             const batch = buffer.slice(0, BATCH);
-            await registry(`/v1/sessions/${aid.slice(2)}/events`, { method: 'POST', body: { events: batch }, timeoutMs: 5000 });
+            const res = await registry(`/v1/sessions/${aid.slice(2)}/events`, { method: 'POST', body: { events: batch }, timeoutMs: 5000 });
             buffer.splice(0, batch.length);
             sent += batch.length;
+            // (session, source, seq) already stored: the events were NOT kept. Leave a marker in the trace instead of losing them silently.
+            if (res?.duplicates > 0) { buffer.push(stamp('gateway', 'trace.duplicates', { count: res.duplicates, batch: batch.length, accepted: res.accepted ?? null })); log(`trace-duplicates ${JSON.stringify({ kind, aid, count: res.duplicates, batch: batch.length })}`); }
           }
           fails = 0;
           return true;
         } catch (err) {
           // the registry does not know this kind (yet): keep the local audit line, drop the events, stop asking until the next day
-          if (kind === 'device' && !aid && err?.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status)) { refused = true; buffer = []; closed = true; clearTimeout(timer); timer = null; open.delete(self); fallback(`kind-refused-${err.status}`); return true; }
+          if (kind === 'device' && !aid && err?.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status)) { refused = true; refusedAt = now(); buffer = []; closed = true; clearTimeout(timer); timer = null; open.delete(self); fallback(`kind-refused-${err.status}`); return true; }
           fails = Math.min(fails + 1, 5); if (buffer.length || !aid) arm(); return false;
         }
       })().finally(() => { inflight = null; });
@@ -239,8 +255,14 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       external(events, source = 'screen-agent') {
         try {
           if (closed || !SOURCES.has(source)) return;
+          const reserve = kind === 'device' ? DEVICE_RESERVE : 0;
           for (const e of events) {
-            if (foreign >= cap) break;
+            // the gateway's own events and errors may use the reserve; chatter goes first once the log is half full
+            const mine = source === 'gateway' || URGENT.test(e.type);
+            if (foreign >= cap - (mine ? 0 : reserve) || (kind === 'device' && !mine && foreign >= cap / 2 && CHATTER.test(e.type))) {
+              if (!capNoted && foreign >= cap - (mine ? 0 : reserve)) { capNoted = true; push(stamp('gateway', 'trace.capped', { foreign, cap, reserve })); }
+              continue;
+            }
             foreign += 1;
             push(stamp(source, e.type, e.data, e.turn, e.ts));
           }
@@ -263,6 +285,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
       get started() { return started; },
       get closed() { return closed; },
       get refused() { return refused; },
+      get refusedAt() { return refusedAt; },
       get kind() { return kind; },
       nextTurn: () => (turnNo += 1),
       ready,
@@ -291,12 +314,12 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     return entry.trace;
   }
 
-  /** Events with no session: one trace of kind "device" per UTC day and device, created on the first event. */
+  /** Events with no session: one trace of kind "device" per Berlin day and device, created on the first event. */
   const devlogs = new Map(); // "deviceId:YYYY-MM-DD" -> trace
   function deviceLog(deviceId, events, source = 'screen-agent') {
     try {
       if (!deviceId || !events?.length || !SOURCES.has(source)) return false;
-      const day = iso(now()).slice(0, 10), key = `${deviceId}:${day}`;
+      const day = berlinDay(now()), key = `${deviceId}:${day}`;
       for (const [k, t] of devlogs) if (!k.endsWith(`:${day}`)) { devlogs.delete(k); void t.close(); } // yesterday's log ends with the first event of today
       let trace = devlogs.get(key);
       if (!trace) {
@@ -305,8 +328,9 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
         trace.event('session.start', { title: deviceLogTitle(day), client: { device: deviceId } });
         devlogs.set(key, trace);
       }
+      if (trace.refused && now() - trace.refusedAt >= REFUSED_RETRY_MS) { devlogs.delete(key); return deviceLog(deviceId, events, source); } // the registry may have been migrated since
       if (trace.refused || trace.closed) return false;
-      trace.external(events.map((e) => (e.late ? { ...e, data: { ...e.data, late: true } } : e)), source);
+      trace.external(events.map((e) => (e.late ? { ...e, data: { ...e.data, late: true, ...(e.origTs ? { origTs: e.origTs } : {}) } } : e)), source);
       return true;
     } catch { return false; /* the caller never depends on the log */ }
   }
@@ -349,7 +373,8 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
   const idOf = (q) => String(q).replace(/^a#/, '');
   const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.events) ? r.events : []);
   return {
-    open: openTrace, chat, attach, deviceLog, flushAll, bind, unbind, registry,
+    open: openTrace, chat, attach, deviceLog, startOf: (sid) => { const set = bySid.get(sid); return set?.size ? Math.min(...[...set].map((t) => t.startedAt)) : null; },
+    flushAll, bind, unbind, registry,
     configured,
     lookup: (q, extra = '') => registry(`/v1/sessions/lookup?q=${encodeURIComponent(q)}${extra}`),
     recent: (query = '') => registry(`/v1/sessions/recent${query}`),

@@ -36,14 +36,14 @@ const TTL = 90 * 24 * 3600_000;
 export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
-  function rate(key, max) {
+  function rate(key, max, cost = 1) {
     const time = now(), entry = hits.get(key);
     if (!entry || entry.until <= time) {
       for (const [k, v] of hits) if (v.until <= time) hits.delete(k);
       if (hits.size >= 5000) throw fail('Zu viele Anfragen.', 429);
-      hits.set(key, { n: 1, until: time + 60000 }); return;
+      hits.set(key, { n: cost, until: time + 60000 }); return;
     }
-    if (++entry.n > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
+    if ((entry.n += cost) > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
   }
   // chunks of one dictation: at most 60, the index must grow, and a device may start only a few dictations per hour (a looping app rotating ids)
   const chunkIds = new Map();
@@ -59,6 +59,20 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation' });
     if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing' });
     e.last = index;
+  }
+  // events per minute a device may write to the traces, and a short memory of what it sent: a re-sent batch (lost response) is not stored twice
+  const EVENTS_PER_MIN = 600, sent = new Map();
+  function unseen(deviceId, raw) {
+    if (!Array.isArray(raw) || raw.length > 100) return raw; // traceEvents rejects it
+    let ring = sent.get(deviceId);
+    if (!ring) { if (sent.size >= 100) sent.delete(sent.keys().next().value); ring = new Set(); sent.set(deviceId, ring); }
+    return raw.filter(e => {
+      if (!e || typeof e !== 'object' || e.ts === undefined) return true; // no timestamp: cannot tell a repeat from a new event
+      const key = `${e.type}|${e.ts}|${JSON.stringify(e.data ?? null).slice(0, 300)}`;
+      if (ring.has(key)) return false;
+      ring.add(key); if (ring.size > 2000) ring.delete(ring.values().next().value);
+      return true;
+    });
   }
   const verified = new Map();
   const busy = new Set(); let inFlight = 0;
@@ -277,14 +291,19 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       sendJson(res, 200, briefing.deviceIn(target[1], device, commandId, { blocked: artifacts.screen(target[1]).window?.blocked === true }));
     } else if (target && target[2] === 'trace' && req.method === 'POST') {
       rate(`trace:${record.deviceId}`, 60);
-      const events = traceEvents((await readJson(req, 256 * 1024)).events);
-      const fresh = events.filter(e => !e.late), late = events.filter(e => e.late); // a retry queue's old events belong to the day, not to this session
+      const raw = (await readJson(req, 256 * 1024)).events;
+      const events = traceEvents(unseen(record.deviceId, raw));
+      rate(`events:${record.deviceId}`, EVENTS_PER_MIN, events.length);
+      // a retry queue's old events belong to the day, not to this session; late ones that happened inside this session still belong to it
+      const from = traces?.startOf?.(target[1]) ?? Infinity, inside = e => e.late && !e.origTs && Date.parse(e.ts) >= from;
+      const fresh = events.filter(e => !e.late || inside(e)), late = events.filter(e => e.late && !inside(e));
       if (late.length) traces?.deviceLog(record.deviceId, late);
-      sendJson(res, 200, { ok: true, accepted: events.length, attached: (fresh.length && traces?.attach(target[1], fresh, { deviceId: record.deviceId })) || false, ...(late.length ? { late: late.length } : {}) });
+      sendJson(res, 200, { ok: true, accepted: events.length, attached: (fresh.length && traces?.attach(target[1], fresh, { deviceId: record.deviceId })) || false, ...(late.length ? { late: late.length } : {}), ...(Array.isArray(raw) && raw.length > events.length ? { duplicate: raw.length - events.length } : {}) });
     } else if (path === '/api/device/log' && req.method === 'POST') {
       // Events outside any voice/chat session (dictation, captions, the retry queue): straight into the device log of the day.
       rate(`log:${record.deviceId}`, 60);
-      const events = traceEvents((await readJson(req, 256 * 1024)).events);
+      const events = traceEvents(unseen(record.deviceId, (await readJson(req, 256 * 1024)).events));
+      rate(`events:${record.deviceId}`, EVENTS_PER_MIN, events.length);
       sendJson(res, 200, { ok: true, accepted: events.length, logged: traces?.deviceLog(record.deviceId, events) ?? false });
     } else if (path === '/api/device/caption' && req.method === 'POST') {
       rate(`caption:${record.deviceId}`, 60);
@@ -317,6 +336,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       artifacts.addHighlight(target[1], summary, all);
       sendJson(res, 200, { ok: true, summary, ids: all.map(id => `a#${id}`) });
     } else if (path === '/api/device/dictate' && req.method === 'POST') {
+      rate(`dictate-in:${record.deviceId}`, 130); // before the 1.9 MB body is read and parsed; single clips and chunks are limited exactly below
       if (!/^multipart\/form-data;\s*boundary=/i.test(req.headers['content-type'] ?? '')) throw fail('Multipart erforderlich.', 415);
       const bytes = await readBody(req, 60 * 32000 + 65536);
       let form;
