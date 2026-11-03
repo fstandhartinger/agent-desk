@@ -4,7 +4,7 @@ import { redact } from './redact.js';
 import { audit } from './audit.js';
 import { originOk } from './auth.js';
 import { fetchExplainerJson } from './explainer.js';
-import { directRef, fuzzyScore, significantTokens } from './artifactMatch.js';
+import { directRef, fuzzyDetail, significantTokens } from './artifactMatch.js';
 
 export const CONTEXT_TTL = 30 * 60_000;
 export const CONTEXT_MAX = 8; // ids kept per session; a new resolve adds in front, the oldest fall off
@@ -107,6 +107,30 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const parents = [...fresh.parents, ...(prior.parents ?? [])].filter((p, i, all) => all.findIndex(q => q.id === p.id) === i).slice(0, 12);
     return { ids, items, parents, unknown: fresh.unknown ?? [], invalid: fresh.invalid ?? [] };
   };
+  // Card numbers ("19209", "card:19209") become ids through the screen or the registry search. A pure-digit six-character string is a card
+  // number first and an id only when no card has that number (192090 must not open another card's id).
+  async function cardId(sid, number) {
+    const has = i => i.refs?.some(r => CARD_REF.exec(r.target)?.[1] === number);
+    const onScreen = screen(sid).items.find(has);
+    if (onScreen) return onScreen.id;
+    try { return (await registry(`/v1/search?q=${encodeURIComponent(number)}`)).items.find(has)?.id ?? null; } catch { return null; /* registry down: treated as not found, the caller reports it invalid */ }
+  }
+  async function withCards(sid, raw) {
+    const parts = (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map(p => typeof p === 'string' ? p.trim() : p);
+    const plain = [], cards = [];
+    for (const part of parts) {
+      const m = typeof part === 'string' && /^(?:card:(?:urgent:)?)?([1-9]\d{0,11})$/i.exec(part);
+      if (m) cards.push({ part, number: m[1], asId: m[1].length === 6 && !/^card:/i.test(part) }); else plain.push(part);
+    }
+    const { ids, invalid } = parseArtifactIds(plain);
+    for (const c of cards.slice(0, 8)) {
+      const found = await cardId(sid, c.number);
+      const id = found ?? (c.asId ? c.number : null);
+      if (!id) invalid.push(String(c.part).slice(0, 60)); else if (!ids.includes(id)) ids.push(id);
+    }
+    if (ids.length > 8) throw fail('Höchstens 8 Artefakte pro Anfrage.');
+    return { ids, invalid };
+  }
   async function resolve(sid, raw, depth = 1) {
     sweep();
     // Install a new generation before validation/I/O: an older, slower resolve cannot overwrite it. The context MERGES (newest first, up to
@@ -115,7 +139,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const record = { value: prior, expires: now() + CONTEXT_TTL };
     if (sessions.size >= 1000 && !sessions.has(sid)) sessions.delete(sessions.keys().next().value);
     sessions.set(sid, record);
-    const { ids, invalid } = parseArtifactIds(raw);
+    const { ids, invalid } = await withCards(sid, raw);
     if (![1, 2].includes(depth)) throw fail('depth muss 1 oder 2 sein.');
     const result = ids.length ? await registry(`/v1/resolve?ids=${ids.join(',')}&depth=${depth}`) : { items: [], unknown: [] };
     await expandCards(result.items);
@@ -158,17 +182,32 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
         else try { const r = await registry(`/v1/resolve?ids=${direct.id}&depth=1`); r.items.forEach(i => add(marked(i, 'id'))); unknown = r.unknown; } catch (err) { registryError = err; }
       }
     }
-    const tokens = significantTokens(text);
-    visible.map(item => ({ item, score: fuzzyScore(tokens, item) })).filter(x => x.score >= 0.3).sort((a, b) => b.score - a.score)
-      .forEach(({ item, score }) => add({ ...marked(item, 'bildschirm-unscharf'), score: Math.round(score * 100) / 100 }));
+    // Screen and registry hits are merged BY SCORE (a registry hit that fits all words beats a partial hit on the screen); a tie goes to the screen.
+    const tokens = significantTokens(text), minimum = tokens.length >= 3 ? 0.5 : 0.3;
+    const round = n => Math.round(n * 100) / 100;
+    const scored = [];
+    for (const item of visible) {
+      const { score, numberMiss } = fuzzyDetail(tokens, item);
+      if (score >= minimum) scored.push({ item: { ...marked(item, 'bildschirm-unscharf'), score: round(score), ...(numberMiss ? { unscharf: true } : {}) }, score, screen: 1 });
+    }
     try {
       const found = await registry(`/v1/search?q=${encodeURIComponent(direct?.card ?? text)}`);
-      found.items.forEach(i => add(marked(i, 'registry')));
+      for (const i of found.items) {
+        const { score, numberMiss } = fuzzyDetail(tokens, i);
+        const s = Number.isFinite(i.score) ? Math.max(i.score, score) : Math.max(score, 0.3);
+        scored.push({ item: { ...marked(i, 'registry'), score: round(s), ...(numberMiss ? { unscharf: true } : {}) }, score: s, screen: 0 });
+      }
       unknown = found.unknown.length ? found.unknown : unknown;
     } catch (err) { registryError = err; }
+    scored.sort((a, b) => b.score - a.score || b.screen - a.screen);
+    const directCount = hits.length;
+    for (const { item } of scored) add(item);
     if (!hits.length && registryError && !visible.length) throw registryError;
     const items = hits.slice(0, 20);
-    if (items.length) return { items, unknown, ...(registryError ? { hinweis: 'Die Registry-Suche war nicht erreichbar; das sind die Treffer vom Bildschirm.' } : {}) };
+    // two hits that are nearly equally good: the model asks or names both instead of picking one
+    const top = scored.filter(s => items.some(i => i.id === s.item.id));
+    const eindeutig = !directCount && top.length > 1 ? top[0].score - top[1].score > 0.1 : true;
+    if (items.length) return { items, unknown, ...(eindeutig ? {} : { eindeutig: false, hinweis: 'Mehrere ähnlich gute Treffer: nenne beide kurz oder frage nach, welche gemeint ist.' }), ...(registryError ? { hinweis: 'Die Registry-Suche war nicht erreichbar; das sind die Treffer vom Bildschirm.' } : {}) };
     return { items: [], unknown, ...(visible.length ? { hinweis: `Keine Treffer; sichtbar sind: ${brief(visible).map(v => `a#${v.id} ${v.title}`).join('; ')}`, sichtbar: brief(visible) } : {}) };
   }
   async function refRead(sid, id, index, hub) {

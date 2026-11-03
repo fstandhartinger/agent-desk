@@ -460,7 +460,7 @@ function parseJsonObject(text) {
 }
 
 /** Told to the agent with every canvas_draw result: the illustrator may find the drawing worthless and skip it. */
-export const DRAW_NOTE = 'Die Zeichnerin entscheidet selbst, ob die Zeichnung Florian etwas zeigt; kündige sie nicht an und sprich weiter mit Inhalt.';
+export const DRAW_NOTE = 'Ob eine Zeichnung entsteht, entscheidet die Zeichnerin selbst; sage weder "ich zeichne" noch "es gibt keine Zeichnung", kündige nichts an und sprich weiter mit Inhalt.';
 
 /** {skip:true, reason} when the illustrator judged the drawing worthless (value check), else null. */
 function skipOf(content) {
@@ -890,7 +890,8 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
           return { ok: true, skipped: true, reason: why, id: job.id ?? entry.id };
         }
       }
-      let outcome = judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
+      // a second skip after the explicit-draw retry is a rejected answer (the repair round asks once more), never a silent end
+      let outcome = skipOf(answer.content) ? { error: 'a drawing was asked for explicitly: no skip, answer with the CanvasSpec JSON object' } : judged(finish(answer.content, { job, used, corpus: corpusOf(), entities: entitiesOf() }));
       if (outcome.error) {
         audit({ action: 'canvas.repair', ip: job.ip, detail: `${entry.id}: ${outcome.error}` });
         const fallback = outcome.fallback;
@@ -1070,7 +1071,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
   const writable = (id) => onBus(id) && (!foreignOwner(id) || id === namedId); // an existing canvas this conversation may update
   const specOf = (id) => (id ? bus.latest().find((e) => e.id === id)?.spec ?? null : null);
   let entityStrikes = 0; // canvas_render answers of this turn rejected for invented names
-  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; /* ignored */ } };
+  const hosts = () => { try { return (illustrator.bridgeHosts?.() ?? []); } catch { return []; /* bridge hosts unavailable: none known */ } };
   /** What the agent's own canvas_render may name: the conversation, this turn's tool results, the page, the previous version. */
   const entityCorpus = (previous) => createCorpus({
     rich: [JSON.stringify(page ?? ''), pageFacts(page), previous ? JSON.stringify(previous) : '', ...memory.turnTexts(), ...memory.toolsUsed().map((t) => t.content)].join('\n'),

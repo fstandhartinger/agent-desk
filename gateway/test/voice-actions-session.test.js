@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { setEnv } from './helpers/env.js';
-const STAMP = '\n[Desk: diese Sitzung a#0a1b2c; Protokoll: desk-trace a#0a1b2c]';
+const STAMP = '[Desk: diese Sitzung a#0a1b2c; Protokoll: desk-trace a#0a1b2c]\n'; // first: the app's 8000-character cut never takes it
 
 setEnv({});
 const { runVoiceSession } = await import('../src/voice/session.js');
@@ -54,7 +54,7 @@ test('a sentence with "Hauptagent" in his words: one prompt typed, the event sta
   h.say('Schreib dem Hauptagent einen Prompt zu a#123abc, der die Zahlen prüft.');
   h.call('c1', 'output_main_agent_prompt', { text: 'Prüfe die Zahlen von a#123abc.' });
   const out = await h.result('c1');
-  assert.deepEqual(h.commands, [{ type: 'main-agent-prompt', text: `Prüfe die Zahlen von a#123abc.${STAMP}` }]);
+  assert.deepEqual(h.commands, [{ type: 'main-agent-prompt', text: `${STAMP}Prüfe die Zahlen von a#123abc.` }]);
   assert.match(out, /steht im Eingabefeld, nicht abgeschickt/);
   assert.ok(!h.ws.sent.some((m) => m.type === 'main_agent_prompt'));
   const trace = h.traced.find((e) => e.type === 'action.main_prompt');
@@ -71,7 +71,7 @@ test('no Screen Agent: the text goes to the browser as a main_agent_prompt event
   h.call('c1', 'output_main_agent_prompt', { text: `Das ist der Text mit sk-fake` });
   const out = await h.result('c1');
   assert.match(out, /Nicht eingetippt \(kein Screen Agent verbunden\)/);
-  assert.deepEqual(h.ws.sent.find((m) => m.type === 'main_agent_prompt'), { type: 'main_agent_prompt', text: `Das ist der Text mit sk-fake${STAMP}` });
+  assert.deepEqual(h.ws.sent.find((m) => m.type === 'main_agent_prompt'), { type: 'main_agent_prompt', text: `${STAMP}Das ist der Text mit sk-fake` });
 });
 
 test('screen/marker/context text with the trigger words is no trigger: nothing is typed, nothing is started', async (t) => {
@@ -136,7 +136,7 @@ test('fragment growth makes ONE start: the call that answered the fragment is re
   h.call('c2', 'output_main_agent_prompt', { text: 'Prompt (ganzer Satz)' }, 'r2');
   assert.match(await h.result('c1'), /Satzfetzen oder einer früheren Frage/);
   assert.match(await h.result('c2'), /Eingabefeld/);
-  assert.deepEqual(h.commands.map((c) => c.text), [`Prompt (ganzer Satz)${STAMP}`]);
+  assert.deepEqual(h.commands.map((c) => c.text), [`${STAMP}Prompt (ganzer Satz)`]);
 });
 
 test('the grown sentence REPLACES the fragment in what he said (one start prompt carries the whole sentence)', async (t) => {
@@ -163,7 +163,7 @@ test('settle: new speech while waiting cancels the action ("Florian spricht noch
   await sleep(1);
   h.call('c2', 'output_main_agent_prompt', { text: 'jetzt' });
   assert.match(await h.result('c2'), /Eingabefeld/);
-  assert.deepEqual(h.commands.map((c) => c.text), [`jetzt${STAMP}`]);
+  assert.deepEqual(h.commands.map((c) => c.text), [`${STAMP}jetzt`]);
 });
 
 test('the same prompt twice within 60 s is typed once; start_agent_job twins start one job', async (t) => {

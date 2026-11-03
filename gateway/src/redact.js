@@ -16,7 +16,7 @@ export function redact(text) {
   const s = String(text);
   if (s.length <= OFFLOAD_FROM) return redactText(s);
   sync ??= createSyncRunner({ preload: [offload.patterns] });
-  try { return sync.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* ignored */ }
+  try { return sync.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* worker failed: fail closed with the fallback text */ }
 }
 
 /** redact() for async callers (tool results): the work runs in the pool, the event loop stays free. */
@@ -24,7 +24,7 @@ export async function redactAsync(text) {
   const s = String(text);
   if (s.length <= OFFLOAD_FROM) return redactText(s);
   pool ??= createPool({ size: 2, preload: [offload.patterns] });
-  try { return await pool.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* ignored */ }
+  try { return await pool.run(offload.patterns, 'redactText', [s], offload.budgetMs); } catch { return REDACT_FALLBACK; /* worker failed: fail closed with the fallback text */ }
 }
 
 /** Starts the workers now, so the first big tool result does not pay the start-up (~40-70 ms). */

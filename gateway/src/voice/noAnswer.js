@@ -33,8 +33,13 @@ export function needsAnswer(text) {
 
 const ACK = /^(?:(?:okay|ok|gut|alles klar|verstanden|klar|gerne|natürlich)[,.!]?|ich habe (?:deine|die) frage\b[^.!?]{0,80}[.!?…]?|ich (?:kümmere|mache) mich\b[^.!?]{0,80}[.!?…]?)$/i;
 const PROMISE = /\b(?:ich\s+(?:schaue?|seh[e]?|prüfe?|lese?|suche?|hole?|checke?|recherchiere?|gucke?|werfe?|zeichne?|male?|lade?|öffne?)|lass\s+mich|einen\s+moment|moment|kommt\s+gleich)\b/i;
-// A finished announcement or failed-step report is no answer either (a#624670: "Ich zeichne dir das auf." / "Ich lese den Volltext." / "Die Suche lieferte nichts." ended the turn)
-const ANNOUNCED = /^(?:(?:ok|okay|gut|alles klar|ja)[,.!]?\s*)?(?:ich\s+(?:schaue?|prüfe?|lese?|suche?|hole?|checke?|recherchiere?|gucke?|werfe?|zeichne?|male?|lade?|öffne?)\b|die\s+suche\s+(?:lieferte|ergab|brachte)\s+(?:nichts|keine?\b)|[^.!?…]{0,30}\bkommt\s+gleich)/i;
+// A finished announcement is no answer either (a#624670: "Ich zeichne dir das auf." / "Ich lese den Volltext." ended the turn). Only a BARE
+// announcement counts: short, no comma/colon, no conjunction, no negation, no digit ("Ich zeichne kein Diagramm, weil ..." is an answer).
+const ANNOUNCED = /^(?:ich\s+(?:schaue?|prüfe?|lese?|suche?|hole?|checke?|recherchiere?|gucke?|werfe?|zeichne?|male?|lade?|öffne?)\b|[^.!?…]{0,30}\bkommt\s+gleich)/i;
+const FAILED_STEP = /^die\s+suche\s+(?:lieferte|ergab|brachte)\s+(?:nichts|keine?\b)/i;
+const NOT_BARE = /[,;:]|\b(?:nicht|kein\w*|nie|niemals|weil|aber|denn|dass|damit|sondern|obwohl|und|oder|sie|er|es)\b|\d/i;
+const LEAD_IN = /^(?:ok|okay|gut|alles klar|ja)[,.!]?\s*/i;
+const bareAnnouncement = (part) => { const p = part.replace(LEAD_IN, ''); return p.length <= 45 && ANNOUNCED.test(p) && !NOT_BARE.test(p); };
 
 /** Nothing but announcements so far ("Ich habe deine Frage verstanden. Ich schaue sofort, was in der neuesten Mail…"), no matter whether cut off. */
 export function isPromiseOnly(text) {
@@ -44,7 +49,8 @@ export function isPromiseOnly(text) {
   return parts.every((p, i) => {
     const part = p.trim();
     if (ACK.test(part) || isFiller(part.slice(0, 200))) return true;
-    if (ANNOUNCED.test(part) && part.length < 70 && !/\d/.test(part)) return true;
+    if (bareAnnouncement(part)) return true;
+    if (parts.length > 1 && FAILED_STEP.test(part)) return true; // a failed search is no answer only while more of the turn follows or precedes it
     const open = i === parts.length - 1 && !/[.!?…]$/.test(part);
     return open && (part.length < 25 || (part.length < 90 && PROMISE.test(part))); // an unfinished sentence: too short to judge, or a promise being spoken
   });

@@ -283,7 +283,7 @@ function publicText(home) {
     const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
     parts.push(execFileSync('git', ['-C', repo, 'config', '--get-regexp', '^remote\\..*\\.url$'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }));
   } catch { /* not a checkout */ }
-  try { parts.push(fs.readFileSync(path.join(home, '.gitconfig'), 'utf8')); } catch { /* none */ }
+  try { parts.push(fs.readFileSync(path.join(home, '.gitconfig'), 'utf8')); } catch { /* file missing: no values from it */ }
   return parts.join('\n');
 }
 

@@ -48,7 +48,8 @@ export function cleanDevice(body) {
   });
   const tabs = arr(body.tabs, 100, 'tabs').map((t) => {
     if (!isObj(t) || (t.active !== undefined && typeof t.active !== 'boolean')) throw bad('tabs');
-    const url = str(t.url, 150, 'tabs.url', { optional: true });
+    // no query, no fragment: OAuth codes and tokens live there and redact() only knows token shapes
+    const url = typeof t.url === 'string' ? str(t.url.slice(0, 2000).replace(/[?#].*$/s, ''), 150, 'tabs.url') : str(t.url, 150, 'tabs.url', { optional: true });
     return { window: str(t.window, 60, 'tabs.window'), title: str(t.title, 120, 'tabs.title'), active: t.active === true, ...(url ? { url } : {}) };
   });
   let main = null;
@@ -193,15 +194,17 @@ export function createBriefing({ hub, artifacts, now = Date.now, requestDevice, 
   }
 
   /** POST .../briefing: validate, store (the newest wins), wake a waiting refresh, and send ONE update to sessions that started without it. */
-  function deviceIn(sid, body, commandId) {
+  function deviceIn(sid, body, commandId, { blocked = false } = {}) {
     const S = state(sid);
     let device;
     try { device = cleanDevice(body); }
     catch (err) { traceAll(S, 'briefing.device', { ok: false, reason: clip(err.message, 100) }); throw err; }
     if (commandId !== undefined && !/^[0-9a-f]{8}$/.test(commandId)) throw bad('commandId');
+    // a blocked (private) screen: what the app listed about windows, tabs and the screen text is not for the voice vendors
+    if (blocked) device = { ...device, windows: device.windows.map((w) => ({ process: w.process, title: '' })), tabs: device.tabs.map(({ url, ...t }) => ({ ...t, title: '' })), screenText: '' };
     const bytes = JSON.stringify(body).length;
     S.device = device; S.deviceAt = now(); S.deviceBytes = bytes;
-    traceAll(S, 'briefing.device', { ok: true, bytes, windows: device.windows.length, tabs: device.tabs.length, messages: device.main?.messages.length ?? 0, ...(commandId ? { commandId } : {}) });
+    traceAll(S, 'briefing.device', { ok: true, bytes, ...(blocked ? { blocked: true } : {}), windows: device.windows.length, tabs: device.tabs.length, messages: device.main?.messages.length ?? 0, ...(commandId ? { commandId } : {}) });
     if (commandId) S.waiters.get(commandId)?.();
     for (const h of S.handles) {
       if (!h.sent || h.sentDevice) continue;

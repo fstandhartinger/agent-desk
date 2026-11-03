@@ -236,7 +236,7 @@ function allowedHit(file) {
     const real = fs.realpathSync(file);
     const canonical = canonicalOf(file);
     return real.startsWith(fs.realpathSync(MIRROR_DIR) + path.sep) && !isDenied(canonical) ? canonical : null;
-  } catch { return null; /* ignored */ }
+  } catch { return null; /* path missing or unreadable: not mirrored */ }
 }
 
 function jobOf(canonical) {

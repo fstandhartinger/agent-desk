@@ -89,6 +89,26 @@ describe('errors are logged', () => {
     assert.deepEqual(bad, [], 'comment the one-word reason or trace it');
   });
 
+  it('comment-only catches state a real reason: a word of the allowlist, never "ignored" / "none" / "skip" alone', () => {
+    // A comment is not logging. Such a catch (empty body or `return x;` plus a comment, or `.catch(() => null /* why */)`) stays allowed only
+    // when the comment says why nothing is lost, with one of these words. "ignored", "ignore", "none", "skip" do not.
+    const REASON = /\b(?:absent|malformed|unparsable|unreadable|missing|gone|vanished|unavailable|unknown|rejected|failed|traces|reports|sees|never rejects|courtesy|advisory|bookkeeping|fallback|fail(?:s)? closed|cut|partial|yet|bad|invalid|down|offline|expired|dangling|best effort|stdout|keep|next|try|optional|first use|not (?:a|there|pushed|listed|mirrored|claude)|no [a-z]+|never [a-z]+|do not|may come|memory-only|must not notice|caller|listener|plain text|new file|stands|desk is advisory|cached|header|socket)\b/i;
+    const CATCH = /catch(?:\s*\(\s*\w*\s*\))?\s*\{\s*(?:return[^;{}]*;\s*)?(?:\/\*([^*]*)\*\/|\/\/([^\n]*))?\s*\}|\.catch\(\(\)\s*=>\s*(?:\{\s*\}|null|undefined|\[\]|false|true|\'\'|0|\{\s*\/\*([^*]*)\*\/\s*\}|\/\*([^*]*)\*\/\s*(?:null|undefined|\[\]|false|true|0))\s*\)\s*;?\s*(?:\/\/([^\n]*))?/g;
+    const bad = []; let count = 0;
+    for (const f of [...gateway, ...bridge]) {
+      read(f).split('\n').forEach((line, i) => {
+        for (const m of line.matchAll(CATCH)) {
+          count += 1;
+          const why = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5] ?? '').trim();
+          if (!REASON.test(why)) bad.push(`${f}:${i + 1} [${why || 'no comment'}]`);
+        }
+      });
+    }
+    assert(count > 100, `the scan found the swallowing catches (${count})`);
+    assert.deepEqual(bad, [], 'name the reason (allowlist in this test) or log the failure');
+    console.log(`errors-logged: ${count} comment-only / empty catches, all with an allowlisted reason`);
+  });
+
   it('live: wrong login code, unknown route and a device failure each leave an audit line', async () => {
     setEnv();
     const app = createApp();

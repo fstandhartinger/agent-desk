@@ -101,12 +101,13 @@ describe('phraseList', () => {
 
 describe('caption (MAI only)', () => {
   it('returns text, ms and seconds, meters the real cost into the daily cap, and times out at 3 s', async () => {
-    const before = limits.costToday();
+    const before = limits.costToday(), capBefore = limits.captionToday();
     let signal;
     const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async (_u, opts) => { signal = opts.signal; return Response.json({ text: ' Guten Tag ', usage: { seconds: 2, cost: 0.01 } }); } });
-    const r = await media.caption(wav(2), ['Karpathy']);
+    const r = await media.caption(wav(2), ['Karpathy'], 'dev-cost');
     assert.equal(r.text, 'Guten Tag'); assert.equal(r.seconds, 2); assert.equal(typeof r.ms, 'number');
-    assert.ok(Math.abs(limits.costToday() - before - 0.01) < 1e-9);
+    assert.ok(Math.abs(limits.captionToday() - capBefore - 0.01) < 1e-9, 'metered into the caption ledger');
+    assert.equal(limits.costToday(), before, 'not into the shared daily cap');
     assert(signal instanceof AbortSignal);
   });
   it('503 with a code when the key is missing or MAI is down; the status of the provider rides along', async () => {

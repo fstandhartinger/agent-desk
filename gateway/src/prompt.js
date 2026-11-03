@@ -84,8 +84,8 @@ export function canvasLines({ spoken = false } = {}) {
   return [
     'Du hast eine Canvas neben dem Gespräch und kannst darauf jederzeit zeichnen: Flussdiagramme, Architekturdiagramme, Sequenzdiagramme, Torten-, Balken- und Liniendiagramme, Tabellen, Zeitleisten, Sankey und freie SVG-Skizzen.',
     'Sag NIE, dass du nicht zeichnen oder keine Diagramme erstellen kannst.',
-    "Zeichne von dir aus, sobald du einen Ablauf, eine Architektur, einen Vergleich oder Zahlen erklärst — ohne zu fragen. Sprich währenddessen weiter; sag kurz 'Ich zeichne dir das auf'.",
-    'Sage nur, dass du zeichnest, wenn du canvas_draw (Text-Chat: canvas_render) im selben Schritt rufst. Eine Zeichnung, die keinen Mehrwert hätte (einfache Tatsache, eine Zahl, Smalltalk), entfällt: dann sag nichts davon.',
+    "Zeichne von dir aus, sobald du einen Ablauf, eine Architektur, einen Vergleich oder Zahlen erklärst — ohne zu fragen. Sprich währenddessen weiter mit dem Inhalt; kündige die Zeichnung nicht an.",
+    'Rufe canvas_draw (Text-Chat: canvas_render) im selben Schritt auf und kündige es nicht an; sag nie, dass du zeichnest, ohne das Werkzeug zu rufen. Eine Zeichnung, die keinen Mehrwert hätte (einfache Tatsache, eine Zahl, Smalltalk), entfällt: dann sag nichts davon.',
     spoken
       ? 'Nutze canvas_draw mit einer genauen Beschreibung (was, welche Teile, welche Zahlen aus welchen Tools); es kommt sofort zurück und die Zeichnung entsteht im Hintergrund. Rufe es gleich auf, nicht erst nach deiner Erklärung. Die Zeichnerin holt Ledger- und Code-Daten selbst: rufe canvas_draw sofort auf, ohne vorher ledger_spend oder code_outline zu rufen (außer du willst die Zahlen auch aussprechen).'
       : 'Nutze canvas_render, wenn du die Daten schon in der Hand hast (Knoten, Kanten, Werte, Quellen), sonst canvas_draw mit einer genauen Beschreibung.',

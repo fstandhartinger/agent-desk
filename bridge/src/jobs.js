@@ -46,7 +46,7 @@ async function statAll(root, filter) {
       try {
         const st = await fs.promises.stat(path.join(root, name));
         return st.isDirectory() ? { name, mtimeMs: st.mtimeMs } : null;
-      } catch { return null; /* ignored */ }
+      } catch { return null; /* entry vanished: not listed */ }
     }));
     out.push(...batch.filter(Boolean));
   }

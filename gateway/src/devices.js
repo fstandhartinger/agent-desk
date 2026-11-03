@@ -37,14 +37,43 @@ const TTL = 90 * 24 * 3600_000;
 export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }), computer = createComputer({ vision, hub, now, audit }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
-  function rate(key, max) {
+  function rate(key, max, cost = 1) {
     const time = now(), entry = hits.get(key);
     if (!entry || entry.until <= time) {
       for (const [k, v] of hits) if (v.until <= time) hits.delete(k);
       if (hits.size >= 5000) throw fail('Zu viele Anfragen.', 429);
-      hits.set(key, { n: 1, until: time + 60000 }); return;
+      hits.set(key, { n: cost, until: time + 60000 }); return;
     }
-    if (++entry.n > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
+    if ((entry.n += cost) > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
+  }
+  // chunks of one dictation: at most 60, the index must grow, and a device may start only a few dictations per hour (a looping app rotating ids)
+  const chunkIds = new Map();
+  function chunkGate(deviceId, { dictationId, index }) {
+    const time = now(), key = `${deviceId}:${dictationId}`;
+    for (const [k, v] of chunkIds) if (v.until <= time) chunkIds.delete(k);
+    let e = chunkIds.get(key);
+    if (!e) {
+      const started = [...chunkIds.entries()].filter(([k]) => k.startsWith(`${deviceId}:`)).length;
+      if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600, body: { error: 'Zu viele Diktate pro Stunde.', code: 'chunk-limit' } });
+      e = { n: 0, last: -1, until: time + 3600_000 }; chunkIds.set(key, e);
+    }
+    if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation', body: { error: 'Zu viele Teile in einem Diktat.', code: 'chunk-limit' } });
+    if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing', body: { error: 'Teil-Index muss wachsen.', code: 'chunk-order' } });
+    e.last = index;
+  }
+  // events per minute a device may write to the traces, and a short memory of what it sent: a re-sent batch (lost response) is not stored twice
+  const EVENTS_PER_MIN = 600, sent = new Map();
+  function unseen(deviceId, raw) {
+    if (!Array.isArray(raw) || raw.length > 100) return raw; // traceEvents rejects it
+    let ring = sent.get(deviceId);
+    if (!ring) { if (sent.size >= 100) sent.delete(sent.keys().next().value); ring = new Set(); sent.set(deviceId, ring); }
+    return raw.filter(e => {
+      if (!e || typeof e !== 'object' || e.ts === undefined) return true; // no timestamp: cannot tell a repeat from a new event
+      const key = `${e.type}|${e.ts}|${JSON.stringify(e.data ?? null).slice(0, 300)}`;
+      if (ring.has(key)) return false;
+      ring.add(key); if (ring.size > 2000) ring.delete(ring.values().next().value);
+      return true;
+    });
   }
   const verified = new Map();
   // The `computer` scope (item F) is switched by the device itself from its tray (POST /api/device/computer {enabled}) and lives here, not in the registry
@@ -153,8 +182,8 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     capBusy.set(record.deviceId, (capBusy.get(record.deviceId) ?? 0) + 1); capInFlight++;
     try {
       const phrases = await captionPhrases(record.deviceId, ctx);
-      try { const r = await media.caption(buffer, phrases); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost }); return { text: r.text, ms: r.ms, seconds: r.seconds }; }
-      catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: { error: err.message, code: err.code ?? 'caption-failed' } }); }
+      try { const r = await media.caption(buffer, phrases, record.deviceId); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost }); return { text: r.text, ms: r.ms, seconds: r.seconds, costUsd: Number(r.cost.toFixed(6)) }; }
+      catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'caption-failed' } }); }
     } finally { capBusy.set(record.deviceId, capBusy.get(record.deviceId) - 1); if (!capBusy.get(record.deviceId)) capBusy.delete(record.deviceId); capInFlight--; }
   }
   async function handle(req, res, url, ctx) {
@@ -209,7 +238,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     ctx.deviceId = record.deviceId;
-    rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // a computer run adds a poll, a beat and a result per step
+    if (path !== '/api/device/caption') rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // captions have their own bucket: 40/min of them must not starve command polls and the trace; a computer run adds a poll, a beat and a result per step
     if (path === '/api/device/computer' && req.method === 'POST') {
       // device token only (no scope: this is how the scope is switched); the answer says what is now on
       const body = await readJson(req, 512);
@@ -247,7 +276,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       await registry('/v1/dictionary', { term: to, replace_from: [from], source: 'learned' }); dict = null;
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen/clear' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* ignored */ null))?.why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* body missing or malformed: no reason given */ null))?.why);
       sendJson(res, 200, artifacts.clearScreen(target[1], record.deviceId));
     } else if (target && target[2] === 'frame' && req.method === 'POST') {
       rate(`frame:${record.deviceId}`, 30);
@@ -271,7 +300,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       rate(`computerbeat:${record.deviceId}`, 120);
       sendJson(res, 200, computer.beat(computerBeat[1], record, await readJson(req, 512)));
     } else if (target && target[2] === 'screen/private' && req.method === 'POST') {
-      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* ignored */ null))?.why);
+      vision.clear(target[1], (await readJson(req, 2048).catch(() => /* body missing or malformed: no reason given */ null))?.why);
       sendJson(res, 200, { ok: true });
     } else if (target && target[2] === 'screen' && req.method === 'POST') {
       const body = await readJson(req, 8192), ids = deviceIds(body.ids);
@@ -280,19 +309,25 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     } else if (target && target[2] === 'briefing' && req.method === 'POST') {
       rate(`briefing:${record.deviceId}`, 30);
       if (!vision.active(target[1])) throw Object.assign(fail('Keine aktive Sprach- oder Chat-Sitzung.', 409), { code: 'no-session' });
+      if (vision.ownedBy && !vision.ownedBy(target[1], record.deviceId)) throw fail('Fremde Sitzung.', 403);
       const body = await readJson(req, 64 * 1024);
       const { commandId, ...device } = body;
-      sendJson(res, 200, briefing.deviceIn(target[1], device, commandId));
+      sendJson(res, 200, briefing.deviceIn(target[1], device, commandId, { blocked: artifacts.screen(target[1]).window?.blocked === true }));
     } else if (target && target[2] === 'trace' && req.method === 'POST') {
       rate(`trace:${record.deviceId}`, 60);
-      const events = traceEvents((await readJson(req, 256 * 1024)).events);
-      const fresh = events.filter(e => !e.late), late = events.filter(e => e.late); // a retry queue's old events belong to the day, not to this session
+      const raw = (await readJson(req, 256 * 1024)).events;
+      const events = traceEvents(unseen(record.deviceId, raw));
+      rate(`events:${record.deviceId}`, EVENTS_PER_MIN, events.length);
+      // a retry queue's old events belong to the day, not to this session; late ones that happened inside this session still belong to it
+      const from = traces?.startOf?.(target[1]) ?? Infinity, inside = e => e.late && !e.origTs && Date.parse(e.ts) >= from;
+      const fresh = events.filter(e => !e.late || inside(e)), late = events.filter(e => e.late && !inside(e));
       if (late.length) traces?.deviceLog(record.deviceId, late);
-      sendJson(res, 200, { ok: true, accepted: events.length, attached: (fresh.length && traces?.attach(target[1], fresh, { deviceId: record.deviceId })) || false, ...(late.length ? { late: late.length } : {}) });
+      sendJson(res, 200, { ok: true, accepted: events.length, attached: (fresh.length && traces?.attach(target[1], fresh, { deviceId: record.deviceId })) || false, ...(late.length ? { late: late.length } : {}), ...(Array.isArray(raw) && raw.length > events.length ? { duplicate: raw.length - events.length } : {}) });
     } else if (path === '/api/device/log' && req.method === 'POST') {
       // Events outside any voice/chat session (dictation, captions, the retry queue): straight into the device log of the day.
       rate(`log:${record.deviceId}`, 60);
-      const events = traceEvents((await readJson(req, 256 * 1024)).events);
+      const events = traceEvents(unseen(record.deviceId, (await readJson(req, 256 * 1024)).events));
+      rate(`events:${record.deviceId}`, EVENTS_PER_MIN, events.length);
       sendJson(res, 200, { ok: true, accepted: events.length, logged: traces?.deviceLog(record.deviceId, events) ?? false });
     } else if (path === '/api/device/caption' && req.method === 'POST') {
       rate(`caption:${record.deviceId}`, 60);
@@ -310,21 +345,22 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const box = body.bbox;
       if (!box || ['x', 'y', 'w', 'h'].some(k => !Number.isSafeInteger(box[k]) || Math.abs(box[k]) > 100000) || box.w <= 0 || box.h <= 0) throw fail('Ungültiger Bildausschnitt.');
       // v0.1.4 may still send noImage: then only the ids (with their titles) are known, never an empty "Element(e) ()"
-      const titles = body.noImage && ids.length ? await artifacts.visibleTitles(ids).catch(() => /* ignored */ []) : [];
+      const titles = body.noImage && ids.length ? await artifacts.visibleTitles(ids).catch(() => /* registry unavailable: no titles */ []) : [];
       const summary = body.noImage
         ? (titles.length ? `Markiert ist ${titles.map(item => `a#${item.id} (${item.title})`).join('; ')}.` : 'Florian hat etwas markiert; vom Bild kam nichts an.')
         : await limited(record, 'highlight', () => media.highlight(crop, context, { x: box.x, y: box.y, w: box.w, h: box.h }, ids));
       // ids read by the model in or next to the mark count only when the registry knows them
       const read = idsInText(summary).filter(id => !ids.includes(id));
-      const known = read.length ? await artifacts.visibleTitles(read).catch(() => /* ignored */ []) : [];
+      const known = read.length ? await artifacts.visibleTitles(read).catch(() => /* registry unavailable: no titles */ []) : [];
       const all = [...ids, ...known.map(item => item.id)];
-      const background = all.length ? await artifacts.visibleTitles(all).catch(() => /* ignored */ []) : [];
+      const background = all.length ? await artifacts.visibleTitles(all).catch(() => /* registry unavailable: no titles */ []) : [];
       const marked = { beschreibung: summary, ids: all.map(id => `a#${id}`), hintergrund: background.map(({ id, title, summary: s }) => ({ id: `a#${id}`, titel: title, kurz: String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 220) })) };
       const data = artifactData(marked).replace('<artifact_data>', '<artifact_data source="screen">');
       artifacts.contextTurn(target[1], `${MARKER_LEAD}\n${data}`, { screen: true, marker: true });
       artifacts.addHighlight(target[1], summary, all);
       sendJson(res, 200, { ok: true, summary, ids: all.map(id => `a#${id}`) });
     } else if (path === '/api/device/dictate' && req.method === 'POST') {
+      rate(`dictate-in:${record.deviceId}`, 130); // before the 1.9 MB body is read and parsed; single clips and chunks are limited exactly below
       if (!/^multipart\/form-data;\s*boundary=/i.test(req.headers['content-type'] ?? '')) throw fail('Multipart erforderlich.', 415);
       const bytes = await readBody(req, 60 * 32000 + 65536);
       let form;
@@ -335,7 +371,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const dctx = dictateContext(raw);
       const chunk = form.has('chunk') ? chunkInfo(form.get('chunk')) : null;
       // the chunks of one long dictation come in a burst: their own, larger bucket instead of the 12/min of single clips
-      if (chunk) rate(`chunk:${record.deviceId}`, 120); else rate(`media:${record.deviceId}`, 12);
+      if (chunk) { rate(`chunk:${record.deviceId}`, 120); chunkGate(record.deviceId, chunk); } else rate(`media:${record.deviceId}`, 12);
       const buffer = Buffer.from(await audio.arrayBuffer());
       wavDuration(buffer);
       const result = await limited(record, chunk ? `dictate:${chunk.dictationId}` : 'dictate', async () => {

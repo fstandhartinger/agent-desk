@@ -73,7 +73,8 @@ describe('device routes: chunks, captions, device log, device.error', () => {
   });
 
   it('chunks of one dictation have their own larger bucket; single clips still stop at 12 per minute', async () => {
-    for (let i = 0; i < 20; i++) assert.equal((await post('/api/device/dictate', dictateForm({ dictationId: `d-${i % 3}`, index: i, final: false }))).status, 200, `chunk ${i}`);
+    const tag = Date.now().toString(36);
+    for (let i = 0; i < 20; i++) assert.equal((await post('/api/device/dictate', dictateForm({ dictationId: `d-${i % 3}-${tag}`, index: i, final: false }))).status, 200, `chunk ${i}`);
     let last = 200;
     for (let i = 0; i < 20 && last === 200; i++) last = (await post('/api/device/dictate', dictateForm())).status;
     assert.equal(last, 429);
@@ -127,7 +128,7 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     const late = (await until(() => deviceEvents('client.dictation.retry')[0]));
     assert.equal(Date.parse(late.ts), hourAgo); assert.equal(late.data.late, true); assert.equal(late.source, 'screen-agent');
     const old = deviceEvents('client.dictation.old')[0], future = deviceEvents('client.dictation.future')[0];
-    assert(Math.abs(Date.parse(old.ts) - Date.now()) < 60_000 && !old.data.late);
+    assert(Math.abs(Date.parse(old.ts) - Date.now()) < 60_000 && old.data.late === true && Date.parse(old.data.origTs) === tooOld, 'older than a day: stamped now, flagged late with its real time');
     assert(Math.abs(Date.parse(future.ts) - Date.now()) < 60_000);
     assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type: 'tool.call' }] }))).status, 400);
   });
@@ -159,7 +160,7 @@ describe('device log lifecycle in trace.js', () => {
     assert.equal(deviceLogTitle('2026-03-21'), 'Geräteprotokoll 21 Mär');
     const at = Date.now();
     assert.deepEqual(lateTs(at - 3600_000, at), { ts: new Date(at - 3600_000).toISOString(), late: true });
-    assert.equal(lateTs(at - 25 * 3600_000, at).late, false);
+    assert.deepEqual(lateTs(at - 25 * 3600_000, at), { ts: new Date(at).toISOString(), late: true, origTs: new Date(at - 25 * 3600_000).toISOString() });
     assert.equal(lateTs('garbage', at).late, false);
   });
 

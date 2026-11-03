@@ -200,7 +200,7 @@ async function codexCwd(file) {
       const { bytesRead } = await fd.read(buf, 0, buf.length, 0);
       return /"cwd":"([^"]+)"/.exec(buf.toString('utf8', 0, bytesRead))?.[1] ?? null;
     } finally { await fd.close(); }
-  } catch { return null; /* ignored */ }
+  } catch { return null; /* file missing or unreadable: no cwd */ }
 }
 
 const jobLabel = (cwd) => (cwd ? cwd.replace(/^\/home\/flori\/jobs\//, '').replace(/^\/home\/flori\/?/, '~/').slice(0, 120) : '');
@@ -338,7 +338,7 @@ export async function search({ query, agent = 'all', limit = 15 } = {}) {
   hits.splice(0, hits.length, ...balance(hits, cap));
 
   if (agents.includes('claude') && Date.now() < deadline) {
-    const outputFiles = (await recentJobDirs(200).catch(() => /* ignored */ [])).map((d) => path.join(d, 'OUTPUT.md')).filter((f) => !isDenied(f));
+    const outputFiles = (await recentJobDirs(200).catch(() => /* directory list unavailable: no outputs */ [])).map((d) => path.join(d, 'OUTPUT.md')).filter((f) => !isDenied(f));
     const outputs = outputFiles.length ? matches(await rg(['--json', '--max-count', '2', ...base.slice(0, 4), ...termArgs, '--'], outputFiles, left())) : [];
     for (const m of outputs) {
       if (hits.length >= cap) break;
@@ -421,7 +421,7 @@ async function opencodeTurns(file, sessionId) {
   const names = (await fs.promises.readdir(msgDir).catch(() => /* absent */ [])).filter((n) => n.endsWith('.json')).sort();
   const msgs = [];
   for (const n of names.slice(0, 2000)) {
-    try { msgs.push(JSON.parse(await fs.promises.readFile(path.join(msgDir, n), 'utf8'))); } catch { /* skip */ }
+    try { msgs.push(JSON.parse(await fs.promises.readFile(path.join(msgDir, n), 'utf8'))); } catch { /* unreadable message file: skipped, the rest still loads */ }
   }
   msgs.sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
   const turns = [];

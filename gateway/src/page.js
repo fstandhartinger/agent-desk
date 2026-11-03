@@ -22,7 +22,7 @@ export async function loadPageContext(page) {
     .map((w) => w.w)
     .join(' ');
 
-  const pack = await loadPack(page.slug, points, timeline).catch(() => /* ignored */ null);
+  const pack = await loadPack(page.slug, points, timeline).catch(() => /* pack unavailable: the page context stays without it */ null);
   const loaded = {
     slug: page.slug,
     title: points?.page?.title || timeline?.title || page.slug,

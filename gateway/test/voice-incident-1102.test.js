@@ -186,3 +186,22 @@ test('GPT-Live keeps speaking the old answer after the barge-in: that text settl
   await sleep(60);
   assert.ok(h.recovered.length >= 1);
 });
+
+test('fix-desk M3: a started drawing answers "zeichne das"; a question that needs words is still recovered', async (t) => {
+  const draw = async () => ({ ok: true, summary: 's', content: JSON.stringify({ ok: true, id: 'x', status: 'zeichne' }) });
+  const a = harness(t, { noAnswerMs: 20, runTool: draw });
+  await sleep(1);
+  a.emit({ t: 'ready', model: 'm' });
+  ask(a, 'Zeichne mir den Ablauf der Freigabe auf');
+  a.emit({ t: 'tool_call', id: 'c', name: 'canvas_draw', args: { kind: 'flow', text: 'x' } });
+  await sleep(60);
+  assert.equal(a.recovered.length, 0, 'the drawing is the answer');
+  assert.ok(a.traced.some((e) => e.type === 'watchdog.settled' && e.reason === 'drawing'));
+  const b = harness(t, { noAnswerMs: 20, runTool: draw });
+  await sleep(1);
+  b.emit({ t: 'ready', model: 'm' });
+  ask(b, 'Erkläre mir bitte die Freigabe von Reax 1.3');
+  b.emit({ t: 'tool_call', id: 'c', name: 'canvas_draw', args: { kind: 'flow', text: 'x' } });
+  await sleep(60);
+  assert.ok(b.recovered.length >= 1, 'words were asked for');
+});

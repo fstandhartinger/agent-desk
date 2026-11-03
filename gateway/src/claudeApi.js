@@ -31,7 +31,7 @@ const clip = (value, max) => (typeof value === 'string' && value ? value.slice(0
 async function pageForClaude(raw) {
   if (!raw || typeof raw.slug !== 'string') return undefined;
   const page = { slug: raw.slug.slice(0, 80), title: clip(raw.title, 200), t: Number(raw.t) || 0, sceneId: clip(raw.sceneId, 60), pointId: clip(raw.pointId, 60), transcriptNear: clip(raw.transcriptNear, 1500) };
-  const loaded = await loadPageContext(page).catch(() => /* ignored */ null);
+  const loaded = await loadPageContext(page).catch(() => /* page context unavailable: the request goes without it */ null);
   return loaded ? { ...page, title: loaded.title, sceneId: loaded.sceneId, point: loaded.point, transcriptNear: loaded.transcriptNear || page.transcriptNear } : page;
 }
 

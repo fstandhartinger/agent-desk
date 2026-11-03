@@ -63,7 +63,8 @@ export async function deskStamp(ctx) {
   const prev = previousOf.get(aid);
   return `[Desk: diese Sitzung ${aid}${prev ? `, vorherige ${prev}` : ''}; Protokoll: desk-trace ${aid}]`;
 }
-const stamped = (text, stamp) => (stamp ? `${text}\n${stamp}` : text);
+// first, not last: the app cuts a prompt at 8000 characters and must never cut exactly the stamp
+const stamped = (text, stamp) => (stamp ? `${stamp}\n${text}` : text);
 
 const out = (ok, content, extra = {}) => ({ ok, summary: short(content, 200), content: redact(content), ...extra });
 const refuse = (ctx, name, reason, content) => {
@@ -220,6 +221,7 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   const p = String(prompt ?? '').trim();
   if (!t || !p) return release(g, 'start_agent_job'), out(false, 'Titel und Auftrag dürfen nicht leer sein. Nichts gestartet.');
+  const stampedPrompt = stamped(p, await deskStamp(ctx)); // the only await before the checks below: nothing can change between the limit check and job.start
   const sid = ctx.sid ?? 'desk', now = clock.now();
   sweep(now);
   // the same title alone does not make a twin: "Check disk" two minutes later can be a different task
@@ -232,7 +234,6 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   const verdict = (ctx.limits ?? defaultLimits).check(sid, 'agentJob');
   if (!verdict.ok) return release(g, 'start_agent_job'), refuse(ctx, 'start_agent_job', 'limit', `Nichts gestartet: ${verdict.reason}. Sag das Florian in einem Satz.`);
   const requestId = crypto.randomUUID();
-  const stampedPrompt = stamped(p, await deskStamp(ctx));
   const entry = remember('job', sid, { title: t, prompt: p, requestId, host: host ?? 'auto', at: now });
   const traced = ctx.trace?.();
   const aid = /^a#[0-9a-f]{6}$/.test(traced?.aid ?? '') ? traced.aid : undefined;

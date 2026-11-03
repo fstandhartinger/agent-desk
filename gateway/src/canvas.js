@@ -812,7 +812,7 @@ export function countSentences(text) {
 // A plain yes/no question ("Läuft der Job noch?", "Is the bridge up?"): one short sentence that starts with a verb, asks for no
 // picture, no explanation and no comparison. The early illustrator stays out; the agent can still draw if it wants to.
 const YES_NO_START = /^\s*(?:ist|sind|war|waren|hat|haben|hatte|hatten|kann|kannst|können|könnte|könntest|muss|musst|müssen|soll|sollen|darf|darfst|dürfen|gibt|läuft|laufen|lief|geht|gehen|klappt|stimmt|wird|werden|wurde|wurden|funktioniert|habe|hast|bin|bist|is|are|was|were|does|do|did|has|have|had|can|could|should|will|would|may)\b/i;
-const YES_NO_BLOCK = /zeichn|diagramm|grafik|skizze|chart|bild|visualis|darstell|erklär|beschreib|vergleich|zeig|übersicht|struktur|architektur|aufbau|ablauf|schritt|kosten|ausgaben|\bund\b|\boder\b|\bwarum\b|\bwieso\b|\bwelche|\bwas\b|\bwer\b|\bwann\b|\bwo\b|\bwie (?:viel|lang|oft|groß)|draw|diagram|chart|explain|compare|show|\bwhy\b|\bhow\b|\bwhat\b|\bwhich\b/i;
+const YES_NO_BLOCK = /,|\bflow|pipeline|sequenz|zeitleiste|\bmit\b|\bzwischen\b|zeichn|diagramm|grafik|skizze|chart|bild|visualis|darstell|erklär|beschreib|vergleich|zeig|übersicht|struktur|architektur|aufbau|ablauf|schritt|kosten|ausgaben|\bund\b|\boder\b|\bwarum\b|\bwieso\b|\bwelche|\bwas\b|\bwer\b|\bwann\b|\bwo\b|\bwie (?:viel|lang|oft|groß)|draw|diagram|chart|explain|compare|show|\bwhy\b|\bhow\b|\bwhat\b|\bwhich\b/i;
 export function isYesNoQuestion(text) {
   const t = String(text ?? '').trim();
   if (!t || t.length > 90 || (t.match(/[?.!]/g) ?? []).length > 1 || !t.endsWith('?')) return false;

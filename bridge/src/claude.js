@@ -70,7 +70,7 @@ function isClaudePid(pid) {
   if (!Number.isInteger(pid) || pid < 2) return false;
   try {
     return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('claude');
-  } catch { return false; /* ignored */ }
+  } catch { return false; /* process gone: not claude */ }
 }
 
 function signalGroup(pid, signal) {
@@ -211,7 +211,7 @@ export function createClaude({ emit }) {
     else if (!t.sawResult || t.sawError || t.failed) {
       const code = t.child?.exitCode;
       let errText = '';
-      try { errText = fs.readFileSync(t.errFile, 'utf8').trim().slice(-400); } catch { /* none */ }
+      try { errText = fs.readFileSync(t.errFile, 'utf8').trim().slice(-400); } catch { /* file missing: no error text */ }
       if (!t.sawResult) addEvent(s, { kind: 'error', message: redact(`claude exited without a result${code ? ` (exit ${code})` : ''}${errText ? `: ${errText}` : ''}`) });
       state = 'error';
     }

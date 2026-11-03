@@ -11,6 +11,7 @@ const RATES = {
 };
 const VOICE_MAX_CONCURRENT = 2;
 const VOICE_MAX_SECONDS_PER_DAY = 90 * 60;
+export const CAPTION_DAY_USD = 2.00, CAPTION_HOUR_USD = 1.00; // per device, separate from the shared daily cap
 
 const dayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -51,6 +52,7 @@ export class Limits {
     this.cost = new Map();
     this.voice = new Map();
     this.voiceSeconds = new Map();
+    this.caption = new Map();
   }
 
   /**
@@ -99,6 +101,34 @@ export class Limits {
     this.cost.set(key, total);
   }
 
+  /**
+   * Live captions have their own ledger per device (day and hour): a stuck app loop must never use up the shared Desk cap that dictation and
+   * drawings need. Caption spend is NOT added to cost/costToday; it is reported next to it (snapshot.captionTodayUsd).
+   */
+  captionCheck(deviceId, now = Date.now()) {
+    const e = this.caption.get(deviceId), day = dayKey(now), hour = Math.floor(now / 3_600_000);
+    if (!e || e.day !== day) return { ok: true };
+    if (e.dayUsd >= CAPTION_DAY_USD) return { ok: false, retryAfter: 3600, scope: 'day', usd: e.dayUsd };
+    const h = e.hours.get(hour) || 0;
+    if (h >= CAPTION_HOUR_USD) return { ok: false, retryAfter: Math.max(1, Math.ceil(((hour + 1) * 3_600_000 - now) / 1000)), scope: 'hour', usd: h };
+    return { ok: true };
+  }
+
+  captionAdd(deviceId, usd, now = Date.now()) {
+    if (!Number.isFinite(usd) || usd <= 0) return;
+    const day = dayKey(now), hour = Math.floor(now / 3_600_000);
+    let e = this.caption.get(deviceId);
+    if (!e || e.day !== day) { if (this.caption.size >= 200 && !e) this.caption.delete(this.caption.keys().next().value); e = { day, dayUsd: 0, hours: new Map() }; this.caption.set(deviceId, e); }
+    e.dayUsd += usd; e.hours = new Map([[hour, (e.hours.get(hour) || 0) + usd]]);
+  }
+
+  captionToday() {
+    const day = dayKey();
+    let sum = 0;
+    for (const e of this.caption.values()) if (e.day === day) sum += e.dayUsd;
+    return sum;
+  }
+
   costToday() {
     return this.cost.get(dayKey()) || 0;
   }
@@ -108,6 +138,7 @@ export class Limits {
       rates: RATES,
       voice: { maxConcurrent: VOICE_MAX_CONCURRENT, maxSecondsPerDay: VOICE_MAX_SECONDS_PER_DAY },
       spendTodayUsd: Number(this.costToday().toFixed(4)),
+      captionTodayUsd: Number(this.captionToday().toFixed(4)), // own ledger, not part of spendTodayUsd
       dailyCapUsd: cfg.dailyCapUsd(),
     };
   }
