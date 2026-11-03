@@ -1,9 +1,11 @@
-import { companionMuted } from './companion';
+import { companionMuted, nativeHost } from './companion';
+import { ACTIVITY_LINGER_MS, isActivity, nextActivity, type ActivityLine } from './liveActivity';
+import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
 import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
-import type { ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
+import type { ActivityEvent, ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
 import type { ProviderId } from './status';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error';
@@ -31,7 +33,7 @@ export interface VoiceHandlers {
 }
 
 /** `option` is the user's picker choice and never changes by itself; `active` is the provider of the running session. */
-export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null; muted: boolean; aid: string | null; serverNotice: string | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null, muted: false, aid: null, serverNotice: null });
+export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null; muted: boolean; aid: string | null; serverNotice: string | null; activity: ActivityLine | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null, muted: false, aid: null, serverNotice: null, activity: null });
 
 /** Mic/speaker RMS (0..1). Read at animation rate, never pushed through React state. */
 export const levels = { mic: 0, speaker: 0 };
@@ -66,13 +68,13 @@ export class VoiceSession {
   constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers, private startMuted = false) {}
 
   private set(state: VoiceState, model?: string) {
-    voiceStore.set((s) => ({ ...s, state, active: this.opt.key, model: model ?? s.model, error: state === 'error' ? s.error : null }));
+    voiceStore.set((s) => ({ ...s, state, active: this.opt.key, model: model ?? s.model, error: state === 'error' ? s.error : null, activity: state === 'idle' ? null : s.activity }));
   }
 
   async start() {
     this.gate.reset();
     this.gate.muted = this.startMuted;
-    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null }));
+    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null }));
     this.set('connecting', '');
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
@@ -190,6 +192,9 @@ export class VoiceSession {
       case 'tool':
         this.h.onTool(m);
         break;
+      case 'activity':
+        if (isActivity(m)) this.showActivity(m);
+        break;
       case 'viz':
         this.h.onViz(m.spec);
         break;
@@ -216,6 +221,15 @@ export class VoiceSession {
       case 'closed':
         this.onGone();
         break;
+    }
+  }
+
+  /** The newest activity line in the dock (finished ones fade after a few seconds) and the same event to the native host. */
+  private showActivity(e: ActivityEvent) {
+    forwardActivity(nativeHost, e);
+    voiceStore.set((s) => ({ ...s, activity: nextActivity(s.activity, e) }));
+    if (e.phase === 'done' || e.phase === 'fail' || e.phase === 'heard') {
+      setTimeout(() => voiceStore.set((s) => (s.activity?.id === e.id && s.activity.phase === e.phase ? { ...s, activity: null } : s)), ACTIVITY_LINGER_MS);
     }
   }
 

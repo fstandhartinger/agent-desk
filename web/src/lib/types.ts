@@ -39,6 +39,9 @@ export type ClaudeEvent = { seq: number; ts: string } & (
 /** The voice agent's prompt for the main agent could not be typed (no app connected): shown as a copyable card. Plain text. */
 export interface MainAgentPromptEvent { type: 'main_agent_prompt'; text: string }
 
+/** What the desk does right now (voice session): hearing, thinking, one tool running / finished / failed. Labels are German and redacted. */
+export interface ActivityEvent { type: 'activity'; id: string; phase: 'thinking' | 'heard' | 'start' | 'done' | 'fail'; label: string; tool?: string; ms?: number; reason?: string; at?: number }
+
 export type VoiceServerMsg =
   | { type: 'ready'; provider: string; model: string }
   | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean }
@@ -47,6 +50,7 @@ export type VoiceServerMsg =
   | HandoffEvent
   | ClaudeProposalEvent
   | MainAgentPromptEvent
+  | ActivityEvent
   | { type: 'viz'; spec: VizSpec }
   | { type: 'usage'; seconds: number; costUsd: number }
   | { type: 'error'; message: string; fallback?: string }

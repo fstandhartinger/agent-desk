@@ -1,8 +1,9 @@
-import { Hand, Mic, MicOff, PenTool, PhoneOff, RotateCcw, X } from 'lucide-react';
+import { Check, Hand, Loader2, Mic, MicOff, PenTool, PhoneOff, RotateCcw, X } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { useMedia } from '../../lib/useMedia';
 import { nativeHost } from '../../lib/companion';
 import { optionByKey, voiceStore, type VoiceState } from '../../lib/voice';
+import type { ActivityLine } from '../../lib/liveActivity';
 import { dismissVoiceError, interruptVoice, startVoice, stopVoice, toggleVoiceMuted } from '../../lib/voiceController';
 import LiveOrb from './LiveOrb';
 import SessionBadge from './SessionBadge';
@@ -16,9 +17,20 @@ export const STATE_LABEL: Record<VoiceState, string> = {
   error: 'Verbindung gestört',
 };
 
+/** The newest thing the desk does: spinner while it runs, a tick when it is done, a cross with the short reason when it failed. */
+export function ActivityRow({ a }: { a: ActivityLine }) {
+  const running = a.phase === 'start' || a.phase === 'thinking';
+  return (
+    <p className={`mt-0.5 flex items-center gap-1.5 text-[13px] leading-snug ${a.phase === 'fail' ? 'text-danger' : 'text-fg-2'}`} data-activity={a.phase}>
+      {running ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet" aria-hidden /> : a.phase === 'done' ? <Check className="h-3.5 w-3.5 shrink-0 text-moss" aria-hidden /> : a.phase === 'fail' ? <X className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Mic className="h-3.5 w-3.5 shrink-0 text-dim" aria-hidden />}
+      <span className="min-w-0 truncate">{a.phase === 'heard' ? `„${a.label}“` : a.label}{a.phase === 'fail' && a.reason ? ` – ${a.reason}` : ''}</span>
+    </p>
+  );
+}
+
 /** Live voice strip above the thread while a voice session runs. */
 export default function VoiceDock() {
-  const { state, active, model, error, notice, muted, serverNotice } = useStore(voiceStore);
+  const { state, active, model, error, notice, muted, serverNotice, activity } = useStore(voiceStore);
   const desktop = useMedia('(min-width: 1024px)');
   if (state === 'idle') return null;
   const opt = optionByKey(active);
@@ -35,6 +47,7 @@ export default function VoiceDock() {
           </div>
           <div className="min-w-0 flex-1" aria-live="polite">
             <p className={`text-[17px] font-semibold tracking-[-0.01em] ${failed || mute ? 'text-danger' : 'text-fg'}`}>{mute ? 'Stumm' : STATE_LABEL[state]}</p>
+            {!failed && !mute && activity && <ActivityRow a={activity} />}
             {failed && (
               <>
                 <p role="alert" className="mt-0.5 text-xs leading-snug text-fg-2">{error}</p>
