@@ -96,7 +96,7 @@ export function lateTs(ts, at) {
   return { ts: clampTs(ts, at), late: false };
 }
 /** The Berlin calendar day (YYYY-MM-DD) of `ms`: the registry's device session changes at Berlin midnight, so the gateway's log must too. */
-export const berlinDay = (ms) => { const p = berlinParts(ms); return `${p.year}-${p.month}-${p.day}`; };
+export const berlinDay = (ms) => { const p = berlinParts(ms); return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`; };
 /** "Geräteprotokoll 3 Nov" for the Berlin day `day` (YYYY-MM-DD). */
 export const deviceLogTitle = (day) => `Geräteprotokoll ${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
 

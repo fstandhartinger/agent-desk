@@ -49,7 +49,7 @@ export function cleanDevice(body) {
   const tabs = arr(body.tabs, 100, 'tabs').map((t) => {
     if (!isObj(t) || (t.active !== undefined && typeof t.active !== 'boolean')) throw bad('tabs');
     // no query, no fragment: OAuth codes and tokens live there and redact() only knows token shapes
-    const url = str(t.url, 400, 'tabs.url', { optional: true })?.replace(/[?#].*$/s, '').slice(0, 150);
+    const url = typeof t.url === 'string' ? str(t.url.slice(0, 2000).replace(/[?#].*$/s, ''), 150, 'tabs.url') : str(t.url, 150, 'tabs.url', { optional: true });
     return { window: str(t.window, 60, 'tabs.window'), title: str(t.title, 120, 'tabs.title'), active: t.active === true, ...(url ? { url } : {}) };
   });
   let main = null;

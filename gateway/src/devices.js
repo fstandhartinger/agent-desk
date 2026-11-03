@@ -53,11 +53,11 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     let e = chunkIds.get(key);
     if (!e) {
       const started = [...chunkIds.entries()].filter(([k]) => k.startsWith(`${deviceId}:`)).length;
-      if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600 });
+      if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600, body: { error: 'Zu viele Diktate pro Stunde.', code: 'chunk-limit' } });
       e = { n: 0, last: -1, until: time + 3600_000 }; chunkIds.set(key, e);
     }
-    if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation' });
-    if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing' });
+    if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation', body: { error: 'Zu viele Teile in einem Diktat.', code: 'chunk-limit' } });
+    if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing', body: { error: 'Teil-Index muss wachsen.', code: 'chunk-order' } });
     e.last = index;
   }
   // events per minute a device may write to the traces, and a short memory of what it sent: a re-sent batch (lost response) is not stored twice
