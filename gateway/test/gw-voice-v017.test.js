@@ -241,6 +241,16 @@ describe('illustrator value check', () => {
     assert.equal(skipped.length, 0); assert.equal(calls.length, 2);
     assert.match(calls[1].at(-1).content, /ausdrücklich verlangt/);
   });
+  it('fix-desk S10a: a second skip after the explicit-draw retry is sent back for the CanvasSpec once more, then drawn', async () => {
+    let n = 0;
+    script = () => answer(n++ < 2 ? SKIP : flow);
+    const s = session();
+    ask(s, 'Erkläre mir den Ablauf des Versands und zeichne das bitte auf.');
+    await s.idle();
+    assert.ok(seen().some((x) => x.startsWith('ready:')), 'drawn, not ended as an error');
+    assert.equal(calls.length, 3); assert.equal(skipped.length, 0);
+    assert.match(calls[2].at(-1).content, /no skip/);
+  });
   it('canvas_draw on a yes/no turn or small talk answers "keine Zeichnung nötig" without a model call', async () => {
     const s = session();
     ask(s, 'Läuft der Job gerade noch?');
