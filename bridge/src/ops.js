@@ -19,6 +19,8 @@ export const COMMANDS = {
   sched_list: () => [bin('sched'), 'list'],
   disk: () => ['/bin/df', '-h', '/'],
   jobs_running: () => ['/usr/bin/systemctl', '--user', 'list-units', 'job-*', '--no-legend'],
+  load: () => ['/bin/cat', '/proc/loadavg'], // voice computer runs (server_read), 3 Nov 2026
+  units: () => ['/usr/bin/systemctl', '--user', 'list-units', '--type=service', '--state=running', '--no-legend', '--no-pager'],
 };
 
 /** Pure argv builder (tested): refuses everything outside the map. */

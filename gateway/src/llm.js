@@ -4,7 +4,7 @@ import { TEXT, modelError } from './messages.js';
 import { markFailure, markOk } from './providerHealth.js';
 import { short } from './redact.js';
 
-const HEADERS = () => ({
+export const HEADERS = () => ({
   authorization: `Bearer ${cfg.openrouterKey()}`,
   'content-type': 'application/json',
   'http-referer': cfg.deskOrigin(),

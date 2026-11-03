@@ -70,7 +70,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
   function state(sid) {
     let S = states.get(sid);
     if (!S) {
-      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), devices: new Set(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [] };
+      S = { sid, seq: 0, handles: new Set(), chatUntil: 0, lastSeen: 0, polls: new Map(), devices: new Set(), queue: [], waiters: new Map(), desc: null, newest: new Map(), spend: [], frames: 0, usd: 0, busy: 0, sent: { text: '', at: 0, n: 0, ids: '' }, timer: null, capNoted: false, idSeq: 0, idFirst: new Map(), pendingFrame: null, noPicture: null, prompts: [], commands: new Map(), briefings: [], computerQ: [], computerCmds: new Map(), computerSeen: 0, computerDevice: null };
       states.set(sid, S);
       sweeper ??= setInterval(sweep, 15_000).unref();
     }
@@ -90,6 +90,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     clearTimeout(S.timer);
     for (const p of S.polls.values()) p.resolve({ stop: true });
     for (const w of S.waiters.values()) w();
+    for (const c of S.computerCmds.values()) c.settle({ ok: false, code: 'no-run', note: 'session-gone' });
     states.delete(sid);
   }
   /** Tell sessions whose belief differs (a Screen Agent attached later, or went away). */
@@ -263,12 +264,16 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     seen(sid);
     return new Promise(resolve => {
       const cmd = S.queue.find(c => c.expires > now());
+      const mayComputer = Array.isArray(record.scopes) && record.scopes.includes('computer');
+      if (mayComputer) { S.computerSeen = now(); S.computerDevice = key; }
+      const computer = mayComputer ? takeComputer(S, key) : null;
       const prompt = takePrompt(S, key);
       const briefing = takeBriefing(S);
       const done = value => { clearTimeout(timer); if (S.polls.get(key) === entry) S.polls.delete(key); seen(sid); resolve(value); };
-      const entry = { resolve: done };
+      const entry = { resolve: done, computer: mayComputer };
       const timer = setTimeout(() => done({ fresh: false }), ms);
       signal?.addEventListener('abort', () => done({ fresh: false }), { once: true });
+      if (computer) { done({ fresh: false, computer }); return; }
       if (prompt) { done({ fresh: false, prompt }); return; }
       if (briefing) { done({ fresh: false, briefing }); return; }
       if (cmd) { S.queue.splice(S.queue.indexOf(cmd), 1); done({ fresh: true, id: cmd.id, ...(cmd.question ? { question: cmd.question } : {}) }); return; }
@@ -348,6 +353,53 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ok: true };
   }
 
+  // --- computer channel (item F): `{fresh:false, computer:{id, run, seq, op, ...}}` to a poller that holds the `computer` scope; the app answers on
+  // POST .../computer/:id/result (validated by the computer module). Commands expire after T.ttl: a late one is never delivered. An op:'beat' replaces a queued beat.
+  function takeComputer(S, deviceId) {
+    S.computerQ = S.computerQ.filter(c => c.expires > now() && !c.cancelled);
+    const c = S.computerQ.shift();
+    if (!c) return null;
+    c.deviceId = deviceId;
+    return c.wire;
+  }
+  /** An app that holds the scope polls (or polled in the last 45 s): the computer tool may be offered. */
+  const computerReady = sid => { const S = states.get(sid); return Boolean(S && active(sid) && S.computerSeen && now() - S.computerSeen < ATTACHED_MS); };
+  /**
+   * Sends one computer command (`wire` = {id, run, seq, op, ...}). fire:true = no answer expected (beat, stop). Otherwise resolves the app's validated
+   * result, or {ok:false, code:'unclear'} after waitMs / {code:'no-run'} when the session is gone. An unanswered command is never retried.
+   */
+  function computerSend(sid, wire, { waitMs = 30_000, fire = false, validate = body => body } = {}) {
+    if (!computerReady(sid)) return Promise.resolve({ ok: false, code: 'no-app' });
+    const S = states.get(sid);
+    if (wire.op === 'beat') S.computerQ = S.computerQ.filter(c => !(c.wire.op === 'beat' && c.wire.run === wire.run));
+    const cmd = { wire, expires: now() + T.ttl, cancelled: false, deviceId: null, validate, settled: false, late: null };
+    const target = [...S.polls.entries()].find(([, p]) => p.computer);
+    if (target) { cmd.deviceId = target[0]; target[1].resolve({ fresh: false, computer: wire }); } else S.computerQ.push(cmd);
+    if (fire) return Promise.resolve({ ok: true, code: 'sent' });
+    return new Promise(resolve => {
+      const timer = setTimeout(() => cmd.settle({ ok: false, code: 'unclear', note: 'timeout' }), waitMs);
+      timer.unref?.();
+      cmd.settle = value => {
+        if (cmd.settled) return;
+        cmd.settled = true; cmd.cancelled = true; clearTimeout(timer);
+        setTimeout(() => S.computerCmds.delete(wire.id), T.keep).unref?.();
+        resolve(value);
+      };
+      S.computerCmds.set(wire.id, cmd);
+    });
+  }
+  /** POST .../computer/:id/result: only a command delivered to THIS device is known (404 otherwise). A second answer reaches `late` (hotkey confirm after needs-confirm). */
+  function computerResult(sid, record, id, body) {
+    const S = states.get(sid), cmd = S?.computerCmds.get(id);
+    if (!cmd || cmd.deviceId !== record.deviceId) throw deviceError('Unbekannter Befehl.', 404);
+    const clean = cmd.validate(body);
+    if (cmd.settled) { const late = cmd.late; cmd.late = null; late?.(clean); return { ok: true }; }
+    cmd.settle(clean);
+    return { ok: true };
+  }
+  const computerCommand = (sid, id) => states.get(sid)?.computerCmds.get(id);
+  const computerDevice = sid => states.get(sid)?.computerDevice ?? null;
+
   /** look_at_screen: ask for a fresh frame (max cfg.visionFreshWaitMs), fall back to the newest description with its age. */
   async function look(sid, question) {
     if (!attached(sid)) return { attached: false, hinweis: 'kein aktiver Screen Agent: ich sehe den Bildschirm nicht und habe keine Beschreibung davon.' };
@@ -389,5 +441,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, requestBriefing, look, chatBlock, snapshot, _states: states };
+  return { attach, touchChat, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, computerReady, computerSend, computerResult, computerCommand, computerDevice, requestBriefing, look, chatBlock, snapshot, _states: states };
 }

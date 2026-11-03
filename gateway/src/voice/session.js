@@ -22,7 +22,7 @@ export const FACTS_WAIT_MS = 2500;
 export const MAX_RESEARCH_TOOLS = { gemini: 3 };
 const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 // Action tools wait for him to finish and are no research: they never count against the research cap
-const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job']);
+const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job', 'computer_task']);
 const SPOKEN_KEEP = 12;
 const ECHO_MS = 20_000;
 const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
@@ -115,7 +115,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const said = new Set(normText(heardBack.text).split(' ')), own = normText(text).split(' ').filter(Boolean);
     return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
   };
-  const noteSpoken = (text, at_, turn_) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_) }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
+  let speechStartSeen = false; // did this vendor ever send a speech start? If not, "early" cannot be judged and the confirm code is the only gate
+  let lastSpeechStart = -Infinity; // when the sound of his latest utterance began (speech_started); a computer confirm needs it after the question
+  let partialTail = ''; // the last characters of his live transcript: stop words are looked for here (computer runs)
+  const noteSpoken = (text, at_, turn_, extra = {}) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_), ...extra }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
   let lastFinal = null; // the newest user final of the current turn: a longer final that extends it replaces it (growing fragments)
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
@@ -125,6 +128,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let screenHeld = null; // screen context that arrived before the vendor was ready
   let briefingHeld = null; // the start briefing (item G), same: held until the vendor is ready
   let detachBriefing = null;
+  let detachComputer = null;
   let muted = false;
   let mutedAt = 0;
   let mutedMs = 0;
@@ -164,12 +168,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (!turn.role || !turn.text.trim()) { turn.role = null; turn.text = ''; return; }
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
-    trace.event(`transcript.${role}.final`, { turn: turnId, text });
+    trace.event(`transcript.${role}.final`, deps.computer?.quiet?.(sid, role) ? { turn: turnId, chars: text.length, computer: true } : { turn: turnId, text }); // the app's R2 text and his answer to an ask: length only
     if (role === 'assistant') {
+      deps.computer?.assistantFinal(sid, text);
       heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
       if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) spoken.at(-1).answered = true; }
     }
-    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId); }
+    if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId, { started: speechStartSeen ? lastSpeechStart : undefined }); partialTail = ''; deps.computer?.userFinal(sid, spoken.at(-1)); }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
     turn.role = null;
     turn.text = '';
@@ -353,13 +358,15 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function growUser(e) {
     const text = e.text.trim(), prev = lastFinal;
     if (normText(text) === prev.norm) return; // the same item again
-    trace.event('turn.user.grown', { turn: prev.turn, text: prev.text, into: text });
+    const quiet = deps.computer?.quiet?.(sid, 'user');
+    trace.event('turn.user.grown', quiet ? { turn: prev.turn, chars: text.length, computer: true } : { turn: prev.turn, text: prev.text, into: text });
     sendJson({ type: 'transcript', role: 'user', text, final: true, replace: true });
-    trace.event('transcript.user.final', { turn: prev.turn, text, grown: true });
+    trace.event('transcript.user.final', quiet ? { turn: prev.turn, chars: text.length, grown: true, computer: true } : { turn: prev.turn, text, grown: true });
     lastFinal = { text, norm: normText(text), itemId: e.itemId ?? prev.itemId, turn: prev.turn, at: now() };
     speechOpen = false;
     if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, echo: echoOf(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
-    else noteSpoken(text, lastFinal.at, prev.turn);
+    else noteSpoken(text, lastFinal.at, prev.turn, { started: speechStartSeen ? lastSpeechStart : undefined });
+    deps.computer?.userFinal(sid, spoken.at(-1));
     lastUserText = text;
     if (contentOpen) { // not committed yet: collect again from the whole sentence
       userBuf = '';
@@ -380,7 +387,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   }
 
   function onTranscript(e) {
-    if (e.role === 'user') speechAt = now();
+    if (e.role === 'user') {
+      speechAt = now();
+      if (e.delta != null || e.text != null) { partialTail = (e.delta != null ? partialTail + e.delta : String(e.text)).slice(-80); deps.computer?.userPartial(sid, partialTail); }
+    }
     if (growsPrevious(e)) { if (turn.role === 'assistant') flushTranscript(); growUser(e); return; }
     if (e.role !== turn.role) flushTranscript();
     if (e.role === 'user') {
@@ -518,6 +528,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         break;
       case 'speech_started':
         speechAt = now();
+        lastSpeechStart = now();
+        speechStartSeen = true;
         speechOpen = true;
         flushTranscript();
         beginUserTurn(false);
@@ -625,6 +637,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       if (readyAt === null) { briefingHeld = text; return 'held-until-ready'; }
       return adapter?.setBriefing?.(text) ?? 'unsupported';
     } });
+    // Computer runs (item F): the manager hears his finals, partials and the assistant's finals through the hooks above and speaks through say().
+    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj) });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -677,6 +691,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     unregisterText?.();
     detachVision?.();
     detachBriefing?.();
+    detachComputer?.(); // the run is bound to this voice handle: it ends with it
     adapter?.close();
     viz?.close();
     canvas?.close(); // drawings already under way still finish and reach the canvas bus
@@ -714,7 +729,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     expectFacts(canvas?.userTurn(text));
     sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
     lastUserText = text;
-    if (typedByHim) { speechAt = now(); noteSpoken(text, now(), turnId); } // typed in the Desk composer: his words; a context turn is not
+    if (typedByHim) { speechAt = now(); noteSpoken(text, now(), turnId, { typed: true }); } // typed in the Desk composer: his words; a context turn is not
     armNoAnswer(text);
     trace.event('transcript.user.final', { turn: turnId, text, typed: true });
     adapter.sendText(text);
@@ -725,7 +740,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
    * Florian marked something on the screen (Screen Agent highlight): the description reaches the model as a marked context turn that asks for
    * an answer. It is no user transcript: the browser sees nothing of it, the trace flags it `marker`, no illustrator, no growing-fragment merge.
    */
-  function deliverMarker(raw) {
+  function deliverMarker(raw, quiet = false) {
     const text = String(raw ?? '').slice(0, 12000).trim();
     if (!text || !adapter || closed) return false;
     flushTranscript();
@@ -738,7 +753,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     lastFinal = spoken && !spoken.answered ? { ...spoken, turn: turnId } : null; // he often goes on talking while he draws: the sentence still grows across the marking
     lastUserText = text;
     armNoAnswer(text);
-    trace.event('transcript.user.final', { turn: turnId, text: text.replace(/\d/g, '#'), marker: true }); // what he circled is screen data: numbers stay out of the durable trace
+    trace.event('transcript.user.final', quiet ? { turn: turnId, marker: true, computer: true, chars: text.length } : { turn: turnId, text: text.replace(/\d/g, '#'), marker: true }); // what he circled is screen data: numbers stay out of the durable trace
     adapter.sendText(text);
     return true;
   }

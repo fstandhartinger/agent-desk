@@ -53,5 +53,7 @@ export const METHOD_PARAMS = {
   // voice action (Sandy bridge only): the gateway gates it on Florian's spoken words, the bridge guards it once more (jobStart.js)
   'job.start': { requestId: 'string', title: 'string', prompt: 'string', spoken: 'array', host: 'string', aid: 'string', provider: 'string' },
   'notify.loginLink': { url: 'string' },
+  // voice computer runs (server_read): one named unit or job unit, 200 lines at most, both hosts
+  'journal.tail': { unit: 'string', job: 'string', lines: 'integer' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
 };

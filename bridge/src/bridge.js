@@ -8,6 +8,7 @@ import * as skills from './skills.js';
 import * as discord from './discord.js';
 import * as mail from './mail.js';
 import * as ops from './ops.js';
+import * as journal from './journal.js';
 import * as audit from './audit.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
@@ -70,6 +71,7 @@ export function buildMethods(claude, host = 'lechonk') {
     'skills.read': skills.read,
     'ledger.entries': ledger.entries,
     'code.outline': outline,
+    'journal.tail': journal.tail,
   };
   if (host === 'sandy') {
     return {
