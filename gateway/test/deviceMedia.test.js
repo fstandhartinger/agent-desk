@@ -137,3 +137,10 @@ it('dictionary entries from the app are validated', () => {
   assert.deepEqual(dictionaryEntry({ term: 'Neu', previous: 'Alt' }), { term: 'Neu', replace_from: [], previous: 'Alt' });
   for (const bad of [{}, { term: '' }, { term: ' x' }, { term: 'a\nb' }, { term: 'x'.repeat(101) }, { term: 'x', replace_from: 'y' }, { term: 'x', replace_from: Array(41).fill(0).map((_, i) => `a${i}`) }, { term: 'x', previous: '' }]) assert.throws(() => dictionaryEntry(bad), JSON.stringify(bad));
 });
+
+it('a transcript that only reads the vocabulary prompt back is not a source', async () => {
+  const media = createDeviceMedia({ env: { GROQ_API_KEY: 'g' }, fetchImpl: async () => Response.json({ text: 'Example, Begriff.' }) });
+  await assert.rejects(media.dictate(wav(), ctx, { items: [{ term: 'Example' }, { term: 'Begriff' }] }), e => e.status === 504 || e.status === 502);
+  const real = createDeviceMedia({ env: { GROQ_API_KEY: 'g' }, fetchImpl: async () => Response.json({ text: 'Example' }) });
+  assert.equal((await real.dictate(wav(), ctx, { items: [{ term: 'Example' }] })).text, 'Example');
+});

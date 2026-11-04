@@ -241,7 +241,11 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       limits.addCost(duration / 60 * 0.03);
       const res = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}` }, redirect: 'error', body, signal: controller.signal });
       if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
-      return (await res.json()).text;
+      const text = (await res.json()).text;
+      // Whisper reads its prompt back on a very short clip: 'Screen Agent, REAX, ...' instead of what he said (4 Nov). That is no transcript.
+      const said = normalized(text);
+      if (prompt && said.includes(' ') && normalized(prompt).includes(said)) return '';
+      return text;
     };
     let resolvedDictionary = {}, resolvedContext = {};
     let contextSettled = false;
