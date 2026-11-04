@@ -47,6 +47,7 @@ const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its fir
 
 export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
+  let inScreenAgent = false;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
   // Live activity for the dock and the Screen Agent window (v0.1.7): what the desk does right now. Not traced: tool.call / tool.done already are.
   const activity = (obj) => sendJson({ type: 'activity', ...obj, at: now() });
@@ -626,7 +627,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock, tools: toolDefs, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    inScreenAgent = msg.client?.app === 'screen-agent';
+    // In the app the Desk window is hidden: a handoff button there is out of his sight, and with no page open there is no explainer to look up (trace a#92a698: "Gerade ist keine Erklärseite offen" as the answer to his marking).
+    const sessionTools = inScreenAgent ? toolDefs.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : toolDefs;
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent }) + artifactBlock, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
@@ -668,7 +672,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false }) + artifactBlock });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
