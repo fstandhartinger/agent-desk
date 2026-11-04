@@ -187,6 +187,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     async function ensureSession() {
       if (aid) return aid;
       const body = { ...(meta ?? { kind, provider }), kind, gateway_commit: commit() };
+      body.provider ||= kind; // the registry needs a provider; a device trace has none, and every device log of the day was refused for that (kind-refused-422)
       const res = await registry('/v1/sessions', { method: 'POST', body });
       if (!res?.id) throw new Error('registry returned no id');
       aid = `a#${String(res.id).replace(/^a#/, '')}`;
