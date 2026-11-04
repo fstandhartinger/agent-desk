@@ -139,8 +139,8 @@ it('dictionary entries from the app are validated', () => {
 });
 
 it('a transcript that only reads the vocabulary prompt back is not a source', async () => {
-  const media = createDeviceMedia({ env: { GROQ_API_KEY: 'g' }, fetchImpl: async () => Response.json({ text: 'Example, Begriff.' }) });
-  await assert.rejects(media.dictate(wav(), ctx, { items: [{ term: 'Example' }, { term: 'Begriff' }] }), e => e.status === 504 || e.status === 502);
+  const media = createDeviceMedia({ env: { GROQ_API_KEY: 'g' }, fetchImpl: async () => Response.json({ text: 'Example, Begriff, Wort.' }) });
+  await assert.rejects(media.dictate(wav(), ctx, { items: [{ term: 'Example' }, { term: 'Begriff' }, { term: 'Wort' }] }), e => e.status === 504 || e.status === 502);
   const real = createDeviceMedia({ env: { GROQ_API_KEY: 'g' }, fetchImpl: async () => Response.json({ text: 'Example' }) });
   assert.equal((await real.dictate(wav(), ctx, { items: [{ term: 'Example' }] })).text, 'Example');
 });
