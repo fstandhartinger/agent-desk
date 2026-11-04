@@ -39,7 +39,7 @@ test('the loop gets his verbatim final (not the model goal), a fixed prompt, exa
   assert.equal(stopReason(h), 'done');
   assert.equal(h.vision.ofOp('stop').length, 1);
   const fact = h.session.said.at(-1);
-  assert.match(fact, /Computer-Lauf ist beendet \(erledigt\)\. Aktionen: 1\./);
+  assert.match(fact, /Computer-Lauf ist beendet \(der Agent hat aufgehört; ob es geklappt hat, steht in der Zusammenfassung\)\. Aktionen: 1\./);
   assert.match(fact, /<artifact_data>/);
   assert.ok(!/https?:|evil\.example|google\.com/.test(fact), fact);
   assert.match(fact, /\[Link\]/);
@@ -439,7 +439,7 @@ test('the start: no capable app, the wrong client, a refusing app and a silent a
   assert.equal(h.vision.sent.length, 0);
 
   h = setup({ script: [] });
-  h.session.client = 'desk-web';
+  h.session.client = { app: 'web', version: '1', commit: 'c', device: 'desktop' };
   r = await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   assert.match(r.text, /nur im Screen Agent/);
   assert.equal(h.vision.sent.length, 0);
@@ -453,6 +453,7 @@ test('the start: no capable app, the wrong client, a refusing app and a silent a
   h = setup({ script: [], app: () => null });
   r = await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   assert.match(r.text, /keine Antwort/);
+  assert.equal(h.vision.ofOp('stop').length, 1); // a late start must not hold the app's run slot
   assert.ok(!h.computer.isOpen('s1'));
 });
 

@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { setEnv } from './helpers/env.js';
-import { fakeVision, scriptedModel, until } from './helpers/computer.js';
+import { readFileSync } from 'node:fs';
+import { fakeVision, SCREEN_AGENT, scriptedModel, until } from './helpers/computer.js';
 
 setEnv({});
 const { runVoiceSession } = await import('../src/voice/session.js');
@@ -15,7 +16,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SPOKEN = 'Soll ich die Mail an anna@example.org mit dem Betreff Rechnung senden?';
 const R2 = { ok: false, code: 'needs-confirm', class: 'R2', rule: 'send', needs_confirm: { hash: 'a1b2c3d4e5f60718', spoken: SPOKEN } };
 
-function harness(t, { client = 'screen-agent', script = [{ name: 'chrome_click', args: { ref: 'e5' } }, { name: 'done', args: { summary: 'fertig' } }], app, provider = 'xai' } = {}) {
+function harness(t, { client = SCREEN_AGENT, script = [{ name: 'chrome_click', args: { ref: 'e5' } }, { name: 'done', args: { summary: 'fertig' } }], app, provider = 'xai' } = {}) {
   resetActions();
   const ws = Object.assign(new EventEmitter(), { OPEN: 1, CONNECTING: 0, readyState: 1, sent: [], close() { this.readyState = 3; } });
   ws.send = (d) => ws.sent.push(typeof d === 'string' ? JSON.parse(d) : d);
@@ -89,8 +90,28 @@ test('a bare ja after a model question harvests nothing; a question ABOUT the to
   assert.equal(h.vision.sent.length, 0);
 });
 
+test('regression a#4d63c3: the client object the Screen Agent really sends opens a run; the old string compare refused every session', async (t) => {
+  assert.match(readFileSync(new URL('../../web/src/lib/clientInfo.ts', import.meta.url), 'utf8'), /return \{ app: 'screen-agent', version:/); // the wire shape this test stands on
+  const h = harness(t);
+  await sleep(1);
+  h.say('Klicke auf diesen Details-Link.');
+  h.call('c1', 'computer_task', { goal: 'x' });
+  assert.doesNotMatch(await h.result('c1'), /nur im Screen Agent|Nichts/);
+  assert.equal(h.vision.sent[0].op, 'start');
+  assert.equal(h.vision.sent[0].goal, 'Klicke auf diesen Details-Link.');
+});
+
+test('a sentence that names nothing starts a read-only run and the voice model says so, without dictating a command', async (t) => {
+  const h = harness(t);
+  h.vision.app = (w) => (w.op === 'start' ? { ok: true, code: 'done', rule: 'start', result: 'Bereich: keine Seite; Programme: keine', run_state: 'running' } : { ok: true, code: 'done' });
+  await sleep(1);
+  h.say('Klicke auf diesen Details-Link.');
+  h.call('c1', 'computer_task', { goal: 'x' });
+  assert.match(await h.result('c1'), /darf sie nur lesen.*"hier"/);
+});
+
 test('a session of another client (Desk in the browser) gets one sentence and no command', async (t) => {
-  const h = harness(t, { client: 'web' });
+  const h = harness(t, { client: { app: 'web', version: '1', commit: 'c', device: 'desktop' } });
   await sleep(1);
   h.say('Übernimm den Computer.');
   h.call('c1', 'computer_task', { goal: 'x' });

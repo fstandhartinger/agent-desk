@@ -10,7 +10,7 @@ const OPENER = new RegExp(`(?<![\\p{L}\\p{N}_])(?:übernimm|steuere|fernsteuer(?
 // "Mach das am Rechner" is an order; "Ich sitze am Rechner" is a report.
 const AT_DESK = new RegExp(`(?<![\\p{L}\\p{N}_])(?:mach|erledige|arbeite|bedien|steuer)\\p{L}*[^.!?;\\n]{0,40}(?<![\\p{L}\\p{N}_])am\\s+rechner${END}`, 'iu');
 const AT_DESK_START = new RegExp(`^\\s*(?:bitte\\s+)?am\\s+rechner${END}`, 'iu'); // "Am Rechner bitte den Dialog schließen."
-const IMPERATIVE = /^(?:klick(?:e)?|öffne|tippe|geh(?:e)?\s+auf)(?![\p{L}\p{N}_])/iu;
+const IMPERATIVE = /^(?:klick(?:e)?|öffne|tippe|übernehme\s+(?:den|meinen)\s+(?:computer|rechner|pc)|geh(?:e)?\s+auf)(?![\p{L}\p{N}_])/iu; // "Übernehme den Computer" is how speech recognition hears "Übernimm"; only with that object: "Okay, übernehme das selbst" is a report
 const LEAD = /^(?:(?:und|dann|danach|bitte|mal|jetzt|noch|also|okay|ok|hey|so|na|aber|gut|nun)\b[\s,]*)+/i;
 // "geh auf die Frage ein" answers a point, it clicks nothing
 const GO_INTO = /^geh(?:e)?\s+auf\b(?:(?!\bein\b).){0,40}\bein\b/i;
@@ -19,13 +19,17 @@ const GO_INTO = /^geh(?:e)?\s+auf\b(?:(?!\bein\b).){0,40}\bein\b/i;
 const NEGATION = /(?<![\p{L}\p{N}_])(?:nicht|nichts|kein(?:e|en|em|er|es)?|nie|niemals|ohne|don'?t|never|not)(?![\p{L}\p{N}_])/iu;
 const DOUBT = /(?<![\p{L}\p{N}_])(?:glaub\p{L}*|denk\p{L}*|vielleicht|wäre|wären|würde|würdest|würden|könnte|könntest|sollte|sollten|soll|sollen|falls|wenn|ob|angenommen|beispiel|hypothetisch|sagt|sagte|sagen|meinte|meint|behauptet|fragt|möchte|möchten|will|wollen|dass|damit|idealerweise|feature|funktion|idee)(?![\p{L}\p{N}_])/iu;
 const POLITE = /^\s*(?:und\s+)?(?:kannst|könntest|würdest)\s+du(?![\p{L}\p{N}_])/iu;
+// One sentence that ENDS in the verb, with "für mich auf" before it: "Kannst du ... für mich auf den Link klicken?". Not "Kannst du den Computer steuern?" (a question about what
+// it can do), "für mich auch auf Links klicken?" or "für mich die Kosten pro Klick ausrechnen?".
+const POLITE_CLICK = /^\s*(?:und\s+)?kannst\s+du(?![\p{L}\p{N}_])[^.!?;\n]{0,80}(?<![\p{L}\p{N}_])für\s+mich\s+auf\s[^.!?;\n]{1,120}(?<![\p{L}\p{N}_])klicken\s*[.?!]?\s*$/iu;
 const QUESTION_START = /^\s*(?:und\s+)?(?:kannst|könntest|darfst|sollst|willst|möchtest|würdest|hast|bist|ist|sind|kann|wird|kommst)(?![\p{L}\p{N}_])/iu;
 
 export function isTrigger(text) {
   const t = String(text ?? '');
   if (ABOUT.test(t) || NEGATION.test(t) || DOUBT.test(t)) return false;
-  if ((t.includes('?') || QUESTION_START.test(t)) && !(POLITE.test(t) && OPENER.test(t))) return false; // a question opens nothing, except the polite order "Kannst du das für mich klicken?" with an opener
-  if (OPENER.test(t) || AT_DESK.test(t) || AT_DESK_START.test(t)) return true;
+  const politeOrder = (POLITE.test(t) && OPENER.test(t)) || POLITE_CLICK.test(t);
+  if ((t.includes('?') || QUESTION_START.test(t)) && !politeOrder) return false; // a question opens nothing, except the polite order "Kannst du das für mich klicken?"
+  if (politeOrder || OPENER.test(t) || AT_DESK.test(t) || AT_DESK_START.test(t)) return true;
   return t.split(/[.!;,\n]+/).some((clause) => {
     const c = clause.trim().replace(LEAD, '');
     return IMPERATIVE.test(c) && !GO_INTO.test(c);

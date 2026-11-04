@@ -45,7 +45,8 @@ export function validateResult(body) {
 }
 
 const noUrls = (t) => redact(String(t ?? '')).split(/\s+/).slice(0, 200).map((tok) => (/^(?:https?:\/\/|www\.)/i.test(tok) || looksLikeHost(tok) || tok.length > 120 ? '[Link]' : tok)).join(' ').trim().slice(0, 300);
-const WHY = { done: 'erledigt', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als acht Bestätigungen nötig', 'start-denied': 'Florian hat den Start nicht bestätigt', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'start-failed': 'der Start schlug fehl' };
+const WHY = { done: 'der Agent hat aufgehört; ob es geklappt hat, steht in der Zusammenfassung', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als acht Bestätigungen nötig', 'start-denied': 'Florian hat den Start nicht bestätigt', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'start-failed': 'der Start schlug fehl' };
+const NOTHING_NAMED = 'Bereich: keine Seite; Programme: keine'; // the app's start reply when his sentence named nothing (ScopeText in ComputerAgent.cs)
 const QUIET = new Set(['voice-gone']);
 const VERB = { ui_windows: 'lese die Fenster', ui_tree: 'lese das Fenster', ui_click: 'klicke', ui_type: 'tippe', key: 'drücke eine Taste', scroll: 'scrolle', window_focus: 'wechsle das Fenster', screenshot: 'schaue auf den Bildschirm', chrome_tabs: 'lese die Tabs', chrome_open: 'öffne eine Seite', chrome_snapshot: 'lese die Seite', chrome_click: 'klicke', chrome_fill: 'fülle ein Feld aus', chrome_read: 'lese die Seite', server_read: 'lese vom Server' };
 const letters = (t, n = 40) => redact(String(t ?? '')).replace(/[^\p{L}\p{N} ]+/gu, '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -366,7 +367,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   async function begin(sid, { text, goalArg }) {
     const s = sessions.get(sid);
     if (!s) return { ok: false, text: 'Keine Sprachsitzung: die Computer-Steuerung gibt es nur im Sprachgespräch. Nichts passiert.' };
-    if (s.client !== 'screen-agent') return { ok: false, text: 'Die Computer-Steuerung gibt es nur im Screen Agent, nicht in diesem Fenster. Nichts passiert. Sag das Florian in einem Satz.' };
+    // s.client is the object from web/src/lib/clientInfo.ts: {app, version, commit, device}
+    if (s.client?.app !== 'screen-agent') return { ok: false, text: 'Die Computer-Steuerung gibt es nur im Screen Agent, nicht in diesem Fenster. Nichts passiert. Sag das Florian in einem Satz.' };
     if (runs.has(sid)) return { ok: true, text: 'Es läuft schon eine Computer-Steuerung; Florians Satz ergänzt sie, falls er einen Auftrag enthielt. Sag nur einen kurzen Satz.' };
     if (!vision.computerReady?.(sid)) return { ok: false, text: 'Nichts passiert: der Screen Agent auf Florians Computer kann das gerade nicht (Computer-Steuerung ist dort ausgeschaltet, nicht erlaubt oder die App ist zu alt). Sag das Florian in einem Satz; er schaltet sie im Tray unter "Computer-Steuerung erlauben" ein.' };
     const spend = limits.check(sid, 'spend');
@@ -376,11 +378,12 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.ev('computer.run.start', { run: R.run, goal: goalForTrace(text), modelGoal: short(goalArg ?? '', 120), scope: R.scopeWords.length, model: R.model });
     audit({ action: 'computer.start', detail: `${R.run} scope=${R.scopeWords.length}` });
     const wire = { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', goal: R.goalText, scopeWords: R.scopeWords };
-    const res = await vision.computerSend(sid, wire, { waitMs: 8000, validate: validateResult });
+    const res = await vision.computerSend(sid, wire, { waitMs: 14_000, validate: validateResult }); // "hier" connects to Chrome inside the start: up to 10 s with its allow dialog
     const asks = res.code === 'needs-confirm'; // a start with a non-empty scope needs his code or chord too (a speaker in a video must not open a run)
     if (!res.ok && !asks) {
       R.ev('computer.run.stop', { run: R.run, why: 'start-failed', code: res.code, rule: res.rule, actions: 0, ms: now() - R.startedAt });
       runs.delete(sid); R.ended = true; R.why = 'start-failed';
+      if (res.code === 'unclear') vision.computerSend?.(sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'stop', reason: 'start-failed' }, { fire: true }); // a late start must not hold the app's run slot
       const why = res.code === 'refused' || res.code === 'denied' ? `der Screen Agent hat abgelehnt${res.rule ? ` (${res.rule})` : ''}` : res.code === 'unclear' ? 'keine Antwort vom Screen Agent' : 'der Screen Agent ist nicht erreichbar';
       return { ok: false, text: `Nichts gestartet: ${why}. Sag das Florian in einem Satz.` };
     }
@@ -393,6 +396,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       return { ok: true, text: 'Die Computer-Steuerung wartet auf Florians Bestätigung mit einem Code. Der Desk stellt die Frage gleich selbst; sag jetzt nichts weiter.' };
     }
     go();
+    if (res.result === NOTHING_NAMED) return { ok: true, text: 'Die Computer-Steuerung läuft, aber Florians Satz nennt keine Seite und kein Programm: so darf sie nur lesen, nichts klicken und nichts tippen. Sag ihm das in einem Satz: für einen Klick soll er das Wort "hier" oder den Namen der Seite mitsagen. Sprich ihm keinen ganzen Befehl vor.' };
     return { ok: true, text: 'Die Computer-Steuerung läuft. Auf dem Bildschirm steht ein lila Rahmen; Strg+Win+Umschalt+X stoppt sofort. Sag nur einen kurzen Satz, zum Beispiel dass du anfängst; die Rückmeldung kommt, wenn der Lauf fertig ist.' };
   }
 
