@@ -1,6 +1,7 @@
 // Computer-use trigger (item F, DESIGN-F "Trigger"). Stricter than the two voice actions: ONLY his one latest SPOKEN final, verbatim.
 // No yes-bridging, no typed turn, no echo, no older entry; the question filter applies. The loop later receives exactly this text.
 import { ABOUT } from '../voiceActions.js';
+import { unrestricted } from './mode.js';
 
 export const TRIGGER_AGE_MS = 90_000;
 // Openers anywhere in the sentence ("Übernimm mal den Computer"), imperatives only at the START of a clause. Every opener has a RIGHT boundary
@@ -39,6 +40,7 @@ export function isTrigger(text) {
 /** {ok, entries:[e], text} when his latest spoken final opens (or extends) a run, else {ok:false, why}. */
 export function checkComputerTrigger(spoken, now = Date.now()) {
   const e = spoken.at(-1);
+  if (unrestricted()) return e?.used?.computer_task ? { ok: false, why: 'used' } : { ok: true, entries: e ? [e] : [], text: String(e?.text ?? '') }; // the voice model decides; he watches
   if (!e) return { ok: false, why: 'no-trigger' };
   if (e.typed) return { ok: false, why: 'typed' };
   if (e.echo) return { ok: false, why: 'echo' };

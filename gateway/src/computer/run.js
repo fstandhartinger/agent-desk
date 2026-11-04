@@ -10,6 +10,7 @@ import { limits as defaultLimits } from '../limits.js';
 import { ABOUT } from '../voiceActions.js';
 import { askInstruction, ASK_MS, buildAsk, isGoWord, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
+import { unrestricted, UNRESTRICTED_ACTIONS, UNRESTRICTED_RUN_MS } from './mode.js';
 import { goalForTrace, openrouterComplete, runLoop, toWire } from './loop.js';
 import { serverRead } from './serverRead.js';
 
@@ -85,7 +86,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   function makeRun(sid, s, { text, goalArg, scopeWords }) {
     const R = {
       sid, run: hex('r'), startedAt: now(), goalText: String(text).slice(0, GOAL_CHARS), scopeWords, actions: 0, cost: 0, seq: 0, asks: 0, expiries: 0, questions: 0,
-      ended: false, why: null, paused: false, awaitingGo: false, stepLimit: STEP_REPORT, pending: null, answer: null, inflight: 0, lastActivity: now(), appBeatAt: now(), nextBeat: now() + BEAT_MS,
+      ended: false, why: null, paused: false, awaitingGo: false, stepLimit: unrestricted() ? Infinity : STEP_REPORT, pending: null, answer: null, inflight: 0, lastActivity: now(), appBeatAt: now(), nextBeat: now() + BEAT_MS,
       note: null, extTurn: null, waiters: [], abort: new AbortController(), tools: {}, model: cfg.computerModel(), signal: null,
     };
     R.signal = R.abort.signal;
@@ -99,8 +100,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.touch = touch;
 
     R.limitReason = () => {
-      if (now() - R.startedAt >= RUN_MS) return 'time';
-      if (R.actions >= MAX_ACTIONS) return 'actions';
+      if (now() - R.startedAt >= (unrestricted() ? UNRESTRICTED_RUN_MS : RUN_MS)) return 'time';
+      if (R.actions >= (unrestricted() ? UNRESTRICTED_ACTIONS : MAX_ACTIONS)) return 'actions';
       if (R.cost >= cfg.computerRunUsd()) return 'cost';
       if (dayCost() >= cfg.computerDayUsd()) return 'day-cost';
       return null;
@@ -401,7 +402,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   }
 
   /** The two voice action tools need the app confirm during a run and for 5 minutes after it. */
-  const guarded = (sid) => Boolean(runs.get(sid)) || (guards.get(sid) ?? 0) > now();
+  const guarded = (sid) => !unrestricted() && (Boolean(runs.get(sid)) || (guards.get(sid) ?? 0) > now());
 
   function attach(sid, session) {
     sessions.set(sid, session);
