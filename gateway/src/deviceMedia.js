@@ -274,7 +274,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       }
       return google([{ inline_data: { mime_type: 'audio/wav', data: audio.toString('base64') } }, { text: 'Transkribiere wortgetreu, meist Deutsch. Nur das Transkript; nichts hinzuerfinden.' }], controller.signal, { thinking: 'low', maxTokens: 3000 });
     });
-    const geminiJob = geminiWaits ? jobs.pop() : null; // kept out of the wait below: it only matters when nothing else answered
+    const geminiJob = geminiWaits && googleKey() ? jobs.pop() : null; // kept out of the wait below: it only matters when nothing else answered
     if (maiKey()) add('mai', async () => {
       if (!dictionarySettled || !contextSettled) await Promise.all([dictionarySettled || settled(dictionaryJob), contextSettled || settled(contextJob)]);
       if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
