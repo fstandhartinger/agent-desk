@@ -101,6 +101,15 @@ test('regression a#4d63c3: the client object the Screen Agent really sends opens
   assert.equal(h.vision.sent[0].goal, 'Klicke auf diesen Details-Link.');
 });
 
+test('a sentence that names nothing starts a read-only run and the voice model says so, without dictating a command', async (t) => {
+  const h = harness(t);
+  h.vision.app = (w) => (w.op === 'start' ? { ok: true, code: 'done', rule: 'start', result: 'Bereich: keine Seite; Programme: keine', run_state: 'running' } : { ok: true, code: 'done' });
+  await sleep(1);
+  h.say('Klicke auf diesen Details-Link.');
+  h.call('c1', 'computer_task', { goal: 'x' });
+  assert.match(await h.result('c1'), /darf sie nur lesen.*"hier"/);
+});
+
 test('a session of another client (Desk in the browser) gets one sentence and no command', async (t) => {
   const h = harness(t, { client: { app: 'web', version: '1', commit: 'c', device: 'desktop' } });
   await sleep(1);
