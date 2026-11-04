@@ -439,7 +439,7 @@ test('the start: no capable app, the wrong client, a refusing app and a silent a
   assert.equal(h.vision.sent.length, 0);
 
   h = setup({ script: [] });
-  h.session.client = 'desk-web';
+  h.session.client = { app: 'web', version: '1', commit: 'c', device: 'desktop' };
   r = await h.computer.begin('s1', { text: GOAL, goalArg: '' });
   assert.match(r.text, /nur im Screen Agent/);
   assert.equal(h.vision.sent.length, 0);

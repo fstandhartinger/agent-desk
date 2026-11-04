@@ -25,8 +25,11 @@ export function fakeVision() {
   return v;
 }
 
+/** What web/src/lib/clientInfo.ts really sends in the voice start message, as seen in trace a#4d63c3. */
+export const SCREEN_AGENT = { app: 'screen-agent', version: '0.1.8', commit: '3add1fe11b26', device: 'windows' };
+
 export function fakeSession(extra = {}) {
-  const s = { client: 'screen-agent', said: [], events: [], activities: [], say: (t) => { s.said.push(t); return true; }, trace: (type, data) => s.events.push({ type, ...data }), activity: (a) => s.activities.push(a), ...extra };
+  const s = { client: SCREEN_AGENT, said: [], events: [], activities: [], say: (t) => { s.said.push(t); return true; }, trace: (type, data) => s.events.push({ type, ...data }), activity: (a) => s.activities.push(a), ...extra };
   return s;
 }
 

@@ -6,9 +6,9 @@ import { checkComputerTrigger } from './gate.js';
 
 const out = (ok, content, extra = {}) => ({ ok, summary: short(content, 200), content: redact(content), ...extra });
 const SAY = {
-  'no-trigger': 'Nichts passiert: Florian hat in seinem letzten Satz nicht darum gebeten, den Computer zu übernehmen oder etwas zu klicken, zu öffnen oder zu tippen. Frage ihn in einem kurzen Satz, ob du den Computer steuern sollst; erst sein eigener Satz löst es aus.',
+  'no-trigger': 'Nichts passiert: Florian hat in seinem letzten Satz nicht als Befehl gesagt, den Computer zu übernehmen oder etwas zu klicken, zu öffnen oder zu tippen. Bitte ihn in einem kurzen Satz, den Auftrag selbst als Befehl zu sagen; ein Ja reicht nicht. Sprich ihm keinen Befehl zum Nachsagen vor: was er dir nachspricht, gilt als dein Echo.',
   typed: 'Nichts passiert: getippter Text löst die Computer-Steuerung nie aus. Florian muss es sagen.',
-  echo: 'Nichts passiert: das war dein eigenes Echo, nicht Florian.',
+  echo: 'Nichts passiert: Florians Satz glich fast wörtlich dem, was du gerade gesagt hast, und zählt deshalb als dein Echo. Bitte ihn, den Auftrag mit eigenen Worten zu sagen, und sprich keinen Befehl vor.',
   old: 'Nichts passiert: Florians Satz ist zu lange her. Frage ihn kurz, ob du den Computer steuern sollst.',
   used: 'Für diesen Satz ist das schon passiert; kein zweites Mal. Sag nur einen kurzen Satz.',
   question: 'Nichts passiert: das war eine Frage, kein Auftrag. Beantworte sie.',

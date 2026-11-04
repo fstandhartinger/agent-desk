@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { setEnv } from './helpers/env.js';
-import { fakeVision, flush, scriptedModel, setup, until } from './helpers/computer.js';
+import { fakeVision, flush, SCREEN_AGENT, scriptedModel, setup, until } from './helpers/computer.js';
 
 setEnv({});
 const { isTrigger, checkComputerTrigger } = await import('../src/computer/gate.js');
@@ -260,7 +260,7 @@ test('trace (session): the app\'s R2 text and his answers to an ask are in the d
   const adapter = { sendAudio() {}, sendText() {}, interrupt() {}, close() {}, sendToolResult() {}, recover() {} };
   runVoiceSession(ws, deps, { provider: 'xai', apiKey: 'k', now: () => clockNow, mergeMs: 5, noAnswerMs: () => 60_000, create: (_o, e) => { emit = e; return adapter; } });
   const msg = (o) => ws.emit('message', Buffer.from(JSON.stringify(o)), false);
-  msg({ type: 'start', client: 'screen-agent' });
+  msg({ type: 'start', client: SCREEN_AGENT });
   t.after(() => msg({ type: 'stop' }));
   await new Promise((r) => setTimeout(r, 1));
   emit({ t: 'speech_started' }); clockNow += 300;
@@ -314,7 +314,7 @@ test('caps: NaN, text and negative values fall back to the default; the daily co
   const mk = () => {
     const vision = fakeVision(); vision.app = () => ok();
     const c = createComputer({ vision, hub: {}, now: () => clock.t, complete: scriptedModel([call('ui_windows'), call('done', { summary: 'x' })], { costUsd: 2.4 }), tickMs: 1e9, limits: { check: () => ({ ok: true }), addCost() {} }, statePath: file });
-    const session = { client: 'screen-agent', say: () => true, trace() {}, activity() {} };
+    const session = { client: SCREEN_AGENT, say: () => true, trace() {}, activity() {} };
     c.attach('s1', session);
     return c;
   };
@@ -353,7 +353,7 @@ test('NIT: the day counter is written to a temp file and renamed over the real o
   try {
     const vision = fakeVision(); vision.app = () => ok();
     const c = createComputer({ vision, hub: {}, now: () => Date.UTC(2026, 10, 3, 12), complete: scriptedModel([call('ui_windows'), call('done', { summary: 'x' })], { costUsd: 0.5 }), tickMs: 1e9, limits: { check: () => ({ ok: true }), addCost() {} }, statePath: file });
-    c.attach('s1', { client: 'screen-agent', say: () => true, trace() {}, activity() {} });
+    c.attach('s1', { client: SCREEN_AGENT, say: () => true, trace() {}, activity() {} });
     await c.begin('s1', { text: GOAL, goalArg: '' });
     await until(() => c.runOf('s1') === null);
   } finally { fs.writeFileSync = w0; fs.renameSync = r0; }

@@ -366,7 +366,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   async function begin(sid, { text, goalArg }) {
     const s = sessions.get(sid);
     if (!s) return { ok: false, text: 'Keine Sprachsitzung: die Computer-Steuerung gibt es nur im Sprachgespräch. Nichts passiert.' };
-    if (s.client !== 'screen-agent') return { ok: false, text: 'Die Computer-Steuerung gibt es nur im Screen Agent, nicht in diesem Fenster. Nichts passiert. Sag das Florian in einem Satz.' };
+    // s.client is the object from web/src/lib/clientInfo.ts: {app, version, commit, device}
+    if (s.client?.app !== 'screen-agent') return { ok: false, text: 'Die Computer-Steuerung gibt es nur im Screen Agent, nicht in diesem Fenster. Nichts passiert. Sag das Florian in einem Satz.' };
     if (runs.has(sid)) return { ok: true, text: 'Es läuft schon eine Computer-Steuerung; Florians Satz ergänzt sie, falls er einen Auftrag enthielt. Sag nur einen kurzen Satz.' };
     if (!vision.computerReady?.(sid)) return { ok: false, text: 'Nichts passiert: der Screen Agent auf Florians Computer kann das gerade nicht (Computer-Steuerung ist dort ausgeschaltet, nicht erlaubt oder die App ist zu alt). Sag das Florian in einem Satz; er schaltet sie im Tray unter "Computer-Steuerung erlauben" ein.' };
     const spend = limits.check(sid, 'spend');

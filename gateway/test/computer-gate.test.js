@@ -30,6 +30,26 @@ test('trigger table: what he really says opens a run', () => {
   ]) assert.equal(checkComputerTrigger([e(t)], NOW).ok, true, t);
 });
 
+test('trigger table, trace a#4d63c3: his real orders open a run; near misses stay closed', () => {
+  for (const t of [
+    'Kannst du den Computer steuern und für mich auf den Details-Link auf der neuesten, äh, Telegram-Nachricht klicken?',
+    'Kannst du für mich auf den Link klicken?',
+    'Übernehme den Computer.',
+    'Klicke auf diesen Details-Link.',
+  ]) assert.equal(checkComputerTrigger([e(t)], NOW).ok, true, t);
+  for (const t of [
+    'Ich übernehme den Computer.',
+    'Das übernehme ich selbst.',
+    'Übernehme ich das?',
+    'Übernehme ich das.',
+    'Kannst du den Computer steuern?',
+    'Kannst du für mich nicht klicken?',
+    'Was passiert, wenn man für mich klicken lässt?',
+    'Ja, schau mal, was passiert.',
+    'Die Computersteuerung ist erlaubt. Du kannst ja mal einen Screenshot machen.',
+  ]) assert.equal(checkComputerTrigger([e(t)], NOW).ok, false, t);
+});
+
 test('trigger table: questions ABOUT the topic, descriptions and "geh auf die Frage ein" open nothing', () => {
   for (const t of [
     'Was bedeutet Computer Use?',
