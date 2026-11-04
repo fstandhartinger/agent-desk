@@ -154,6 +154,7 @@ it('M7: a truncated merge loses to the longest source; the first finisher does n
   const long = 'Das ist ein ziemlich langer Satz über die Freigabe von Reax eins drei und ihre Folgen für den Launch nächste Woche';
   const short = 'Das ist ein ziemlich langer Satz';
   const mk = (merge) => createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x' }, fetchImpl: async (url, opts) => {
+    if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: merge } }] });
     if (String(url).includes('openrouter')) return Response.json({ text: short, usage: { seconds: 6, cost: 0.0001 } }); // the fast, cut-off one
     if (String(url).includes('groq')) { await new Promise(r => setTimeout(r, 20)); return Response.json({ text: long }); }
     const text = JSON.parse(opts.body).contents[0].parts[0].text;
