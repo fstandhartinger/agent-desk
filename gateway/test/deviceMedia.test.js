@@ -111,7 +111,7 @@ it('the fast path: two sources plus a short grace, the fast merge model, nothing
     if (u.includes('groq')) return Response.json({ text: 'Hallo Karpati wie geht es' });
     if (u.includes('audio/transcriptions') && u.includes('openrouter')) return Response.json({ text: 'Hallo Karpathy, wie geht es?', usage: { seconds: 1 } });
     if (u.includes('openai.com')) return new Promise(() => {});
-    if (u.includes('chat/completions')) { merged = JSON.parse(opts.body); return Response.json({ choices: [{ message: { content: 'Hallo\u00a0Karpathy, wie\u2011geht es?' } }] }); }
+    if (u.includes('chat/completions')) { merged = JSON.parse(opts.body); return Response.json({ choices: [{ message: { content: 'Hallo\u00a0Karpathy, wie geht es? Test\u2011Wort' } }] }); }
     throw Error(`unexpected ${u}`);
   } });
   const t = Date.now();
@@ -120,7 +120,7 @@ it('the fast path: two sources plus a short grace, the fast merge model, nothing
   assert.equal(merged.model, 'test/fast'); assert.deepEqual(merged.reasoning, { effort: 'low', exclude: true });
   const prompt = merged.messages[0].content;
   assert.match(prompt, /"ersetze":\{"Karpathy":\["Karpati"\]\}/); assert(!prompt.includes('unrelated')); assert(!prompt.includes('Wort200'));
-  assert.equal(r.text, 'Hallo Karpathy, wie-geht es?'); assert.equal(r.merged, true); assert.equal(r.sources.openai, null);
+  assert.equal(r.text, 'Hallo Karpathy, wie geht es? Test-Wort'); assert.equal(r.merged, true); assert.equal(r.sources.openai, null);
 });
 it('a merge that is too slow does not hold the text back: the source most others agree with goes out', async () => {
   const media = createDeviceMedia({ graceMs: 1, env: { GROQ_API_KEY: 'g', OPENROUTER_API_KEY: 'k' }, fetchImpl: async (url, opts) => {
