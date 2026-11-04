@@ -31,11 +31,12 @@ describe('MAI-Transcribe-2 as a dictation source', () => {
   });
 
   it('merges with the other sources and says so; one failed provider shows reason and status, degraded when fewer than two are usable', async () => {
-    const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x' }, fetchImpl: async (url, opts) => {
+    const media = createDeviceMedia({ geminiFallbackMs: 0, env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x' }, fetchImpl: async (url, opts) => {
+      if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: 'Hallo Welt!' } }] });
       if (isMai(url)) return mai('Hallo Welt');
       if (String(url).includes('groq')) return new Response('{}', { status: 503 });
       const text = JSON.parse(opts.body).contents[0].parts[0].text;
-      return Response.json({ candidates: [{ content: { parts: [{ text: text?.includes('Erstelle EIN') ? 'Hallo Welt!' : 'Hallo Welt' }] } }] });
+      return Response.json({ candidates: [{ content: { parts: [{ text: text?.includes('Erstelle EIN') ? 'Nicht dieser Weg' : 'Hallo Wält' }] } }] });
     } });
     const r = await media.dictate(wav(), ctx, dict);
     assert.equal(r.text, 'Hallo Welt!'); assert.equal(r.merged, true); assert.equal(r.degraded, false);

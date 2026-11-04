@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { createDeviceMedia, wavDuration, applyCorrections, imageBytes, vocabularyPrompt } from '../src/deviceMedia.js';
+import { createDeviceMedia, wavDuration, applyCorrections, imageBytes, vocabularyPrompt, dictionaryEntry } from '../src/deviceMedia.js';
 function wav(seconds = 1) {
   const b = Buffer.alloc(44 + seconds * 32000); b.write('RIFF'); b.writeUInt32LE(b.length - 8, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(b.length - 44, 40); return b;
 }
@@ -25,7 +25,9 @@ it('parallel ensemble reconciles variants and applies dictionary replace_from', 
     assert(opts.body instanceof FormData); return Response.json({ text: 'Exampel' });
   } });
   const result = await media.dictate(wav(), ctx, dict);
-  assert.equal(result.text, 'Example'); assert.deepEqual(result.sources, { groq: 'Exampel', openai: 'Exampel', gemini: 'Exampel' }); assert.equal(called.length, 4); assert(signals.every(s => s.aborted));
+  // two sources word for word the same: no merge call, and Gemini (the slow fallback) never runs
+  assert.equal(result.text, 'Example'); assert.deepEqual(result.sources, { groq: 'Exampel', openai: 'Exampel', gemini: null }); assert.equal(called.length, 2); assert(signals.every(s => s.aborted));
+  assert.equal(result.providers.merge.skipped, 'sources-agree'); assert.equal(result.providers.gemini.reason, 'skipped'); assert.equal(result.degraded, false);
 });
 it('deadline returns first transcript even when another provider ignores cancellation', async () => {
   const media = createDeviceMedia({ budgetMs: 40, env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake' }, fetchImpl: async url => String(url).includes('groq') ? Response.json({ text: 'Exampel' }) : new Promise(() => {}) });
@@ -61,7 +63,7 @@ it('maximum-size base64 is validated without recursive regex stack growth', () =
 it('soft deadline merges completed sources while a third provider hangs; bounded context and spend are shared', async () => {
   const { limits } = await import('../src/limits.js');
   const before = limits.costToday(); let merge;
-  const media = createDeviceMedia({ budgetMs: 160, env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake', GOOGLE_API_KEY: 'fake' }, fetchImpl: async (url, opts) => {
+  const media = createDeviceMedia({ budgetMs: 160, geminiFallbackMs: 0, env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake', GOOGLE_API_KEY: 'fake' }, fetchImpl: async (url, opts) => {
     if (String(url).includes('groq')) return Response.json({ text: 'One' });
     if (String(url).includes('openai')) return new Promise(() => {});
     const parts = JSON.parse(opts.body).contents[0].parts;
@@ -100,4 +102,38 @@ it('fast dictionary adds no latency and the overall budget still applies', async
   const result = await media.dictate(wav(), ctx, Promise.resolve({ items: [{ term: 'Example' }] })); assert(result.ms < 50);
   const hung = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: () => new Promise(() => {}) });
   const t = Date.now(); await assert.rejects(hung.dictate(wav(), ctx, new Promise(() => {})), e => e.status === 504); assert(Date.now() - t < 400);
+});
+
+it('the fast path: two sources plus a short grace, the fast merge model, nothing waits for a slow third', async () => {
+  let merged;
+  const media = createDeviceMedia({ graceMs: 20, env: { GROQ_API_KEY: 'g', OPENAI_API_KEY: 'o', OPENROUTER_API_KEY: 'k', GOOGLE_API_KEY: 'x', DESK_DICTATE_MERGE_MODEL: 'test/fast' }, fetchImpl: async (url, opts) => {
+    const u = String(url);
+    if (u.includes('groq')) return Response.json({ text: 'Hallo Karpati wie geht es' });
+    if (u.includes('audio/transcriptions') && u.includes('openrouter')) return Response.json({ text: 'Hallo Karpathy, wie geht es?', usage: { seconds: 1 } });
+    if (u.includes('openai.com')) return new Promise(() => {});
+    if (u.includes('chat/completions')) { merged = JSON.parse(opts.body); return Response.json({ choices: [{ message: { content: 'Hallo\u00a0Karpathy, wie\u2011geht es?' } }] }); }
+    throw Error(`unexpected ${u}`);
+  } });
+  const t = Date.now();
+  const r = await media.dictate(wav(2), ctx, { items: [{ term: 'Karpathy', replace_from: ['Karpati', 'unrelated'] }, ...Array.from({ length: 400 }, (_, i) => ({ term: `Wort${i}` }))] });
+  assert(Date.now() - t < 900, `took ${Date.now() - t} ms`);
+  assert.equal(merged.model, 'test/fast'); assert.deepEqual(merged.reasoning, { effort: 'low', exclude: true });
+  const prompt = merged.messages[0].content;
+  assert.match(prompt, /"ersetze":\{"Karpathy":\["Karpati"\]\}/); assert(!prompt.includes('unrelated')); assert(!prompt.includes('Wort200'));
+  assert.equal(r.text, 'Hallo Karpathy, wie-geht es?'); assert.equal(r.merged, true); assert.equal(r.sources.openai, null);
+});
+it('a merge that is too slow does not hold the text back: the source most others agree with goes out', async () => {
+  const media = createDeviceMedia({ graceMs: 1, env: { GROQ_API_KEY: 'g', OPENROUTER_API_KEY: 'k' }, fetchImpl: async (url, opts) => {
+    const u = String(url);
+    if (u.includes('groq')) return Response.json({ text: 'Eins zwei drei' });
+    if (u.includes('audio/transcriptions')) return Response.json({ text: 'Eins zwei vier', usage: { seconds: 1 } });
+    return new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(Object.assign(Error('aborted'), { name: 'AbortError' }))));
+  } });
+  const t = Date.now(), r = await media.dictate(wav(1), ctx, {});
+  assert(Date.now() - t < 2500, `took ${Date.now() - t} ms`); assert.equal(r.merged, false); assert.equal(r.providers.merge.ok, false); assert(r.text.startsWith('Eins zwei'));
+});
+it('dictionary entries from the app are validated', () => {
+  assert.deepEqual(dictionaryEntry({ term: 'Karpathy', replace_from: ['Karpati', 'Karpati', 'Karpathy'] }), { term: 'Karpathy', replace_from: ['Karpati'] });
+  assert.deepEqual(dictionaryEntry({ term: 'Neu', previous: 'Alt' }), { term: 'Neu', replace_from: [], previous: 'Alt' });
+  for (const bad of [{}, { term: '' }, { term: ' x' }, { term: 'a\nb' }, { term: 'x'.repeat(101) }, { term: 'x', replace_from: 'y' }, { term: 'x', replace_from: Array(41).fill(0).map((_, i) => `a${i}`) }, { term: 'x', previous: '' }]) assert.throws(() => dictionaryEntry(bad), JSON.stringify(bad));
 });

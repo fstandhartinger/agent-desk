@@ -120,6 +120,14 @@ it('highlight reaches the session as a MARKER turn with verified ids and their b
 it('screen/clear and screen/private take an optional why; v0.1.4 sends none', async () => {
   for (const [p, b] of [['screen/clear', {}], ['screen/clear', { why: 'paused' }], ['screen/private', {}], ['screen/private', { why: 'locked' }], ['screen/clear', { why: 'stop' }]]) assert.equal((await native(`session/${sid}/${p}`, b)).status, 200, p + JSON.stringify(b));
 });
+it('dictionary window: a word is saved with exactly these wrong forms, renaming removes the old word, delete works for any source', async () => {
+  registry.seen.length = 0;
+  assert.equal((await native('dictionary/term', { term: 'Karpathy', replace_from: ['Karpati'], previous: 'Karpaty' })).status, 200);
+  const save = registry.seen.find(r => r.url === '/v1/dictionary' && r.method === 'POST');
+  assert.deepEqual(save.body, { term: 'Karpathy', replace_from: ['Karpati'], source: 'manual', replace: true });
+  assert(registry.seen.some(r => r.method === 'DELETE' && r.url === '/v1/dictionary/Karpaty?any=1'));
+  assert.equal((await native('dictionary/term', { term: 'a\nb' })).status, 400);
+});
 it('dictionary cached five minutes, correction syntax validated, learned source and invalidation', async () => {
   const before = registry.seen.filter(r => r.url === '/v1/dictionary').length;
   assert.equal((await native('dictionary')).status, 200); assert.equal((await native('dictionary')).status, 200);
@@ -276,3 +284,4 @@ it('clear prevents pending resolution from reviving screen state', async () => {
   service.clearScreen('s', 'one'); release(); await assert.rejects(pending, e => e.status === 409);
   assert.deepEqual(service.screen('s').ids, []);
 });
+
