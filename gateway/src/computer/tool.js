@@ -3,6 +3,7 @@
 import { gate, release, defaultClock } from '../voiceActions.js';
 import { redact, short } from '../redact.js';
 import { checkComputerTrigger } from './gate.js';
+import { unrestricted } from './mode.js';
 
 const out = (ok, content, extra = {}) => ({ ok, summary: short(content, 200), content: redact(content), ...extra });
 const SAY = {
@@ -18,7 +19,9 @@ export async function computerTask({ goal }, ctx, clock = ctx.clock ?? defaultCl
   const g = await gate('computer_task', ctx, clock, checkComputerTrigger, SAY);
   if (g.refused) return g.refused;
   if (!ctx.computer?.begin) return release(g, 'computer_task'), out(false, 'Die Computer-Steuerung ist in diesem Kontext nicht verfügbar. Nichts passiert.');
-  const r = await ctx.computer.begin(ctx.sid ?? 'desk', { text: g.text, goalArg: goal });
+  // unrestricted: his sentence may only be "ja, mach", so the loop also gets the task as the voice model understood it
+  const text = unrestricted() && goal ? `${goal}${g.text ? ` (Florians Worte: ${g.text})` : ''}`.replace(/\s+/g, ' ') : g.text;
+  const r = await ctx.computer.begin(ctx.sid ?? 'desk', { text, goalArg: goal });
   if (!r.ok) release(g, 'computer_task'); // a refused start may be asked for again
   return out(r.ok, r.text);
 }
