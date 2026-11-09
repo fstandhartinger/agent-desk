@@ -1,6 +1,7 @@
 import { limits } from './limits.js';
-import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, GLOSSARY_TERMS, dictationGlossary, contentWords } from './dictationContext.js';
-export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT };
+import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
+import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark } from './dictationGuard.js';
+export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT };
 // Screen Agent media is processed in memory. Never include payloads or upstream errors in logs.
 export const deviceError = (message, status = 400) => Object.assign(new Error(message), { status });
 export function deviceIds(ids) {
@@ -31,6 +32,16 @@ export function wavDuration(audio) {
   if (!fmt || !length || length % 2) throw deviceError('Leere oder ungültige WAV-Datei.');
   if (length > 60 * 32000) throw deviceError('Höchstens 60 Sekunden Audio.', 413);
   return length / 32000;
+}
+/** The loudest sample of a PCM16 WAV (0-32768): "was anything louder than room noise in here?" */
+export function wavPeak(audio) {
+  let peak = 0;
+  for (let pos = 12; pos + 8 <= audio.length;) {
+    const tag = audio.toString('ascii', pos, pos + 4), size = audio.readUInt32LE(pos + 4), start = pos + 8;
+    if (tag === 'data') for (let i = start; i + 1 < Math.min(audio.length, start + size); i += 2) { const v = Math.abs(audio.readInt16LE(i)); if (v > peak) peak = v; }
+    pos = start + size + (size % 2);
+  }
+  return peak;
 }
 export function dictateContext(ctx) {
   if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx) || typeof ctx.process !== 'string' || ctx.process.length > 100 || typeof ctx.fieldBefore !== 'string' || ctx.fieldBefore.length > 500 || !Array.isArray(ctx.recentTerms) || ctx.recentTerms.length > 50 || ctx.recentTerms.some(v => typeof v !== 'string' || v.length > 100)) throw deviceError('Ungültiger Diktat-Kontext.');
@@ -148,12 +159,44 @@ export const dictationWaitMs = seconds => Math.round(1800 + 60 * Math.max(0, sec
 export const dictationMergeMs = seconds => Math.round(1300 + 45 * seconds);
 /** The speech-to-text hint (Whisper and gpt-4o-transcribe "prompt"): who speaks and about what, then the spellings. */
 export const STT_LEAD = 'Deutsches Diktat von Florian über KI-Agenten, Bittensor, das REAX-Subnetz SN92, JevBench und decisionmodels.io.';
-/** The app's dictionary plus the glossary's proper names (the dictionary's own words first: they are his). */
-export function withGlossaryTerms(dictionary) {
+/** The app's dictionary plus private names (env) plus the glossary's proper names (the dictionary's own words first: they are his). */
+export function withGlossaryTerms(dictionary, extra = []) {
   const entries = dictionary?.terms ?? dictionary?.items ?? (Array.isArray(dictionary) ? dictionary : []);
   const list = Array.isArray(entries) ? entries : [];
-  const have = new Set(list.map(e => String(e?.term ?? '').toLowerCase()));
-  return { items: [...list, ...GLOSSARY_TERMS.filter(t => !have.has(t.toLowerCase())).map(term => ({ term }))] };
+  const have = new Set(list.map(e => String(e?.term ?? '').toLowerCase())), more = [];
+  for (const t of [...extra, ...GLOSSARY_TERMS]) if (!have.has(t.toLowerCase())) { have.add(t.toLowerCase()); more.push({ term: t }); }
+  return { items: [...list, ...more] };
+}
+const NAME_LIKE = /\p{Lu}.*\p{Lu}|\d|\p{Ll}\p{Lu}/u;
+const PUBLIC_NAMES = (DICTATION_GLOSSARY.match(/[\p{L}\p{N}][\p{L}\p{N}.+-]{2,}/gu) ?? []).filter(w => NAME_LIKE.test(w));
+/** The names the word guard accepts as "written properly": glossary names, private names (both env vars) and the app's dictionary. */
+export function guardTerms(dictionary, env = process.env) {
+  const entries = dictionary?.terms ?? dictionary?.items ?? (Array.isArray(dictionary) ? dictionary : []);
+  const own = (Array.isArray(entries) ? entries : []).map(e => e?.term).filter(t => typeof t === 'string');
+  const extra = (String(env.DESK_DICTATION_CONTEXT_EXTRA ?? '').match(/\p{Lu}[\p{L}\p{N}.+-]{2,}/gu) ?? []);
+  return termKeys([...GLOSSARY_TERMS, ...PUBLIC_NAMES, ...privateTerms(env), ...extra, ...own]);
+}
+/**
+ * Line breaks the model chose on the text as it was (sentence numbers), carried over to the cleaned text by word position. A break only lands where the
+ * cleaned text really ends a sentence: the clean-up may have joined what the raw text had split at a pause.
+ */
+export function carryBreaks(raw, cleaned, breaks) {
+  if (!breaks || !(breaks.para.length + breaks.line.length)) return cleaned;
+  const list = sentences(raw);
+  if (raw === cleaned) return applyBreaks(list, breaks);
+  const a = splitWords(raw).map(w => ({ key: wordKey(w) })), words = splitWords(cleaned), b = words.map(w => ({ key: wordKey(w) }));
+  if (a.length > 3000) return cleaned; // the alignment is quadratic: a very long text stays one block rather than hold the gateway
+  const starts = []; let n = 0;
+  for (const sen of list) { starts.push(n); n += splitWords(sen).length; }
+  // only words the clean-up left standing carry a position: a sentence start inside a changed run has none, and its break is dropped
+  const at = new Map();
+  for (const o of alignWords(a, b)) if (o.op === 'equal') for (let k = 0; k < o.a1 - o.a0; k++) at.set(o.a0 + k, o.b0 + k);
+  const marks = new Map();
+  for (const [kind, nums] of [['\n', breaks.line], ['\n\n', breaks.para]]) for (const num of nums) {
+    const start = starts[num - 1], j = at.get(start) ?? (at.has(start - 1) ? at.get(start - 1) + 1 : undefined);
+    if (j > 0 && j < words.length && (endsSentence(words[j - 1]) || /:["“”»)]*$/.test(words[j - 1]) || (kind === '\n' && isListMark(words[j])))) marks.set(j, kind);
+  }
+  return words.map((w, i) => (i === 0 ? '' : marks.get(i) ?? ' ') + w).join('');
 }
 /** A long text in windows of about `size` words, cut after a sentence end (hard cut at 1.6 x): the clean-up stays faithful on short pieces and they run side by side. */
 export function polishWindows(text, size = 90) {
@@ -214,7 +257,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       retried = true; data = await call([]);
     }
     const seconds = Number(data?.usage?.seconds), cost = Number(data?.usage?.cost);
-    return { text: typeof data?.text === 'string' ? data.text : '', seconds: Number.isFinite(seconds) ? seconds : null, cost: Number.isFinite(cost) && cost >= 0 ? cost : null, retried, phrases: phrases.length };
+    return { text: typeof data?.text === 'string' ? data.text : null, seconds: Number.isFinite(seconds) ? seconds : null, cost: Number.isFinite(cost) && cost >= 0 ? cost : null, retried, phrases: phrases.length };
   }
   /** The merge over OpenRouter: a very fast model without visible reasoning (measured 4 Nov on his recordings: 0.45-1.9 s, against 2-10 s and frequent timeouts for gemini-3.8-flash). */
   async function fastMerge(prompt, signal, o = {}) {
@@ -224,6 +267,46 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
     const text = (await res.json())?.choices?.[0]?.message?.content;
     return typeof text === 'string' ? text.replace(/[\u2010\u2011]/g, '-').replace(/[\u00a0\u202f]/g, ' ').trim() : '';
+  }
+  const elevenKey = () => env.ELEVENLABS_API_KEY;
+  /** ElevenLabs Scribe v2 with key terms (at most 100, each under 50 characters). A 4xx with key terms is retried once without. */
+  async function scribe(audio, terms, signal) {
+    const call = async list => {
+      const body = new FormData(); body.set('model_id', 'scribe_v2'); body.set('language_code', 'deu'); body.set('tag_audio_events', 'false');
+      for (const t of list) body.append('keyterms', t);
+      body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
+      const res = await fetchImpl(`${env.ELEVENLABS_BASE_URL || 'https://api.elevenlabs.io/v1'}/speech-to-text`, { method: 'POST', headers: { 'xi-api-key': elevenKey() }, redirect: 'error', body, signal });
+      if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
+      const text = (await res.json()).text;
+      if (typeof text !== 'string') throw Object.assign(Error('bad reply'), { reason: 'bad-reply' });
+      return text;
+    };
+    const list = terms.filter(t => t.length < 50 && t.split(' ').length <= 5).slice(0, 100);
+    try { return await call(list); } catch (err) { if (!list.length || ![400, 413, 422].includes(err.upstream)) throw err; return call([]); }
+  }
+  /** Any other recogniser OpenRouter serves over the same JSON call (no hints: their option names are not documented). */
+  async function routed(model, audio, signal) {
+    const res = await fetchImpl(`${env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'}/audio/transcriptions`, { method: 'POST', headers: { authorization: `Bearer ${maiKey()}`, 'content-type': 'application/json' }, redirect: 'error', signal, body: JSON.stringify({ model, input_audio: { data: audio.toString('base64'), format: 'wav' }, language: 'de' }) });
+    if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
+    const data = await res.json(), cost = Number(data?.usage?.cost);
+    if (typeof data?.text !== 'string') throw Object.assign(Error('bad reply'), { reason: 'bad-reply' });
+    return { text: data.text, cost: Number.isFinite(cost) && cost >= 0 ? cost : null };
+  }
+  /**
+   * Which recognisers hear a dictation (10 Nov 2026). Measured on a day of his recordings (29 min, 2,156 words, German with English terms and long thinking
+   * pauses), wrong words: MAI-Transcribe-2 0.6 %, gpt-transcribe 1.3 %, Scribe v2 1.7 %, AssemblyAI Universal-3.6 Pro 1.8 %, Voxtral Mini Transcribe 3 2.0 %,
+   * whisper-large-v3-turbo 3.1 %; the two that were replaced: gpt-4o-transcribe 6.6 % and whisper-large-v3 9.5 % (both dropped whole passages at his pauses
+   * and invented sentences from the prompt in silence). The three in use: mai, openai (= gpt-transcribe), assembly (0.5 s; Scribe is as good but 0.7 s slower).
+   * DESK_DICTATE_SOURCES names others. The first three configured of the chain run; Whisper on Groq and Gemini are the reserve when nothing answered in time
+   * (Gemini joins the sources when fewer than two are configured).
+   */
+  const SOURCE_KEYS = { mai: maiKey, openai: () => env.OPENAI_API_KEY, assembly: maiKey, scribe: elevenKey, voxtral: maiKey, groq: () => env.GROQ_API_KEY, gemini: googleKey };
+  function sourcePlan() {
+    const wanted = [...new Set(String(env.DESK_DICTATE_SOURCES ?? '').split(',').map(v => v.trim()).filter(n => SOURCE_KEYS[n]))];
+    const main = (wanted.length ? wanted : ['mai', 'openai', 'assembly', 'scribe', 'groq']).filter(n => SOURCE_KEYS[n]()).slice(0, wanted.length || 3), reserve = [];
+    if (!main.includes('groq') && SOURCE_KEYS.groq()) reserve.push('groq');
+    if (!main.includes('gemini') && SOURCE_KEYS.gemini()) (main.length < 2 ? main : reserve).push('gemini');
+    return main.length ? { main, reserve } : { main: reserve, reserve: [] }; // the named ones have no key: whatever has one hears him
   }
   const maiCost = (r, duration) => r.cost ?? Math.ceil(r.seconds ?? duration) / 3600 * 0.10;
   /** Live caption: MAI only, 3 s, no retry of the audio. 503 + code when the key is missing or MAI is down (the app then hides captions). Returns {text, ms, seconds, cost, retried}. */
@@ -235,13 +318,16 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     const started = Date.now();
     try {
       const r = await mai(audio, phrases, AbortSignal.timeout(3000));
+      r.text ??= '';
       const cost = maiCost(r, audio.length / 32000);
       limits.captionAdd(deviceId, cost);
       return { text: r.text.trim(), ms: Date.now() - started, seconds: r.seconds ?? Math.round(audio.length / 320) / 100, cost, retried: r.retried };
     } catch (err) { throw Object.assign(deviceError('Der Untertitel-Dienst ist gerade nicht erreichbar.', 503), { code: 'mai-down', reason: reasonOf(err), upstream: err.upstream, ms: Date.now() - started }); }
   }
-  async function dictate(audio, context, dictionary) {
-    const started = Date.now(), controller = new AbortController(), sources = { groq: null, openai: null, gemini: null, ...(maiKey() ? { mai: null } : {}) }, providers = {}, extra = {};
+  /** patient: a chunk while he is still talking: nobody waits for it, so every recogniser gets its time (up to the soft limit) instead of "two are in, go". */
+  async function dictate(audio, context, dictionary, { patient = false } = {}) {
+    const plan = sourcePlan();
+    const started = Date.now(), controller = new AbortController(), sources = Object.fromEntries([...plan.main, ...plan.reserve].map(n => [n, null])), providers = {}, extra = {};
     const duration = wavDuration(audio);
     const budget = budgetMs ?? dictationBudgetMs(duration);
     const plausible = t => typeof t === 'string' && t.trim() && t.trim().split(/\s+/).length <= duration * 4.5 + 4;
@@ -249,6 +335,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     let first = '', expired = false, merged = false, timer, softTimer;
     const soft = new Promise(resolve => { softTimer = setTimeout(resolve, Math.min(dictationWaitMs(duration), budget * 0.575)); });
     let quorumReached = () => {}; const quorum = new Promise(resolve => { quorumReached = resolve; });
+    let textArrived = () => {}; const anyText = new Promise(resolve => { textArrived = resolve; });
     const deadline = new Promise(resolve => { timer = setTimeout(() => { expired = true; controller.abort(); resolve(); }, budget); });
     // The STT call waits for the dictionary (and the visible titles) at most promptWaitMs; without them the request goes out without a prompt.
     const settled = async job => {
@@ -258,13 +345,14 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     };
     const transcript = async (url, key, model) => {
       if (!dictionarySettled) await settled(dictionaryJob);
-      const prompt = vocabularyPrompt(withGlossaryTerms(resolvedDictionary), 700);
+      const prompt = vocabularyPrompt(withGlossaryTerms(resolvedDictionary, privateTerms(env)), 700);
       const body = new FormData(); body.set('model', model); body.set('language', 'de'); if (prompt) body.set('prompt', `${STT_LEAD} Begriffe: ${prompt}`); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
       if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
       limits.addCost(duration / 60 * 0.03);
       const res = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}` }, redirect: 'error', body, signal: controller.signal });
       if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
       const text = (await res.json()).text;
+      if (typeof text !== 'string') throw Object.assign(Error('bad reply'), { reason: 'bad-reply' }); // a 200 without a transcript is an outage, not "he said nothing"
       // Whisper reads its prompt back on a very short clip: 'Screen Agent, REAX, ...' instead of what he said (4 Nov). That is no transcript.
       const said = normalized(text);
       if (prompt && said.split(' ').length >= 3 && normalized(prompt).includes(said)) return ''; // two words can be what he really said ('Screen Agent')
@@ -282,39 +370,64 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         const ms = Date.now() - t0;
         if (expired) providers[name] = { ok: false, ms, reason: 'late' };
         else if (!plausible(text)) providers[name] = { ok: false, ms, reason: typeof text === 'string' && text.trim() ? 'implausible' : 'empty' };
-        else { providers[name] = { ok: true, ms, ...extra[name] }; sources[name] = text.trim(); first ||= text.trim(); if (Object.values(sources).filter(Boolean).length >= 2) quorumReached(); }
+        else { providers[name] = { ok: true, ms, ...extra[name] }; sources[name] = text.trim(); first ||= text.trim(); textArrived(); if (Object.values(sources).filter(Boolean).length >= 2) quorumReached(); }
       }).catch(err => { providers[name] = failure(err, Date.now() - t0); }));
     };
-    if (env.GROQ_API_KEY) add('groq', () => transcript(`${env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}/audio/transcriptions`, env.GROQ_API_KEY, 'whisper-large-v3'));
-    if (env.OPENAI_API_KEY) add('openai', () => transcript(`${env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/audio/transcriptions`, env.OPENAI_API_KEY, 'gpt-4o-transcribe'));
-    // Gemini on audio takes 2.5-8 s and invented 642 words for a 0.7 s clip (4 Nov): with two faster sources configured it only runs when neither has answered in time.
-    const otherSources = [env.GROQ_API_KEY, env.OPENAI_API_KEY, maiKey()].filter(Boolean).length;
-    const geminiWaits = otherSources >= 2 ? geminiFallbackMs : 0;
-    if (googleKey()) add('gemini', async () => {
-      if (geminiWaits) {
-        await new Promise(resolve => { const t = setTimeout(resolve, geminiWaits); controller.signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); });
-        if (first || expired) throw Object.assign(Error('skipped'), { reason: 'skipped' });
-      }
-      return google([{ inline_data: { mime_type: 'audio/wav', data: audio.toString('base64') } }, { text: 'Transkribiere wortgetreu, meist Deutsch. Nur das Transkript; nichts hinzuerfinden.' }], controller.signal, { thinking: 'low', maxTokens: 3000 });
-    });
-    const geminiJob = geminiWaits && googleKey() ? jobs.pop() : null; // kept out of the wait below: it only matters when nothing else answered
-    if (maiKey()) add('mai', async () => {
-      if (!dictionarySettled || !contextSettled) await Promise.all([dictionarySettled || settled(dictionaryJob), contextSettled || settled(contextJob)]);
-      if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
-      const r = await mai(audio, phraseList(resolvedDictionary, resolvedContext.titles, GLOSSARY_TERMS), controller.signal);
-      limits.addCost(maiCost(r, duration));
-      extra.mai = { phrases: r.phrases, ...(r.retried ? { retried: true } : {}) };
-      return r.text;
-    });
+    const hints = async () => { if (!dictionarySettled || !contextSettled) await Promise.all([dictionarySettled || settled(dictionaryJob), contextSettled || settled(contextJob)]); };
+    const spend = cost => { if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429); limits.addCost(cost); };
+    const run = {
+      // whisper-large-v3-turbo: on his recordings 3.1 % wrong words against 9.5 % for whisper-large-v3 with the same prompt (which skipped passages after long pauses)
+      groq: () => transcript(`${env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}/audio/transcriptions`, env.GROQ_API_KEY, env.DESK_DICTATE_GROQ_MODEL || 'whisper-large-v3-turbo'),
+      openai: () => transcript(`${env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/audio/transcriptions`, env.OPENAI_API_KEY, env.DESK_DICTATE_OPENAI_MODEL || 'gpt-transcribe'),
+      // Gemini on audio takes 2.5-8 s and invented 642 words for a 0.7 s clip (4 Nov): a reserve only, unless it is one of fewer than two sources.
+      gemini: () => google([{ inline_data: { mime_type: 'audio/wav', data: audio.toString('base64') } }, { text: 'Transkribiere wortgetreu, meist Deutsch. Nur das Transkript; nichts hinzuerfinden.' }], controller.signal, { thinking: 'low', maxTokens: 3000 }),
+      mai: async () => {
+        await hints();
+        if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
+        const r = await mai(audio, phraseList(resolvedDictionary, resolvedContext.titles, [...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
+        limits.addCost(maiCost(r, duration));
+        extra.mai = { phrases: r.phrases, ...(r.retried ? { retried: true } : {}) };
+        if (r.text === null) throw Object.assign(Error('bad reply'), { reason: 'bad-reply' }); // a 200 without a transcript is an outage, not "he said nothing"
+        return r.text;
+      },
+      scribe: async () => {
+        await hints(); spend(duration / 60 * 0.006);
+        return scribe(audio, phraseList(resolvedDictionary, [], [...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
+      },
+      assembly: async () => { spend(duration / 60 * 0.006); return (await routed('assemblyai/universal-3-6-pro', audio, controller.signal)).text; },
+      voxtral: async () => { spend(duration / 60 * 0.004); return (await routed('mistralai/voxtral-mini-transcribe-3-0', audio, controller.signal)).text; },
+    };
+    const now = geminiFallbackMs ? plan.main : [...plan.main, ...plan.reserve]; // no fallback wait configured: the reserve is an ordinary source
+    for (const n of now) add(n, run[n]);
     const waited = [...jobs];
-    if (geminiJob) jobs.push(geminiJob);
-    const names = Object.keys(sources).filter(n => ({ groq: env.GROQ_API_KEY, openai: env.OPENAI_API_KEY, gemini: googleKey(), mai: maiKey() })[n]);
-    const report = () => Object.fromEntries(names.map(n => [n, providers[n] ?? { ok: false, ms: Date.now() - started, reason: expired ? 'timeout' : n === 'gemini' && geminiWaits && first ? 'skipped' : 'unfinished' }]));
+    // the reserve only runs when nothing has answered in time
+    for (const n of plan.reserve.filter(n => !now.includes(n))) add(n, async () => {
+      // after the fallback wait, or at once when every source has ended without words (three providers down: no reason to sit out the wait)
+      await new Promise(resolve => { const t = setTimeout(resolve, geminiFallbackMs); const go = () => { clearTimeout(t); resolve(); }; controller.signal.addEventListener('abort', go, { once: true }); Promise.all(waited).then(go); });
+      if (first || expired || nothingHeard()) throw Object.assign(Error('skipped'), { reason: 'skipped' });
+      return run[n]();
+    });
+    const names = [...plan.main, ...plan.reserve];
+    // Recognisers that answered "no words": two of them (or the only one) are a verdict, not a failure. The reserve is for silence from the providers, not from him.
+    const empties = () => now.filter(n => providers[n]?.reason === 'empty' || providers[n]?.dropped).length;
+    const nothingHeard = () => !first && now.length > 0 && empties() >= Math.min(2, now.length);
+    const report = () => Object.fromEntries(names.map(n => [n, providers[n] ?? { ok: false, ms: Date.now() - started, reason: expired ? 'timeout' : plan.reserve.includes(n) && first ? 'skipped' : 'unfinished' }]));
     try {
       if (!jobs.length) throw Object.assign(deviceError('Kein Transkriptionsdienst eingerichtet.', 503), { code: 'no-provider', body: { error: 'Kein Transkriptionsdienst eingerichtet.', code: 'no-provider', providers: {} } });
       // Two sources in, plus a short grace for a third; never longer than the soft limit. The merge needs nothing more.
-      await Promise.race([Promise.all([...waited, dictionaryJob, contextJob]), quorum.then(() => new Promise(resolve => setTimeout(resolve, graceMs))), soft, deadline]);
-      if (!first && !expired) await Promise.race([Promise.all(jobs), deadline]);
+      await Promise.race([Promise.all([...waited, dictionaryJob, contextJob]), ...(patient ? [] : [quorum.then(() => new Promise(resolve => setTimeout(resolve, graceMs)))]), soft, deadline]);
+      // nothing yet after the soft limit: the first recogniser with words ends the wait (not the last one to give up)
+      if (!first && !expired && !nothingHeard()) await Promise.race([anyText, Promise.all(jobs), deadline]);
+      // Noise, not words (10 Nov: the seconds between his last word and letting go of the keys came back as "Okay." from one recogniser and "Ja." from
+      // another, and as whole invented sentences from the two older ones): a few words that the others did not hear at all, in a clip without a loud sample.
+      const heard = names.filter(n => sources[n]);
+      if (heard.length && heard.every(n => wordCount(sources[n]) <= 4)) {
+        const apartAll = heard.length >= 2 && heard.every(a => heard.every(b => a === b || overlap(sources[a], sources[b]) === 0));
+        if ((heard.length === 1 && empties() >= 2) || (apartAll && wavPeak(audio) < 2000)) {
+          for (const n of heard) { providers[n] = { ...providers[n], dropped: 'noise' }; sources[n] = null; }
+          first = '';
+        }
+      }
       let text = first;
       const inHand = Object.values(sources).filter(Boolean);
       // Since 9 Nov the clean-up runs for every chunk, also for one source or sources that agree word for word: both can share the same misheard name
@@ -326,7 +439,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         const data = JSON.stringify({ glossar: dictationGlossary(env), varianten: variants, context: { ...resolvedContext, titles: undefined }, dictionary: mergeDictionary(resolvedDictionary, sources) }).replaceAll('<', '\\u003c').slice(0, 30000);
         const prompt = `<artifact_data>\n${data}\n</artifact_data>`;
         const mergeStop = new AbortController(), stop = () => mergeStop.abort(); controller.signal.addEventListener('abort', stop, { once: true });
-        let mergeTimer; const capped = new Promise(resolve => { mergeTimer = setTimeout(() => { providers.merge ??= { ok: false, ms: Date.now() - t0, reason: 'slow' }; stop(); resolve(''); }, budgetMs ? budget : dictationMergeMs(duration)); });
+        let mergeTimer; const capped = new Promise(resolve => { mergeTimer = setTimeout(() => { providers.merge ??= { ok: false, ms: Date.now() - t0, reason: 'slow' }; stop(); resolve(''); }, budgetMs ? budget : dictationMergeMs(duration) * (patient ? 3 : 1)); }); // while he still talks the clean-up may take its time
         const call = maiKey() ? fastMerge(prompt, mergeStop.signal, { system: MERGE_PROMPT }) : google([{ text: prompt }], mergeStop.signal, { system: MERGE_PROMPT, thinking: 'low', maxTokens: 3000 });
         const answer = await Promise.race([call.catch(err => { providers.merge ??= failure(err, Date.now() - t0); return ''; }), capped, deadline]);
         clearTimeout(mergeTimer);
@@ -334,12 +447,17 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         // others agree with, or far from it in wording, the source stands
         const ref = chooseSource(sources)?.[1] ?? first, longest = contentWords(ref).length, got = contentWords(answer).length;
         const kept = plausible(answer) && got >= 0.75 * longest && got <= 1.3 * longest + 4 && (longest < 5 || overlap(answer, ref) >= 0.3);
-        if (!expired && kept) { text = answer; merged = true; providers.merge = { ok: true, ms: Date.now() - t0 }; }
+        if (!expired && kept) {
+          // every change of the model is checked on its own; what no recogniser heard and no rule explains is undone (dictationGuard.js)
+          const g = guardText(ref, answer, { ...variantContext(ref, Object.values(variants)), terms: guardTerms(resolvedDictionary, env) });
+          text = g.text; merged = true; providers.merge = { ok: true, ms: Date.now() - t0, ...(g.undone ? { undone: g.undone } : {}) };
+        }
         else providers.merge ??= { ok: false, ms: Date.now() - t0, reason: expired ? 'timeout' : !answer ? 'empty' : !plausible(answer) ? 'implausible' : got < 0.75 * longest ? 'short' : 'different', ...(answer ? { words: got, longest, shortfall: Math.max(0, longest - got) } : {}) };
       }
       // the first finisher is not the best one: once several are in, the source the others agree with replaces it, or one with clearly more words (the first was cut off)
       const best = chooseSource(sources);
       if (!merged && best && best[1] !== text && (wordCount(best[1]) >= 1.25 * wordCount(text) + 1 || overlap(best[1], text) < 0.3)) { providers[best[0]] = { ...providers[best[0]], preferred: 'consensus' }; text = best[1]; }
+      if (!text && !expired && nothingHeard()) return { text: '', silent: true, sources: { ...sources }, ms: Date.now() - started, providers: report(), degraded: false, merged: false, seconds: duration };
       if (!text) {
         const list = report(), fails = Object.values(list);
         const status = fails.length && fails.every(p => ['upstream', 'error', 'budget'].includes(p.reason)) && !expired ? 502 : 504;
@@ -352,12 +470,23 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     } finally { expired = true; clearTimeout(timer); clearTimeout(softTimer); controller.abort(); }
   }
   const clean = t => String(t ?? '').replace(/[\u2010\u2011]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
+  /** Where the line breaks go: one small call over the numbered sentences. null = no structure (short text, model late, answer unusable). */
+  async function breaksFor(text, timeoutMs = 2500) {
+    if (!worthFormatting(text)) return null;
+    const list = sentences(text);
+    try {
+      const out = await fastMerge(numbered(list).replaceAll('<', '\\u003c'), AbortSignal.timeout(timeoutMs), { system: FORMAT_PROMPT, maxTokens: 300 });
+      return parseBreaks(out, list.length);
+    } catch { return null; /* model down or late: the text stays one block, the words are never held back for structure */ }
+  }
   /**
-   * The text clean-up without audio (9 Nov 2026). mode "final": the whole dictation after its chunks were transcribed, in windows of ~90 words side by side,
-   * each with the end of the window before it; a window that is late, fails or loses his words stays as it was. mode "live": the subtitle so far, one call,
-   * on the per-device caption ledger. Returns {text, ms, windows, changed, failed}.
+   * The text clean-up without audio. mode "final": the whole dictation after its chunks were transcribed, in windows of ~90 words side by side, each with
+   * the end of the window before it and the start of the next; every change passes the word guard, and a window that is late, fails or loses his words
+   * stays as it was. mode "format": line breaks only. mode "live": the subtitle so far, one call, on the per-device caption ledger.
+   * format (final and format mode): light structure, "\n" between thoughts and "\n\n" between topics; the words are the same with or without it.
+   * Returns {text, ms, windows, changed, failed, undone, breaks}.
    */
-  async function polish(text, context = {}, { mode = 'final', dictionary = {}, deviceId = 'device', timeoutMs } = {}) {
+  async function polish(text, context = {}, { mode = 'final', dictionary = {}, deviceId = 'device', timeoutMs, format = false } = {}) {
     const started = Date.now(), input = clean(text);
     if (!input) return { text: '', ms: 0, windows: 0, changed: 0, failed: 0 };
     if (!maiKey()) throw Object.assign(deviceError('Nachbearbeitung ist nicht eingerichtet.', 503), { code: 'no-key' });
@@ -374,19 +503,37 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       return { text: ok ? applyCorrections(clean(out), dictionary) : input, ms: Date.now() - started, windows: 1, changed: ok && clean(out) !== input ? 1 : 0, failed: ok ? 0 : 1 };
     }
     if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
+    const countBreaks = t => (t.match(/\n+/g) ?? []).length;
+    if (mode === 'format') {
+      const out = applyCorrections(applyBreaks(sentences(input), await breaksFor(input, timeoutMs ?? 2500)), dictionary);
+      return { text: out, ms: Date.now() - started, windows: 0, changed: 0, failed: 0, undone: 0, breaks: countBreaks(out) };
+    }
     const windows = polishWindows(input), budget = Math.round(timeoutMs ?? Math.min(9000, 3500 + 2 * input.length / windows.length));
-    let changed = 0, failed = 0;
-    const outs = await Promise.all(windows.map(async (w, i) => {
-      const before = i ? windows[i - 1].split(' ').slice(-25).join(' ') : clean(context.fieldBefore).slice(-300);
-      const data = JSON.stringify({ glossar, woerterbuch: terms, kontext: { process: process_ }, davor: before, diktat: w }).replaceAll('<', '\\u003c');
+    const guardWith = { terms: guardTerms(dictionary, env) };
+    let changed = 0, failed = 0, undone = 0;
+    // the structure is chosen on the text as it came in, while the windows are cleaned: no extra wait
+    const breaksJob = format ? breaksFor(input, Math.min(budget, 3000)) : null;
+    // each window is cleaned together with the last words of the one before it: where two windows meet, the model has seen both sides (stitchWindows)
+    const LAP = 10, lead = i => (i ? windows[i - 1].split(' ').slice(-LAP).join(' ') : '');
+    const sources = windows.map((w, i) => (i ? `${lead(i)} ${w}` : w));
+    const outs = await Promise.all(sources.map(async (w, i) => {
+      const before = i ? windows[i - 1].split(' ').slice(-LAP - 25, -LAP).join(' ') : clean(context.fieldBefore).slice(-300);
+      const after = i + 1 < windows.length ? windows[i + 1].split(' ').slice(0, 12).join(' ') : '';
+      const data = JSON.stringify({ glossar, woerterbuch: terms, kontext: { process: process_ }, davor: before, diktat: w, danach: after }).replaceAll('<', '\\u003c');
       try {
         const out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(budget), { system: FINAL_PROMPT, maxTokens: 2500 }));
         if (!keptWords(w, out)) { failed += 1; return w; }
-        if (out !== w) changed += 1;
-        return out;
+        const g = guardText(w, out, guardWith);
+        undone += g.undone;
+        if (g.text !== w) changed += 1;
+        return g.text;
       } catch { failed += 1; return w; }
     }));
-    return { text: applyCorrections(outs.join(' '), dictionary), ms: Date.now() - started, windows: windows.length, changed, failed };
+    let cleaned = stitchWindows(sources, outs, LAP);
+    // the whole text once more through the guard: whatever the stitching did, his words are all there, once, in order
+    if (windows.length > 1 && splitWords(input).length <= 3000) cleaned = guardText(input, cleaned, guardWith).text;
+    const out = applyCorrections(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned, dictionary);
+    return { text: out, ms: Date.now() - started, windows: windows.length, changed, failed, undone, breaks: countBreaks(out) };
   }
   return { highlight, dictate, vision, caption, polish };
 }

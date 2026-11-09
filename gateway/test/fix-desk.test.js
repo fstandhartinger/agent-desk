@@ -153,7 +153,7 @@ it('S2: a wrong version number does not win; the registry hit that fits ranks by
 it('M7: a truncated merge loses to the longest source; the first finisher does not win over a much longer one', async () => {
   const long = 'Das ist ein ziemlich langer Satz über die Freigabe von Reax eins drei und ihre Folgen für den Launch nächste Woche';
   const short = 'Das ist ein ziemlich langer Satz';
-  const mk = (merge) => createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x' }, fetchImpl: async (url, opts) => {
+  const mk = (merge) => createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x', DESK_DICTATE_SOURCES: 'mai,groq' }, fetchImpl: async (url, opts) => {
     if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: merge } }] });
     if (String(url).includes('openrouter')) return Response.json({ text: short, usage: { seconds: 6, cost: 0.0001 } }); // the fast, cut-off one
     if (String(url).includes('groq')) { await new Promise(r => setTimeout(r, 20)); return Response.json({ text: long }); }
@@ -167,7 +167,7 @@ it('M7: a truncated merge loses to the longest source; the first finisher does n
   assert.equal(truncated.providers.merge.shortfall, 21 - 6);
   const fine = await mk(`${long}.`).dictate(wavOf(6), ctx, { items: [] });
   assert.equal(fine.merged, true); assert.match(fine.text, /Folgen/);
-  const noMerge = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g' }, fetchImpl: async (url) => (String(url).includes('openrouter') ? Response.json({ text: short, usage: { seconds: 6, cost: 0.0001 } }) : (await new Promise(r => setTimeout(r, 20)), Response.json({ text: long }))) });
+  const noMerge = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', DESK_DICTATE_SOURCES: 'mai,groq' }, fetchImpl: async (url) => (String(url).includes('openrouter') ? Response.json({ text: short, usage: { seconds: 6, cost: 0.0001 } }) : (await new Promise(r => setTimeout(r, 20)), Response.json({ text: long }))) });
   assert.equal((await noMerge.dictate(wavOf(6), ctx, { items: [] })).text, long, 'without a merge the longest source is the transcript');
 });
 

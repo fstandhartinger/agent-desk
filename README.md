@@ -111,20 +111,37 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
 - `POST /api/device/dictate`: multipart `audio` (PCM16 WAV, 16 kHz mono, at most 60 s),
   `context` JSON `{process,fieldBefore,visibleIds,recentTerms}`, optional `chunk` JSON
   `{dictationId:string<=40,index:int,final:bool}` (a long dictation the app split; only traced, malformed = 400). Field text is at most 500
-  characters; at most 20 IDs and 50 recent terms (100 chars each). Groq Whisper large v3,
-  OpenAI `gpt-4o-transcribe`, Gemini 3.8 Flash and MAI-Transcribe-2 (`microsoft/mai-transcribe-2` over OpenRouter,
-  `OPENROUTER_API_KEY`, about USD 0.10/h) run in parallel; missing keys skip providers. MAI gets a phrase list (dictionary terms,
-  corrected spellings only, then the words of the visible artifact titles, at most 200); a 4xx with a list is retried once without it.
-  Gemini reconciles completed variants with dictionary/context when time remains. The hard budget scales with the audio:
-  `clamp(4 s, 45 s, 4 s + 0.7 s per second of audio)` (including the dictionary and bounded visible-title lookup); the soft wait for the
-  other providers is 2.3 s for clips up to 2 s and grows by 0.25 s per further second. On expiry the first completed valid
-  transcript is used and the remaining requests are aborted. Short-clip word-count
-  checks reject implausible output; explicit dictionary `replace_from` corrections apply.
-  Returns `{text,sources:{groq,openai,gemini,mai?},ms,providers:{<name>:{ok,ms,status?,reason?},merge?},degraded,merged,seconds}`
-  (unavailable sources are null; `reason`: `upstream|timeout|empty|implausible|late|unfinished|budget|error`, `status` is the provider's HTTP status,
+  characters; at most 20 IDs and 50 recent terms (100 chars each). Three recognisers run in parallel (10 Nov 2026, chosen by wrong words on a
+  day of his recordings): MAI-Transcribe-2 (`microsoft/mai-transcribe-2`, 0.6 %), OpenAI `gpt-transcribe` (1.3 %) and AssemblyAI Universal-3.6 Pro
+  (`assemblyai/universal-3-6-pro`, 1.8 %); MAI and AssemblyAI go over OpenRouter (`OPENROUTER_API_KEY`). `DESK_DICTATE_SOURCES` picks others by name
+  (`mai,openai,assembly,scribe,voxtral,groq,gemini`; `scribe` = ElevenLabs Scribe v2 with key terms, `ELEVENLABS_API_KEY`); with a missing key the next
+  of the chain `mai,openai,assembly,scribe,groq` takes the place. Whisper large v3 turbo on Groq and Gemini 3.8 Flash are the reserve: they only run when
+  nothing has answered after 2.5 s. MAI gets a phrase list (dictionary terms, corrected spellings only, private names from `DESK_DICTATION_TERMS_EXTRA`,
+  glossary names, then the words of the visible artifact titles, at most 200); a 4xx with a list is retried once without it. OpenAI and Whisper get
+  the same names as a prompt. A fast model (`DESK_DICTATE_MERGE_MODEL`, default `openai/gpt-oss-120b:nitro`) cleans the variants into one text; every
+  change it makes passes the word guard (`src/dictationGuard.js`): punctuation, capitals, a reading another recogniser heard at that place, a near miss
+  in sound, a known name, a filler or a spoken self-correction may stand; a synonym, a reordering, an invented word, a changed digit or a negation that
+  appears or disappears is undone (`providers.merge.undone`). The hard budget scales with the audio:
+  `clamp(4 s, 45 s, 4 s + 0.7 s per second of audio)` (including the dictionary and bounded visible-title lookup). The last chunk of a dictation goes
+  on as soon as two recognisers are in (plus 0.3 s); a chunk sent while he still talks (`chunk.final: false`) waits for all three, up to the soft
+  limit (1.8 s plus 0.06 s per second of audio). On expiry the first completed valid transcript is used and the remaining requests are aborted.
+  Short-clip word-count checks reject implausible output; explicit dictionary `replace_from` corrections apply.
+  No speech is an answer, not an outage: when two recognisers return no words (or one returns up to four words the two others did not hear, or a
+  few words nobody agrees on in a clip without a loud sample), the answer is `200 {text:"",silent:true}` and the reserve is not asked.
+  Returns `{text,sources:{<name>:text|null},ms,providers:{<name>:{ok,ms,status?,reason?,dropped?},merge?},degraded,merged,seconds,silent?}`
+  (`reason`: `upstream|timeout|empty|implausible|late|unfinished|skipped|budget|error`, `status` is the provider's HTTP status,
   never its body; `degraded`: with two or more providers fewer than two delivered, or the merge failed). When nothing is usable: 502 (all upstream errors) or
   504 with `{error,code:"all-providers-failed",providers}`; 503 `code:"no-provider"` without keys. Audio stays
   in memory; no uploads are written to disk or logged. Chunks of one dictation use their own bucket (120/min) instead of the 12/min media bucket.
+- `POST /api/device/polish` (scope `dictate`): text only. `{mode:"final"|"format"|"live",text,context?:{process,fieldBefore},format?:bool}`.
+  `final`: the whole dictation after its chunks, in windows of about 90 words side by side; each window is cleaned together with the last ten words
+  of the one before it, so the place where two windows (and two chunks) meet is seen from both sides, and every change passes the word guard.
+  `format:true` adds light structure: a second small call gets the sentences numbered and answers only with numbers
+  (`{"absatz":[..],"zeile":[..]}`); the gateway puts `\n\n` before a new topic or request and `\n` before a new thought or list item, never
+  markup, and only where the cleaned text ends a sentence. Short texts (under 45 words or three sentences) stay one block. `format` mode is that
+  alone (a dictation of one chunk). `live`: the subtitle so far, one call. Returns `{text,ms,windows,changed,failed,undone,breaks}`; a late or failed
+  model leaves the text as it came.
+  Replay recordings through all of this before shipping a change: `node gateway/scripts/dictation-replay.mjs` (recordings are private, never commit them).
 - `POST /api/device/caption` (scope `dictate`): live caption, MAI only. Multipart `audio` (PCM16 16 kHz mono, raw samples or a WAV, 0.1 to 12 s),
   optional `context` JSON `{visibleIds,recentTerms}` (phrases: dictionary + titles of the visible ids + recent terms, titles cached 5 min per device).
   3 s timeout. Returns `{text,ms,seconds}`. Own limits: 60 requests/device/minute, two in flight per device; the real `usage.cost` goes into the daily Desk cap.
@@ -147,10 +164,13 @@ other HTTP answer >= 400 an `http.error {path,method,status,message?,ms,bytes}` 
 
 Server keys: existing `ARTIFACTS_URL`, `ARTIFACTS_DESK_TOKEN` (read + dict + devices scopes),
 `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) for vision/audio/reconciliation, optional `GROQ_API_KEY`,
-`OPENAI_API_KEY` and `OPENROUTER_API_KEY` (MAI-Transcribe-2, also used by captions; `OPENROUTER_BASE_URL` override) for the other transcribers. For test endpoints the existing
-`GOOGLE_BASE_URL`, `OPENAI_BASE_URL` and new `GROQ_BASE_URL` overrides are supported.
-Processors: Google receives highlighted images and enabled dictation audio; Groq and OpenAI
-receive dictation audio when configured. Field context/dictionary reach Google reconciliation.
+`OPENAI_API_KEY` (gpt-transcribe) and `OPENROUTER_API_KEY` (MAI-Transcribe-2, AssemblyAI, the clean-up model, also used by captions;
+`OPENROUTER_BASE_URL` override), optional `ELEVENLABS_API_KEY` (Scribe v2 as a dictation source). Private names for the recognisers and the
+clean-up never live in this public repository: `DESK_DICTATION_TERMS_EXTRA` (comma separated names, into the recogniser hints and the word guard)
+and `DESK_DICTATION_CONTEXT_EXTRA` (a sentence or two of context for the clean-up model). For test endpoints the existing
+`GOOGLE_BASE_URL`, `OPENAI_BASE_URL`, `GROQ_BASE_URL` and new `ELEVENLABS_BASE_URL` overrides are supported.
+Processors: Google receives highlighted images; OpenAI and, over OpenRouter, Microsoft and AssemblyAI receive dictation audio; Groq and Google
+receive it only as the reserve. The dictated text, field context and dictionary reach the clean-up model over OpenRouter.
 No real provider calls are needed for the device route/media tests.
 
 ### Screen Agent v0.1.3 first run
