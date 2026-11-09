@@ -65,6 +65,8 @@ const TASKS = [
     check: async () => { const line = textOf(await act('ui_windows', {})).split('\n').find((l) => /calc|rechner/i.test(l)) ?? ''; const m = line.match(/(-?\d+),\s*(-?\d+),\s*\d+,\s*\d+|\[(-?\d+),(-?\d+)/); const x = Number(m?.[1] ?? m?.[3]), y = Number(m?.[2] ?? m?.[4]); return Number.isFinite(x) && x <= 60 && y <= 60; } },
   { id: 'chrome-cards', goal: 'Im Chrome ist eine Seite mit drei Karten offen (Nordgatan, Opnar AI, Outwing). Klicke bei der Karte zu Opnar AI auf den Knopf "Senden (empfohlen)". Nur diesen einen Knopf.',
     needs: 'cards', check: async () => /clicked=opnar:senden(?![,\w])/i.test(textOf(await act("ui_windows", {}))) },
+  { id: 'chrome-fill', goal: 'Öffne im Chrome in einem eigenen Tab diese Adresse: data:text/html,<title>Formular</title><h1>Testformular</h1><input id=q placeholder=Name><button onclick="document.title=\'sent=\'+document.getElementById(\'q\').value">Absenden</button> . Trage dort in das Feld den Namen Hallo Welt ein und klicke auf Absenden.',
+    check: async () => /sent=Hallo Welt/.test(textOf(await act('ui_windows', {}))) },
   { id: 'wheel-keys', goal: 'Öffne im Windows-Explorer den Ordner C:\\Windows\\System32, scrolle mit dem Mausrad ein Stück nach unten und sage mir in der Zusammenfassung, wie die erste jetzt sichtbare Datei oder der erste sichtbare Ordner heißt.',
     check: async (summary) => summary.length > 10 },
   { id: 'wsl', goal: 'Führe in WSL den Bash-Befehl "uname -a" aus und schreibe die Ausgabe in die Datei e2e-uname.txt in meinem Windows-Benutzerordner.',
