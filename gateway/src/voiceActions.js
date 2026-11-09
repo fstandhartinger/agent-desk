@@ -111,8 +111,10 @@ export const release = (g, name) => { for (const e of g.entries ?? []) if (e.use
  * The shared gate. {ok:true, spoken} when the tool may act now, else a ready {ok:false} tool result.
  * Order: voice session -> not a fragment's / an old question's call -> settle (he may still be talking) -> trigger in his words.
  */
-export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigger(name, spoken, now), extraSay = {}) {
-  const vt = ctx.voiceTurn;
+export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigger(name, spoken, now), extraSay = {}, { settleMs } = {}) {
+  const raw = ctx.voiceTurn;
+  // settleMs (computer_task in the unrestricted mode): he watches and a longer sentence extends the run, so the start waits only this long after his last sound instead of SETTLE_MS (trace a#ba7990: 2.5 s before anything moved)
+  const vt = raw && settleMs != null && raw.sinceSpeech ? { ...raw, speaking: () => raw.sinceSpeech() < settleMs } : raw;
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
   let epoch = vt.epoch();
