@@ -117,3 +117,12 @@ it('private names come from the environment only: into the recogniser hints and 
   for (const k of ['beispielgmbh', 'musterkunde', 'nordwind', 'eigenes', 'jevbench', 'lechonk', 'sn92']) assert(keys.has(k), k);
   assert(!keys.has('gründer'), 'ordinary words of the glossary are not names');
 });
+it('format: the lines of a spoken list land before "erstens", "zweitens" although no sentence ends there; a start inside a changed run gets no break', () => {
+  const raw = 'Wir machen heute drei Dinge, erstens schreiben wir den Text, zweitens prüfen wir ihn, drittens liefern wir alles aus. Danach ist Schluss für heute.';
+  assert.equal(carryBreaks(raw, raw, { para: [], line: [2, 3, 4] }), 'Wir machen heute drei Dinge,\nerstens schreiben wir den Text,\nzweitens prüfen wir ihn,\ndrittens liefern wir alles aus. Danach ist Schluss für heute.');
+  const cleaned = raw.replace('prüfen wir ihn', 'prüfen wir ihn genau');
+  assert.equal(carryBreaks(raw, cleaned, { para: [5], line: [2, 3, 4] }), 'Wir machen heute drei Dinge,\nerstens schreiben wir den Text,\nzweitens prüfen wir ihn genau,\ndrittens liefern wir alles aus.\n\nDanach ist Schluss für heute.');
+  // the start of sentence 3 was rewritten: no position, no break (never one sentence early)
+  assert.equal(carryBreaks('Punkt eins ist fertig. Jeff Bench leuft. Scream Agent ist das nächste Thema.', 'Punkt eins ist fertig. JevBench läuft. Screen Agent ist das nächste Thema.', { para: [3], line: [] }), 'Punkt eins ist fertig. JevBench läuft. Screen Agent ist das nächste Thema.');
+  assert.equal(carryBreaks('Wir liefern am 3. Mei. Dan sehen wir weiter.', 'Wir liefern am 3. Mai, dann sehen wir weiter.', { para: [], line: [2] }), 'Wir liefern am 3. Mai, dann sehen wir weiter.');
+});

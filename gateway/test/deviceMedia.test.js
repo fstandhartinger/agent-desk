@@ -236,3 +236,17 @@ it('the merge passes the word guard: what no recogniser heard is undone and coun
   const r = await createDeviceMedia({ env: allKeys, fetchImpl: w.fetchImpl }).dictate(wav(4), ctx, {});
   assert.equal(r.text, 'Wir wollen die Kunden verbessern und fragen wieso das so ist.'); assert.equal(r.merged, true); assert.equal(r.providers.merge.undone, 2); // next to an undone change the source's own punctuation stays
 });
+it('a 200 without a transcript is an outage, not "he said nothing"; and with no key for the named sources whatever has one hears him', async () => {
+  const fetchImpl = async (url) => { const u = String(url); if (u.includes('groq')) return Response.json({ text: 'Die Reserve hat ihn gehört' }); if (u.includes('openai.com')) return new Response('{}', { status: 500 }); return Response.json({ error: { message: 'upstream busy' } }); };
+  const r = await createDeviceMedia({ env: allKeys, geminiFallbackMs: 2000, fetchImpl }).dictate(wav(), ctx, {});
+  assert.equal(r.text, 'Die Reserve hat ihn gehört'); assert.notEqual(r.silent, true); assert.equal(r.providers.mai.reason, 'bad-reply'); assert.equal(r.providers.assembly.reason, 'bad-reply');
+  assert(r.ms < 1000, 'the reserve starts as soon as every source has ended without words, not after the fallback wait');
+  const w = world({ groq: 'Nur Groq hat einen Schlüssel' });
+  const only = await createDeviceMedia({ env: { GROQ_API_KEY: 'g', DESK_DICTATE_SOURCES: 'mai,openai' }, fetchImpl: w.fetchImpl }).dictate(wav(), ctx, {});
+  assert.equal(only.text, 'Nur Groq hat einen Schlüssel'); assert.deepEqual(w.calls, ['groq']);
+});
+it('after the soft limit the first recogniser with words ends the wait, not the last one to give up', async () => {
+  const fetchImpl = async (url, opts) => { const u = String(url); if (u.includes('openai.com')) { await new Promise(r => setTimeout(r, 2100)); return Response.json({ text: 'Spät, aber da' }); } return new Promise((_, reject) => opts.signal?.addEventListener('abort', () => reject(Object.assign(Error('aborted'), { name: 'AbortError' })))); };
+  const t = Date.now(), r = await createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', OPENAI_API_KEY: 'o' }, fetchImpl }).dictate(wav(2), ctx, {});
+  assert.equal(r.text, 'Spät, aber da'); assert(Date.now() - t < 3500, `took ${Date.now() - t} ms`);
+});

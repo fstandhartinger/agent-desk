@@ -92,3 +92,56 @@ it('windows cleaned with an overlap are stitched where both agree: a false sente
   assert.equal(stitchWindows(sources, sources, lap), `${w1} ${w2}`);
   assert.equal(stitchWindows([w1], [w1], lap), w1);
 });
+
+// ---- found by the review of 10 Nov 2026: each of these got through the first version of the guard ----
+it('a reading that only touches the edge of a change does not carry a negation or a digit out with it', () => {
+  const src = 'Das geht nicht im Büro', ctx = variantContext(src, [src, 'Das geht nicht in Büro', src]);
+  assert.equal(guard(src, 'Das geht in Büro.', ctx).text, 'Das geht nicht im Büro');
+  const s2 = 'Das ist nicht gut', c2 = variantContext(s2, [s2, 'Das ist nicht so gut']);
+  assert.equal(guard(s2, 'Das ist so gut', c2).text, 'Das ist nicht gut');
+  const s3 = 'Wir starten Opus 5 im Test', c3 = variantContext(s3, [s3, 'Wir starten Opus 5 in Test']);
+  assert.equal(guard(s3, 'Wir starten Opus in Test', c3).text, 'Wir starten Opus 5 im Test');
+  // a recogniser that really did not hear the word may still decide
+  const s4 = 'Das ist nicht gut', c4 = variantContext(s4, [s4, 'Das ist gut', 'Das ist gut']);
+  assert.equal(guard(s4, 'Das ist gut', c4).text, 'Das ist gut');
+});
+it('a bare dash or "..." between words does not make the next word disputable', () => {
+  const src = 'Das geht – nicht gut', ctx = variantContext(src, [src, 'Das geht nicht gut']);
+  assert.match(guard(src, 'Das geht gut', ctx).text, /nicht gut$/);
+  assert.match(guard('Das geht ... nicht gut', 'Das geht gut', variantContext('Das geht ... nicht gut', ['Das geht ... nicht gut', 'Das geht nicht gut'])).text, /nicht gut$/);
+});
+it('digits keep their order and their decimal point; a spoken correction may still change a number', () => {
+  assert.equal(guard('Überweise bitte 1250 Euro an Karte 19432', 'Überweise bitte 1520 Euro an Karte 19423.').text, 'Überweise bitte 1250 Euro an Karte 19432');
+  assert.equal(guard('Opus 5.5 kostet 1,5 Millionen', 'Opus 55 kostet 15 Millionen.').text, 'Opus 5.5 kostet 1,5 Millionen.');
+  assert.equal(guard('das sind einundzwanzig Stück', 'das sind 12 Stück').text, 'das sind einundzwanzig Stück');
+  assert.equal(guard('das sind einundzwanzig Stück', 'das sind 21 Stück').text, 'das sind 21 Stück');
+  assert.equal(guard('wir treffen uns um zehn, nein, ich meine um elf', 'wir treffen uns um elf').text, 'wir treffen uns um elf');
+});
+it('no word rides along with an accepted change, and "meine" or "falsch" alone correct nothing', () => {
+  assert.equal(guard('die zielschlagenden Abfragen', 'die fehlschlagenden SQL Abfragen').text, 'die zielschlagenden Abfragen');
+  assert.equal(guard('die fehlschlagenden alten Abfragen', 'die fehlschlagende Abfragen').text, 'die fehlschlagenden alten Abfragen');
+  const a = 'Ich habe meine Unterlagen vergessen und komme später'; assert.equal(guard(a, 'Und komme später').text, a);
+  const b = 'Der Bericht ist falsch und muss neu geschrieben werden'; assert.equal(guard(b, 'Der Bericht muss neu geschrieben werden').text, b);
+  assert.equal(guard('der Kunde von gestern', 'der Claude von gestern').text, 'der Kunde von gestern', 'a name is only a fix when it sounds like what was heard');
+});
+it('a negation inside a word counts too', () => {
+  for (const [x, y] of [['möglich', 'unmöglich'], ['legal', 'illegal'], ['jemand', 'niemand'], ['immer', 'nimmer'], ['ein', 'nein'], ['interessiert', 'desinteressiert']]) {
+    assert.equal(guard(`das ist ${x} so`, `das ist ${y} so`).text, `das ist ${x} so`, `${x} -> ${y}`);
+    assert.equal(guard(`das ist ${y} so`, `das ist ${x} so`).text, `das ist ${y} so`, `${y} -> ${x}`);
+  }
+});
+it('stitching never cuts inside a change only one window made: the source words fit together instead', () => {
+  const w1 = 'eins zwei drei vier fünf sechs wir treffen uns am Mittwoch früh im Büro nein besser am Freitag dort.', w2 = 'Danach gehen wir alle zusammen essen und reden weiter.';
+  const lap = 10, lead = w1.split(' ').slice(-lap).join(' '), sources = [w1, `${lead} ${w2}`];
+  const applied = 'eins zwei drei vier fünf sechs wir treffen uns am Freitag dort.';
+  const words = t => t.toLowerCase().replace(/[.,]/g, '').split(' ');
+  for (const cleaned of [[applied, sources[1]], [w1, `${lead.replace('Mittwoch früh im Büro nein besser am ', '')} ${w2}`], [applied, `am Freitag dort. ${w2}`]]) {
+    const out = stitchWindows(sources, cleaned, lap), got = words(out);
+    assert(!/am nein|uns am dort|Freitag dort\. Freitag|dort\. dort/.test(out), out);
+    assert.equal(got.filter(w => w === 'freitag').length, 1, out); assert.equal(got.filter(w => w === 'danach').length, 1, out); assert(out.endsWith('reden weiter.'), out);
+    assert(got.includes('eins') && got.includes('essen'), out);
+  }
+});
+it('sentences do not end at abbreviations, dates or ordinals', () => {
+  assert.deepEqual(sentences('Das gilt z. B. ab dem 10.11. für ca. 3 Kunden. Dr. Meier kommt am 3. Mai.'), ['Das gilt z. B. ab dem 10.11. für ca. 3 Kunden.', 'Dr. Meier kommt am 3. Mai.']);
+});
