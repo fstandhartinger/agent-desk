@@ -1,6 +1,6 @@
 import { limits } from './limits.js';
 import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
-import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark } from './dictationGuard.js';
+import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark, properNames } from './dictationGuard.js';
 export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT };
 // Screen Agent media is processed in memory. Never include payloads or upstream errors in logs.
 export const deviceError = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -171,10 +171,16 @@ const NAME_LIKE = /\p{Lu}.*\p{Lu}|\d|\p{Ll}\p{Lu}/u;
 const PUBLIC_NAMES = (DICTATION_GLOSSARY.match(/[\p{L}\p{N}][\p{L}\p{N}.+-]{2,}/gu) ?? []).filter(w => NAME_LIKE.test(w));
 /** The names the word guard accepts as "written properly": glossary names, private names (both env vars) and the app's dictionary. */
 export function guardTerms(dictionary, env = process.env) {
-  const entries = dictionary?.terms ?? dictionary?.items ?? (Array.isArray(dictionary) ? dictionary : []);
-  const own = (Array.isArray(entries) ? entries : []).map(e => e?.term).filter(t => typeof t === 'string');
   const extra = (String(env.DESK_DICTATION_CONTEXT_EXTRA ?? '').match(/\p{Lu}[\p{L}\p{N}.+-]{2,}/gu) ?? []);
-  return termKeys([...GLOSSARY_TERMS, ...PUBLIC_NAMES, ...privateTerms(env), ...extra, ...own]);
+  return termKeys([...knownNames(dictionary, env), ...PUBLIC_NAMES, ...extra]);
+}
+/** Names with one right spelling: the app's dictionary (his own words first), private names, the glossary's list. */
+export function knownNames(dictionary, env = process.env) {
+  const entries = dictionary?.terms ?? dictionary?.items ?? (Array.isArray(dictionary) ? dictionary : []);
+  const own = (Array.isArray(entries) ? entries : []).map(e => e?.term).filter(t => typeof t === 'string' && t.length <= 100);
+  const seen = new Set(), out = [];
+  for (const t of [...own, ...privateTerms(env), ...GLOSSARY_TERMS]) { const k = t.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(t); } }
+  return out;
 }
 /**
  * Line breaks the model chose on the text as it was (sentence numbers), carried over to the cleaned text by word position. A break only lands where the
@@ -423,7 +429,8 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       const heard = names.filter(n => sources[n]);
       if (heard.length && heard.every(n => wordCount(sources[n]) <= 4)) {
         const apartAll = heard.length >= 2 && heard.every(a => heard.every(b => a === b || overlap(sources[a], sources[b]) === 0));
-        if ((heard.length === 1 && empties() >= 2) || (apartAll && wavPeak(audio) < 2000)) {
+        const quiet = () => wavPeak(audio) < 2000;
+        if ((heard.length === 1 && (empties() >= 2 || (empties() >= 1 && quiet()))) || (apartAll && quiet())) {
           for (const n of heard) { providers[n] = { ...providers[n], dropped: 'noise' }; sources[n] = null; }
           first = '';
         }
@@ -466,7 +473,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       const usable = Object.values(sources).filter(Boolean).length;
       const list = report();
       const degraded = (names.length > 1 && usable < 2) || (providers.merge !== undefined && !providers.merge.ok);
-      return { text: applyCorrections(text, resolvedDictionary), sources: { ...sources }, ms: Date.now() - started, providers: { ...list, ...(providers.merge ? { merge: providers.merge } : {}) }, degraded, merged, seconds: duration };
+      return { text: properNames(applyCorrections(text, resolvedDictionary), knownNames(resolvedDictionary, env)), sources: { ...sources }, ms: Date.now() - started, providers: { ...list, ...(providers.merge ? { merge: providers.merge } : {}) }, degraded, merged, seconds: duration };
     } finally { expired = true; clearTimeout(timer); clearTimeout(softTimer); controller.abort(); }
   }
   const clean = t => String(t ?? '').replace(/[\u2010\u2011]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -505,7 +512,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
     const countBreaks = t => (t.match(/\n+/g) ?? []).length;
     if (mode === 'format') {
-      const out = applyCorrections(applyBreaks(sentences(input), await breaksFor(input, timeoutMs ?? 2500)), dictionary);
+      const out = properNames(applyCorrections(applyBreaks(sentences(input), await breaksFor(input, timeoutMs ?? 2500)), dictionary), knownNames(dictionary, env));
       return { text: out, ms: Date.now() - started, windows: 0, changed: 0, failed: 0, undone: 0, breaks: countBreaks(out) };
     }
     const windows = polishWindows(input), budget = Math.round(timeoutMs ?? Math.min(9000, 3500 + 2 * input.length / windows.length));
@@ -532,7 +539,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     let cleaned = stitchWindows(sources, outs, LAP);
     // the whole text once more through the guard: whatever the stitching did, his words are all there, once, in order
     if (windows.length > 1 && splitWords(input).length <= 3000) cleaned = guardText(input, cleaned, guardWith).text;
-    const out = applyCorrections(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned, dictionary);
+    const out = properNames(applyCorrections(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned, dictionary), knownNames(dictionary, env));
     return { text: out, ms: Date.now() - started, windows: windows.length, changed, failed, undone, breaks: countBreaks(out) };
   }
   return { highlight, dictate, vision, caption, polish };

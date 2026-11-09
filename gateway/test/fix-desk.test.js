@@ -151,7 +151,7 @@ it('S2: a wrong version number does not win; the registry hit that fits ranks by
 
 // ---- M7: dictation merge ----
 it('M7: a truncated merge loses to the longest source; the first finisher does not win over a much longer one', async () => {
-  const long = 'Das ist ein ziemlich langer Satz über die Freigabe von Reax eins drei und ihre Folgen für den Launch nächste Woche';
+  const long = 'Das ist ein ziemlich langer Satz über die Freigabe von REAX eins drei und ihre Folgen für den Launch nächste Woche';
   const short = 'Das ist ein ziemlich langer Satz';
   const mk = (merge) => createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', GROQ_API_KEY: 'g', GOOGLE_API_KEY: 'x', DESK_DICTATE_SOURCES: 'mai,groq' }, fetchImpl: async (url, opts) => {
     if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: merge } }] });
