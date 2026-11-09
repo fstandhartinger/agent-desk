@@ -235,7 +235,7 @@ test('he steers by voice while the run works: every spoken sentence reaches the 
   assert.match(second[1].content, /Seit dem Start hat Florian gesagt/);
   assert.ok(second[1].content.includes('aber sende sie nicht sofort') && second[1].content.includes('Nein, nimm den Entwurf von gestern.'));
   assert.ok(!second[1].content.includes('"Nein, nimm"') && !second[1].content.includes('gerade gesagt'));
-  assert.ok(second.at(-1).content.startsWith('Florian hat gerade gesprochen, während du arbeitest.') && second.at(-1).content.includes('der neueste: "Nein, nimm den Entwurf von gestern."'));
+  assert.ok(second.at(-1).content.includes('Florian hat gerade gesprochen, während du arbeitest.') && second.at(-1).content.includes('der neueste: "Nein, nimm den Entwurf von gestern."'));
   assert.match(second.at(-1).content, /geht dem bisherigen Auftrag vor/);
   const steer = h.session.events.filter((e) => e.type === 'computer.steer');
   assert.deepEqual(steer.map((e) => e.opener), [true, false, false]);
@@ -300,6 +300,10 @@ test('steering: a correction during a hands-on pause or while a question to him 
   h.computer.userFinal('s1', { text: 'mach weiter', turn: 3, at: 2 });
   await until(() => !R.paused);
   assert.match(R.note, /Hands-on-Pause ist vorbei/);
+  for (let k = 1; k <= 30; k += 1) h.computer.userFinal('s1', { text: `Nimm den Entwurf von gestern. ${'Noch ein Zusatz. '.repeat(k)}`.trim(), turn: 3, at: 2 + k });
+  const pending = [R.note, R.steerNote].join('\n');
+  assert.ok(pending.length < 3500 && (pending.match(/Florian hat gerade gesprochen/g) ?? []).length === 1, 'a growing sentence replaces its alert, the pause note stays');
+  h.computer.userFinal('s1', { text: 'mach weiter', turn: 3, at: 99 });
   // a question to him is open: his sentence is no clear yes/no, the loop still gets his words
   const answer = R.ask({ form: 'yesno', topic: 'die Mail senden' });
   h.computer.userFinal('s1', { text: 'Nimm den Entwurf von gestern.', turn: 4, at: 3 });

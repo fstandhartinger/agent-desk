@@ -488,6 +488,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     await waitForFacts(name);
     if (closed) return;
+    if (cancelledCalls.delete(id)) { // voided while it waited for the early facts: the same exit as above
+      audit({ action: 'voice.tool.cancelled', detail: `${provider}:${name}` });
+      trace.event('tool.cancelled', { turn: turnId, id, name, reason: 'vendor-voided-late' });
+      return;
+    }
     // An action tool's answer is never swallowed: xAI can call before the transcript of the same sentence arrives (which moves the epoch), and a refusal must reach the model so it calls again or says why
     if (myEpoch !== contentEpoch && !ACTION_TOOLS.has(name)) {
       audit({ action: 'voice.tool.stale', detail: `${provider}:${name}` });

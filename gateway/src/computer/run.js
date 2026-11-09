@@ -117,7 +117,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       return null;
     };
     R.addCost = (usd) => { if (Number.isFinite(usd) && usd > 0) { R.cost += usd; addDay(usd); limits.addCost?.(usd); } };
-    R.takeNote = () => { const n = R.note; R.note = null; return n; };
+    R.takeNote = () => { const n = [R.note, R.steerNote].filter(Boolean).join('\n') || null; R.note = null; R.steerNote = null; return n; };
 
     /** Before each model turn: waits while hands-on, and after 25 steps builds the report and waits for a new spoken final. */
     R.gate = async () => {
@@ -344,7 +344,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       else { R.ev('computer.steer.overflow', { run: R.run, sentences: R.later.size }); R.end('voice-overflow'); return; }
     }
     const alert = `Florian hat gerade gesprochen, während du arbeitest. Seine Sätze stehen wörtlich in der ersten Nachricht unter "Seit dem Start hat Florian gesagt"; der neueste: ${JSON.stringify(text)}. ${opener ? 'Das ist sein Auftragssatz, der weiterging: der vollständige Satz gilt. ' : ''}Betrifft es den Auftrag (Korrektur, Einschränkung, Verneinung, Ergänzung, ein anderes Ziel), gilt es ab sofort und geht dem bisherigen Auftrag vor; hast du schon etwas getan, das dem widerspricht, mach es wenn möglich rückgängig und sag es in der Zusammenfassung. Hat es nichts mit dem Auftrag zu tun, arbeite unverändert weiter.`;
-    R.note = R.note && !R.note.startsWith('Florian hat gerade gesprochen') ? `${R.note}\n${alert}` : alert; // a waiting note of another kind (end of a pause) is kept
+    R.steerNote = alert; // only the newest alert: every sentence is in the first message anyway; a waiting note of another kind (end of a pause) is kept next to it
     R.ev('computer.steer', { run: R.run, chars: text.length, opener });
   }
   async function extend(R, e) {
