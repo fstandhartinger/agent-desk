@@ -16,6 +16,7 @@ import { serverRead } from './serverRead.js';
 
 export const BEAT_MS = 5000, BEAT_DEAD_MS = 15_000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, STEP_REPORT = 25, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
 export const MAX_QUESTIONS = 3, ANSWER_MS = 60_000, GOAL_CHARS = 1000;
+export const STEER_KEEP = 40, STEER_CHARS = 1500; // his sentences during an unrestricted run that every model request repeats
 export const RESULT_CODES = ['done', 'refused', 'needs-confirm', 'stale-ref', 'killed', 'handson', 'unclear', 'no-run', 'denied'];
 const CLASSES = ['R0', 'R1', 'R2', 'R3'];
 const RUN_STATES = ['running', 'handson', 'paused', 'ended', 'killed'];
@@ -49,7 +50,7 @@ export function validateResult(body) {
 }
 
 const noUrls = (t) => redact(String(t ?? '')).split(/\s+/).slice(0, 200).map((tok) => (/^(?:https?:\/\/|www\.)/i.test(tok) || looksLikeHost(tok) || tok.length > 120 ? '[Link]' : tok)).join(' ').trim().slice(0, 300);
-const WHY = { done: 'der Agent hat aufgehört; ob es geklappt hat, steht in der Zusammenfassung', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als acht Bestätigungen nötig', 'start-denied': 'Florian hat den Start nicht bestätigt', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'start-failed': 'der Start schlug fehl' };
+const WHY = { done: 'der Agent hat aufgehört; ob es geklappt hat, steht in der Zusammenfassung', time: 'Zeitlimit von 10 Minuten erreicht', actions: 'Limit von 150 Aktionen erreicht', cost: 'Kostenlimit des Laufs erreicht', 'day-cost': 'Tageslimit für Computer-Läufe erreicht', killed: 'Florian hat per Notaus gestoppt', 'voice-stop': 'Florian hat per Sprache gestoppt', nein: 'Florian hat die Bestätigung abgelehnt', expired: 'zwei Bestätigungen sind abgelaufen', 'asks-cap': 'mehr als acht Bestätigungen nötig', 'start-denied': 'Florian hat den Start nicht bestätigt', idle: '60 Sekunden ohne Aktivität', 'no-beat': 'die Verbindung zum Screen Agent ist abgerissen', 'app-ended': 'der Screen Agent hat den Lauf beendet', 'app-no-run': 'der Screen Agent kennt den Lauf nicht mehr', 'model-error': 'das Modell war nicht erreichbar', 'model-no-action': 'das Modell lieferte keine Aktion', 'voice-gone': 'die Sprachsitzung endete', 'voice-overflow': 'Florian hat während des Laufs mehr gesagt, als der Agent aufnehmen konnte', 'start-failed': 'der Start schlug fehl' };
 const NOTHING_NAMED = 'Bereich: keine Seite; Programme: keine'; // the app's start reply when his sentence named nothing (ScopeText in ComputerAgent.cs)
 const QUIET = new Set(['voice-gone']);
 const VERB = { click: 'klicke', move: 'bewege die Maus', drag: 'ziehe', wheel: 'scrolle', type: 'tippe', wait: 'warte', window_state: 'ändere ein Fenster', open: 'öffne', ui_find: 'suche ein Element', ui_read: 'lese ein Element', clipboard_read: 'lese die Zwischenablage', clipboard_write: 'fülle die Zwischenablage', run_powershell: 'führe PowerShell aus', run_cmd: 'führe einen Befehl aus', run_wsl: 'führe Bash aus', run_python: 'führe Python aus', file_read: 'lese eine Datei', file_write: 'schreibe eine Datei', chrome_navigate: 'öffne eine Seite', chrome_activate: 'wechsle den Tab', chrome_close: 'schließe einen Tab', chrome_key: 'drücke eine Taste', chrome_eval: 'lese die Seite aus', chrome_screenshot: 'schaue auf die Seite', ui_windows: 'lese die Fenster', ui_tree: 'lese das Fenster', ui_click: 'klicke', ui_type: 'tippe', key: 'drücke eine Taste', scroll: 'scrolle', window_focus: 'wechsle das Fenster', screenshot: 'schaue auf den Bildschirm', chrome_tabs: 'lese die Tabs', chrome_open: 'öffne eine Seite', chrome_snapshot: 'lese die Seite', chrome_click: 'klicke', chrome_fill: 'fülle ein Feld aus', chrome_read: 'lese die Seite', server_read: 'lese vom Server' };
@@ -96,7 +97,9 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.v2 = unrestricted() && clientHasV2(s.client?.version); // the free tool set needs an app that implements it; an older app keeps the run it had
     R.startTurn = turn; R.startSaid = String(said ?? ''); R.later = new Map(); // unrestricted: what he said after the run began, by voice turn (steer())
     /** For the loop's first message: his sentences since the start, oldest first; the newest one counts when they disagree. */
-    R.spokenSince = () => [...R.later.values()];
+    R.spokenSince = () => [...R.later.values()].map((v) => v.text);
+    /** The entries a model request is about to carry; the loop marks them `read` once that request was answered: only then may they be dropped to bound memory. */
+    R.spokenEntries = () => [...R.later.values()];
     R.sessionRef = s;
     R.complete = async (o) => { R.inflight += 1; try { return await complete(o); } finally { R.inflight -= 1; R.touch(); } }; // a model call in flight is no idle time
     const ev = (type, data) => { try { s.trace?.(type, { ...data }); } catch { /* a trace failure never stops the run */ } };
@@ -277,6 +280,9 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     if (!R || !e || e.typed || e.echo) return;
     const text = String(e.text ?? '');
     R.touch();
+    // unrestricted: what he says reaches the loop in every state of the run (working, paused by his own mouse, waiting for his answer to a question). A correction during a pause does
+    // not resume the run; an answer to a question is still mapped below.
+    if (unrestricted()) { steer(R, e); if (R.ended) return; }
     const P = R.pending;
     if (P?.state === 'asked' || R.answer) quietUntil.set(sid, now() + 5000); // a sentence of his that grows after the answer was taken (the code arriving in two pieces, the run already over) stays out of the trace too
     if (P?.state === 'asked') {
@@ -302,8 +308,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       resume(R);
       return;
     }
-    if (unrestricted()) steer(R, e);
-    else if (e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
+    if (!unrestricted() && e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
   }
   async function resume(R) {
     if (R.resuming) return;
@@ -324,14 +329,22 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
    * sentence that grows replaces its shorter self, also the sentence that opened the run (the run starts 0.7 s after his last sound, he may go on talking).
    */
   function steer(R, e) {
-    const text = String(e.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
-    if (!text) return;
+    const whole = String(e.text ?? '').replace(/\s+/g, ' ').trim();
+    if (!whole) return;
+    // a long sentence keeps its beginning AND its end: the qualification ("... aber noch nicht senden") is usually the last thing he says
+    const text = whole.length > STEER_CHARS ? `${whole.slice(0, 300)} … ${whole.slice(-(STEER_CHARS - 310))}` : whole;
     const opener = e.turn !== undefined && e.turn !== null && e.turn === R.startTurn;
     if (opener && text === R.startSaid) return; // the final that opened the run, delivered again
-    if (R.later.get(e.turn) === text) return;
-    R.later.delete(e.turn); R.later.set(e.turn, text);
-    while (R.later.size > 6) R.later.delete(R.later.keys().next().value);
-    R.note = `Florian hat gerade gesprochen, während du arbeitest (wörtlich): ${JSON.stringify(text)}. ${opener ? 'Das ist sein Auftragssatz, der weiterging: der vollständige Satz gilt. ' : ''}Betrifft es den Auftrag (Korrektur, Einschränkung, Verneinung, Ergänzung, ein anderes Ziel), gilt es ab sofort und geht dem bisherigen Auftrag vor; hast du schon etwas getan, das dem widerspricht, mach es wenn möglich rückgängig und sag es in der Zusammenfassung. Hat es nichts mit dem Auftrag zu tun, arbeite unverändert weiter.`;
+    if (R.later.get(e.turn)?.text === text) return;
+    R.later.delete(e.turn); R.later.set(e.turn, { text, read: false });
+    if (R.later.size > STEER_KEEP) {
+      // memory stays bounded, but a sentence the loop has not read yet is never dropped: older ones that every later request repeated go first
+      const old = [...R.later.entries()].find(([, v]) => v.read);
+      if (old) R.later.delete(old[0]);
+      else { R.ev('computer.steer.overflow', { run: R.run, sentences: R.later.size }); R.end('voice-overflow'); return; }
+    }
+    const alert = `Florian hat gerade gesprochen, während du arbeitest. Seine Sätze stehen wörtlich in der ersten Nachricht unter "Seit dem Start hat Florian gesagt"; der neueste: ${JSON.stringify(text)}. ${opener ? 'Das ist sein Auftragssatz, der weiterging: der vollständige Satz gilt. ' : ''}Betrifft es den Auftrag (Korrektur, Einschränkung, Verneinung, Ergänzung, ein anderes Ziel), gilt es ab sofort und geht dem bisherigen Auftrag vor; hast du schon etwas getan, das dem widerspricht, mach es wenn möglich rückgängig und sag es in der Zusammenfassung. Hat es nichts mit dem Auftrag zu tun, arbeite unverändert weiter.`;
+    R.note = R.note && !R.note.startsWith('Florian hat gerade gesprochen') ? `${R.note}\n${alert}` : alert; // a waiting note of another kind (end of a pause) is kept
     R.ev('computer.steer', { run: R.run, chars: text.length, opener });
   }
   async function extend(R, e) {

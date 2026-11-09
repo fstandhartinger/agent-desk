@@ -16,7 +16,7 @@ const shot = (text = 'frame: screen 1280x720 (Monitor 0, 2560x1440 @150 %)\ncurs
 const done = (summary = 'fertig') => [{ name: 'done', args: { summary } }];
 
 /** A model that answers each turn with a LIST of tool calls (v2 allows several per answer). */
-function setup({ turns, app, clientVersion = '0.1.14' }) {
+function setup({ turns, app, clientVersion = '0.1.14', costUsd = 0.01 }) {
   const clock = { t: 1_000_000, now: () => clock.t };
   const vision = fakeVision();
   vision.app = app;
@@ -24,9 +24,9 @@ function setup({ turns, app, clientVersion = '0.1.14' }) {
   let i = 0;
   const complete = async (o) => {
     calls.push({ ...o, messages: structuredClone(o.messages) });
-    const step = typeof turns[i] === 'function' ? turns[i](o.messages) : turns[i];
-    i += 1;
-    return { message: { content: '', tool_calls: (step ?? []).map((c, k) => ({ id: `t${i}_${k}`, name: c.name, args: JSON.stringify(c.args ?? {}) })) }, usage: { in: 100, out: 20 }, costUsd: 0.01, ms: 5 };
+    const mine = i; i += 1;
+    const step = typeof turns[mine] === 'function' ? await turns[mine](o.messages) : turns[mine];
+    return { message: { content: '', tool_calls: (step ?? []).map((c, k) => ({ id: `t${i}_${k}`, name: c.name, args: JSON.stringify(c.args ?? {}) })) }, usage: { in: 100, out: 20 }, costUsd, ms: 5 };
   };
   const session = fakeSession({ client: { ...SCREEN_AGENT, version: clientVersion } });
   const computer = createComputer({ vision, hub: { call: async () => ({ text: 'ok' }) }, now: clock.now, complete, tickMs: 1e9, limits: { check: () => ({ ok: true }), addCost() {} }, statePath: '' });
@@ -235,7 +235,7 @@ test('he steers by voice while the run works: every spoken sentence reaches the 
   assert.match(second[1].content, /Seit dem Start hat Florian gesagt/);
   assert.ok(second[1].content.includes('aber sende sie nicht sofort') && second[1].content.includes('Nein, nimm den Entwurf von gestern.'));
   assert.ok(!second[1].content.includes('"Nein, nimm"') && !second[1].content.includes('gerade gesagt'));
-  assert.match(second.at(-1).content, /Florian hat gerade gesprochen, während du arbeitest \(wörtlich\): "Nein, nimm den Entwurf von gestern\."/);
+  assert.ok(second.at(-1).content.startsWith('Florian hat gerade gesprochen, während du arbeitest.') && second.at(-1).content.includes('der neueste: "Nein, nimm den Entwurf von gestern."'));
   assert.match(second.at(-1).content, /geht dem bisherigen Auftrag vor/);
   const steer = h.session.events.filter((e) => e.type === 'computer.steer');
   assert.deepEqual(steer.map((e) => e.opener), [true, false, false]);
@@ -268,4 +268,76 @@ test('an app older than 0.1.14 keeps the run it had: the earlier tool set, promp
   assert.equal(h.calls[0].parallel, false);
   assert.equal(h.calls[0].messages[0].content, FREE_PROMPT_V1);
   assert.equal(h.session.events.find((e) => e.type === 'computer.run.start').v2, false);
+});
+
+// ---- second review round (9 Nov): steering in every state, for every unrestricted app, and nothing unread is dropped ----
+const blockFirstModelCall = () => { let release; const gate = new Promise((r) => { release = r; }); return { release, first: async () => { await gate; return [{ name: 'ui_windows', args: {} }]; } }; };
+const goalMessage = (call) => call.messages[1].content;
+
+test('steering: an older app in the unrestricted mode keeps his correction in EVERY later request, not only in one note', async () => {
+  const b = blockFirstModelCall();
+  const h = setup({ clientVersion: '0.1.13', app: (w) => (w.op === 'action' ? { ok: true, code: 'done', result: { text: 'w1' } } : { ok: true, code: 'done' }), turns: [b.first, [{ name: 'ui_windows', args: {} }], done()] });
+  await h.computer.begin('s1', { text: 'Sende die Mail.', goalArg: 'x', turn: 1, said: 'Sende die Mail.' });
+  await until(() => h.calls.length === 1);
+  h.computer.userFinal('s1', { text: 'Aber noch nicht senden.', turn: 2, at: 1 });
+  b.release();
+  await until(h.ended);
+  assert.equal(h.calls.length, 3);
+  for (const k of [1, 2]) assert.ok(goalMessage(h.calls[k]).includes('Aber noch nicht senden.'), `request ${k + 1}`);
+});
+
+test('steering: a correction during a hands-on pause or while a question to him is open reaches the loop; the pause is not resumed by it', async () => {
+  const b = blockFirstModelCall();
+  const h = setup({ app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [b.first, done()] });
+  await h.computer.begin('s1', { text: 'Mail senden', goalArg: 'x', turn: 1, said: 'Mail senden' });
+  await until(() => h.calls.length === 1);
+  const R = h.computer.runOf('s1');
+  h.computer.beat('s1', { deviceId: 'dev1' }, { run: R.run, state: 'handson' });
+  assert.equal(R.paused, true);
+  h.computer.userFinal('s1', { text: 'Aber noch nicht senden.', turn: 2, at: 1 });
+  assert.equal(R.paused, true, 'a correction is no go word');
+  assert.deepEqual(R.spokenSince(), ['Aber noch nicht senden.']);
+  h.computer.userFinal('s1', { text: 'mach weiter', turn: 3, at: 2 });
+  await until(() => !R.paused);
+  assert.match(R.note, /Hands-on-Pause ist vorbei/);
+  // a question to him is open: his sentence is no clear yes/no, the loop still gets his words
+  const answer = R.ask({ form: 'yesno', topic: 'die Mail senden' });
+  h.computer.userFinal('s1', { text: 'Nimm den Entwurf von gestern.', turn: 4, at: 3 });
+  assert.equal((await answer).code, 'unclear');
+  assert.ok(R.spokenSince().includes('Nimm den Entwurf von gestern.'));
+  b.release();
+  await until(h.ended);
+  assert.ok(goalMessage(h.calls[1]).includes('Aber noch nicht senden.') && goalMessage(h.calls[1]).includes('Nimm den Entwurf von gestern.'));
+});
+
+test('steering: sentences the loop has not read are never dropped, a long sentence keeps its end, and an overflow ends the run instead of forgetting', async () => {
+  const b = blockFirstModelCall();
+  const h = setup({ app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [b.first, done()] });
+  await h.computer.begin('s1', { text: 'Sende die Mail.', goalArg: 'x', turn: 1, said: 'Sende die Mail.' });
+  await until(() => h.calls.length === 1);
+  h.computer.userFinal('s1', { text: 'Aber noch nicht senden.', turn: 2, at: 1 });
+  for (let k = 3; k <= 8; k += 1) h.computer.userFinal('s1', { text: `Das ist Nebensatz Nummer ${k}.`, turn: k, at: k });
+  h.computer.userFinal('s1', { text: `${'Und dann noch etwas ganz Langes. '.repeat(80)}Am Ende aber: nichts abschicken.`, turn: 9, at: 9 });
+  b.release();
+  await until(h.ended);
+  const goal = goalMessage(h.calls[1]);
+  assert.ok(goal.includes('Aber noch nicht senden.'), 'the restriction of turn 2 is still there after six more sentences');
+  assert.ok(goal.includes('Am Ende aber: nichts abschicken.'), 'the end of a long sentence survives the cut');
+  assert.ok(goal.length < 12_000);
+  // 41 unread sentences: the run ends with a reason instead of dropping one
+  const b2 = blockFirstModelCall();
+  const h2 = setup({ app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [b2.first, done()] });
+  await h2.computer.begin('s1', { text: 'x', goalArg: 'x', turn: 1, said: 'x' });
+  await until(() => h2.calls.length === 1);
+  for (let k = 2; k <= 42 && h2.computer.runOf('s1'); k += 1) h2.computer.userFinal('s1', { text: `Satz ${k}.`, turn: k, at: k });
+  assert.equal(h2.session.events.find((e) => e.type === 'computer.run.stop').why, 'voice-overflow');
+  b2.release();
+});
+
+test('a cost cap reached by the model answer itself ends the run before its first action', async () => {
+  const h = setup({ costUsd: 2, app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [[{ name: 'click', args: { x: 1, y: 1 } }, { name: 'click', args: { x: 2, y: 2 } }], done()] });
+  await h.computer.begin('s1', { text: 'Klick', goalArg: 'x' });
+  await until(h.ended);
+  assert.deepEqual(h.actions().map((w) => w.tool), ['screenshot'], 'no click after the cap of USD 1.50');
+  assert.equal(h.session.events.find((e) => e.type === 'computer.run.stop').why, 'cost');
 });

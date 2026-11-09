@@ -460,11 +460,6 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
       const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
       output = String(res.content ?? '').slice(0, voiceCap(name));
-      // A name on his screen that sounds like what the recogniser wrote ("OpenAI" understood, "Opnar AI" on screen): the model reads it with the result of its first tool for that sentence, before it answers
-      if (lastFinal && lastFinal.turn === callTurn && myEpoch === contentEpoch && !fromFragment && !oldChain && lastFinal.turn !== hintedTurn && now() - lastFinal.at < 20_000 && !lastFinal.typed) {
-        const hint = hearingHint(lastFinal.text, deps.vision?.names?.(sid) ?? []);
-        if (hint) { hintedTurn = lastFinal.turn; output = `${output}\n${hint}`; trace.event('screen.heard', { turn: lastFinal.turn, tool: name }); }
-      }
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
       for (const w of knownWords(res.content)) known.add(w);
@@ -513,6 +508,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       restartNoAnswer(); // the model now has the results: same clock for its answer (the adapter nudge runs first, this is the last resort)
     }
     const route = name === 'knowledge_read' ? routingHint(question) : '';
+    // A name on his screen that sounds like what the recogniser wrote ("OpenAI" understood, "Opnar AI" on screen): the model reads it with the first CURRENT result
+    // of that sentence, before it answers. Attached here, after the cancelled and stale exits, so a result that is never delivered cannot use the hint up.
+    if (lastFinal && lastFinal.turn === callTurn && myEpoch === contentEpoch && !fromFragment && !oldChain && lastFinal.turn !== hintedTurn && now() - lastFinal.at < 20_000 && !lastFinal.typed) {
+      const hint = hearingHint(lastFinal.text, deps.vision?.names?.(sid) ?? []);
+      if (hint) { hintedTurn = lastFinal.turn; output = `${output}\n${hint}`; trace.event('screen.heard', { turn: lastFinal.turn, tool: name }); }
+    }
     adapter.sendToolResult(id, requestedName, route ? `${output}\n\n${route}` : output);
     trace.event('tool.result_sent', { turn: turnId, id, name, reachedModel: true, responseRequested: true, routed: Boolean(route) });
   }

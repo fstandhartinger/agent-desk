@@ -40,6 +40,7 @@ function harness(t, { names = [], fakeTool = null, script = [{ name: 'done', arg
   msg({ type: 'start', client: { ...SCREEN_AGENT, version: '0.1.14' } });
   t.after(() => msg({ type: 'stop' }));
   Object.assign(h, {
+    emit: (e) => emit(e),
     say: (text, itemId = 'i1') => { emit({ t: 'speech_started' }); clockNow += 300; emit({ t: 'transcript', role: 'user', final: true, text, itemId }); },
     call: (id, name, args) => emit({ t: 'tool_call', id, name, args }),
     result: async (id) => { for (let i = 0; i < 200 && !h.results.find((r) => r.id === id); i += 1) await sleep(5); return h.results.find((r) => r.id === id)?.output; },
@@ -98,4 +99,21 @@ test('computer_task starts 0.7 s after his last sound, not 2.5 s; the run begins
   await until(() => !h.computer.isOpen('s1'));
   assert.equal(h.vision.ofOp('action')[0].tool, 'screenshot');
   assert.match(h.vision.ofOp('start')[0].goal, /mittleren Karte auf Senden klicken\. \(Florians Worte: Klick bitte auf Senden bei der mittleren Karte\.\)/);
+});
+
+test('a cancelled tool call does not use the hint up: the next current result of the same sentence carries it', async (t) => {
+  let slow;
+  const tool = async (name, args) => { if (args.topic === 'slow') await new Promise((r) => { slow = r; }); return { ok: true, content: 'Ergebnis.', summary: 'x' }; };
+  const h = harness(t, { names: NAMES, fakeTool: tool });
+  await sleep(1);
+  h.say('Erklär mir, um was es bei OpenAI geht.');
+  h.call('c1', 'knowledge_read', { topic: 'slow' });
+  await sleep(5);
+  h.emit({ t: 'tool_cancelled', ids: ['c1'] });
+  slow();
+  await sleep(10);
+  assert.equal(h.results.find((r) => r.id === 'c1'), undefined, 'a cancelled result is not delivered');
+  assert.equal(h.traced.filter((e) => e.type === 'screen.heard').length, 0);
+  h.call('c2', 'knowledge_read', { topic: 'OpenAI' });
+  assert.match(await h.result('c2'), /steht gerade "Oppel AI"; erkannt wurde "OpenAI"/);
 });
