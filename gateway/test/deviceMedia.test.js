@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { createDeviceMedia, wavDuration, applyCorrections, imageBytes, vocabularyPrompt, dictionaryEntry } from '../src/deviceMedia.js';
+import { createDeviceMedia, wavDuration, applyCorrections, imageBytes, vocabularyPrompt, dictionaryEntry, STT_LEAD } from '../src/deviceMedia.js';
 function wav(seconds = 1) {
   const b = Buffer.alloc(44 + seconds * 32000); b.write('RIFF'); b.writeUInt32LE(b.length - 8, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(b.length - 44, 40); return b;
 }
@@ -19,15 +19,15 @@ it('parallel ensemble reconciles variants and applies dictionary replace_from', 
     called.push(String(url)); signals.push(opts.signal); assert.equal(opts.redirect, 'error');
     if (String(url).includes('generateContent')) {
       const body = JSON.parse(opts.body);
-      if (body.contents[0].parts[0].text?.includes('Erstelle EIN')) { assert.match(opts.body, /Wörterbuch|Example/); assert.equal(called.length, 4); }
+      if (body.systemInstruction) { assert.match(body.systemInstruction.parts[0].text, /bereinigst ein Diktat/); assert.match(opts.body, /Example/); assert.match(opts.body, /JevBench/); assert.equal(called.length, 3); }
       return gemini('Exampel');
     }
     assert(opts.body instanceof FormData); return Response.json({ text: 'Exampel' });
   } });
   const result = await media.dictate(wav(), ctx, dict);
-  // two sources word for word the same: no merge call, and Gemini (the slow fallback) never runs
-  assert.equal(result.text, 'Example'); assert.deepEqual(result.sources, { groq: 'Exampel', openai: 'Exampel', gemini: null }); assert.equal(called.length, 2); assert(signals.every(s => s.aborted));
-  assert.equal(result.providers.merge.skipped, 'sources-agree'); assert.equal(result.providers.gemini.reason, 'skipped'); assert.equal(result.degraded, false);
+  // two sources word for word the same: still one clean-up call (both can share a misheard name), and Gemini (the slow fallback) never runs as a source
+  assert.equal(result.text, 'Example'); assert.deepEqual(result.sources, { groq: 'Exampel', openai: 'Exampel', gemini: null }); assert.equal(called.length, 3); assert(signals.every(s => s.aborted));
+  assert.equal(result.providers.merge.ok, true); assert.equal(result.providers.gemini.reason, 'skipped'); assert.equal(result.degraded, false);
 });
 it('deadline returns first transcript even when another provider ignores cancellation', async () => {
   const media = createDeviceMedia({ budgetMs: 40, env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake' }, fetchImpl: async url => String(url).includes('groq') ? Response.json({ text: 'Exampel' }) : new Promise(() => {}) });
@@ -87,7 +87,7 @@ it('STT requests carry a vocabulary prompt of corrected terms only, at most 800 
   const media = createDeviceMedia({ env: { GROQ_API_KEY: 'fake', OPENAI_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { prompts.push(opts.body.get('prompt')); return Response.json({ text: 'Hallo' }); } });
   await media.dictate(wav(), ctx, { items }); await new Promise(r => setTimeout(r, 20));
   assert.equal(prompts.length, 2);
-  for (const p of prompts) { assert(p.startsWith('Deutsches Diktat. Begriffe: Example, Begriff0, Begriff1')); assert(p.length <= 800 && p.length > 700); assert(!p.includes('Exampel')); assert.equal(p.replace('Deutsches Diktat. Begriffe: ', '').split(', ').filter(t => t === 'Example').length, 1); }
+  for (const p of prompts) { assert(p.startsWith(`${STT_LEAD} Begriffe: Example, Begriff0, Begriff1`)); assert(p.length <= STT_LEAD.length + 12 + 700 && p.length > 650); assert(!p.includes('Exampel')); assert.equal(p.replace(`${STT_LEAD} Begriffe: `, '').split(', ').filter(t => t === 'Example').length, 1); }
   assert.equal(vocabularyPrompt({}), ''); assert.equal(vocabularyPrompt(null), '');
 });
 it('a slow dictionary is waited for at most 300 ms, then STT goes without prompt', async () => {
@@ -95,10 +95,12 @@ it('a slow dictionary is waited for at most 300 ms, then STT goes without prompt
   const media = createDeviceMedia({ env: { GROQ_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { sentAt = Date.now() - started; prompts.push(opts.body.get('prompt')); return Response.json({ text: 'Hallo' }); } });
   const slow = new Promise(resolve => setTimeout(() => resolve({ items: [{ term: 'Spät' }] }), 1500));
   const result = await media.dictate(wav(), ctx, slow);
-  assert.deepEqual(prompts, [null]); assert(sentAt >= 250 && sentAt < 700, `sent after ${sentAt} ms`); assert.equal(result.text, 'Hallo');
+  // without his dictionary the request still carries the glossary names
+  assert.equal(prompts.length, 1); assert(prompts[0].startsWith(`${STT_LEAD} Begriffe: JevBench, REAX`)); assert(!prompts[0].includes('Spät'));
+  assert(sentAt >= 250 && sentAt < 700, `sent after ${sentAt} ms`); assert.equal(result.text, 'Hallo');
 });
 it('fast dictionary adds no latency and the overall budget still applies', async () => {
-  const media = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { assert.equal(opts.body.get('prompt'), 'Deutsches Diktat. Begriffe: Example'); return Response.json({ text: 'Hallo' }); } });
+  const media = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: async (_url, opts) => { assert(opts.body.get('prompt').startsWith(`${STT_LEAD} Begriffe: Example, JevBench`)); return Response.json({ text: 'Hallo' }); } });
   const result = await media.dictate(wav(), ctx, Promise.resolve({ items: [{ term: 'Example' }] })); assert(result.ms < 50);
   const hung = createDeviceMedia({ budgetMs: 100, env: { GROQ_API_KEY: 'fake' }, fetchImpl: () => new Promise(() => {}) });
   const t = Date.now(); await assert.rejects(hung.dictate(wav(), ctx, new Promise(() => {})), e => e.status === 504); assert(Date.now() - t < 400);
@@ -118,7 +120,8 @@ it('the fast path: two sources plus a short grace, the fast merge model, nothing
   const r = await media.dictate(wav(2), ctx, { items: [{ term: 'Karpathy', replace_from: ['Karpati', 'unrelated'] }, ...Array.from({ length: 400 }, (_, i) => ({ term: `Wort${i}` }))] });
   assert(Date.now() - t < 900, `took ${Date.now() - t} ms`);
   assert.equal(merged.model, 'test/fast'); assert.deepEqual(merged.reasoning, { effort: 'low', exclude: true });
-  const prompt = merged.messages[0].content;
+  assert.match(merged.messages[0].content, /bereinigst ein Diktat/); assert.equal(merged.messages[0].role, 'system');
+  const prompt = merged.messages[1].content; assert.match(prompt, /"glossar":/);
   assert.match(prompt, /"ersetze":\{"Karpathy":\["Karpati"\]\}/); assert(!prompt.includes('unrelated')); assert(!prompt.includes('Wort200'));
   assert.equal(r.text, 'Hallo Karpathy, wie geht es? Test-Wort'); assert.equal(r.merged, true); assert.equal(r.sources.openai, null);
 });
