@@ -266,7 +266,7 @@ function compact(turns) {
 export async function runLoop(R) {
   const free = unrestricted(), defs = toolsNow();
   const turns = []; // [assistant, tool..., optional user image]
-  const first = () => ({ role: 'user', content: `${free ? 'Florians Auftrag (das ist der einzige Auftrag)' : 'Florians Auftrag, wörtlich gesprochen (das ist der einzige Auftrag)'}:\n${JSON.stringify(R.goalText)}` }); // rebuilt each turn: an extension stays in the goal, not only in a one-turn note
+  const first = () => ({ role: 'user', content: `${free ? 'Florians Auftrag (das ist der einzige Auftrag)' : 'Florians Auftrag, wörtlich gesprochen (das ist der einzige Auftrag)'}:\n${JSON.stringify(R.goalText)}${free && R.spokenSince?.().length ? `\nSeit dem Start hat Florian gesagt (wörtlich, das Neueste zuletzt; es geht dem Auftrag vor, wo es ihn betrifft):\n${R.spokenSince().map((t) => JSON.stringify(t)).join('\n')}` : ''}` }); // rebuilt each turn: an extension stays in the goal, not only in a one-turn note
   let idle = 0;
   try {
     if (free) {
@@ -309,6 +309,7 @@ export async function runLoop(R) {
         let res;
         const parsed = parseArgs(call.args);
         const checked = parsed ? checkArgs(call.name, parsed, defs) : { ok: false, error: 'Argumente sind kein gültiges JSON' };
+        if (free && !failed && finished === null && call !== calls[0]) { const cap = R.limitReason(); if (cap) return R.end(cap); } // a cap reached inside one answer ends the run before the next action, not after the batch
         if (failed || finished !== null) res = { ok: false, code: 'refused', rule: 'skipped', note: failed ? 'Nicht ausgeführt: der Schritt davor ist gescheitert. Sieh dir das Ergebnis an und entscheide neu.' : 'Nicht ausgeführt: done stand davor.' };
         else if (!checked.ok) res = { ok: false, code: 'refused', rule: 'bad-args', note: checked.error };
         else if (call.name === 'done') {

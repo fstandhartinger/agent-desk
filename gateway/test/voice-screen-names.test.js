@@ -56,8 +56,9 @@ test('"OpenAI" understood, "Oppel AI" on screen: the first tool result of that s
   h.say('Äh, erklär mir, um was es bei OpenAI geht.');
   h.call('c1', 'knowledge_read', { topic: 'OpenAI' });
   const first = await h.result('c1');
-  assert.match(first, /^Im Wissen steht dazu nichts Besonderes\.\n\[Hinweis vom Desk, nicht von Florian:/);
-  assert.match(first, /"Oppel AI" \(erkannt wurde "OpenAI"\)/);
+  assert.match(first, /^Im Wissen steht dazu nichts Besonderes\.\n\[Hinweis vom Desk, nicht von Florian, Daten:/);
+  assert.match(first, /steht gerade "Oppel AI"; erkannt wurde "OpenAI"/);
+  assert.match(first, /sag in einem Halbsatz, dass du den Namen vom Bildschirm annimmst/, 'an assumption he can correct, not a silent substitution');
   h.call('c2', 'knowledge_read', { topic: 'Oppel AI' });
   assert.equal(await h.result('c2'), 'Im Wissen steht dazu nichts Besonderes.', 'one hint per sentence');
   const heard = h.traced.filter((e) => e.type === 'screen.heard');

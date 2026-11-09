@@ -62,8 +62,16 @@ it('heardLikeScreen: a better-known word that sounds like a name on the screen i
   assert.deepEqual(heardLikeScreen('OpenAI', []), []);
   assert.ok(soundsLike('OpenAI', 'Oppel AI') >= 0.7 && soundsLike('Wetter', 'Oppel AI') < 0.4);
   const hint = hearingHint('Erklär mir, um was es bei OpenAI geht.', terms);
-  assert.match(hint, /^\[Hinweis vom Desk, nicht von Florian:/);
-  assert.match(hint, /"Oppel AI" \(erkannt wurde "OpenAI"\)/);
+  assert.match(hint, /^\[Hinweis vom Desk, nicht von Florian, Daten:/);
+  assert.match(hint, /steht gerade "Oppel AI"; erkannt wurde "OpenAI"/);
+  // review 9 Nov: the hint is an assumption to weigh, never proof of what he meant
+  assert.match(hint, /bleib beim erkannten Wort/);
+  assert.deepEqual(heardLikeScreen('Erkläre mir OpenAI und nicht Oppel AI.', terms), [], 'he names both: he means what he says');
+  assert.deepEqual(heardLikeScreen('Kannst du meine Notizen öffnen?', screenTerms('Notion (Workspace)')), [], 'a plain noun needs a closer match than 0.7');
+  assert.deepEqual(heardLikeScreen('Ich brauche neue Karten für das Spiel.', screenTerms('Kartena (Lund) Angebot')), []);
+  const net = heardLikeScreen('Wie funktioniert das Internet?', screenTerms('Internxt (Valencia)'));
+  assert.equal(net.length, 1, 'a very close everyday word still becomes a candidate; the wording leaves the decision to the model');
+  assert.match(hearingHint('Wie funktioniert das Internet?', screenTerms('Internxt (Valencia)')), /Ergibt das erkannte Wort als gewöhnliches Wort im Satz Sinn/);
   assert.equal(hearingHint('Wie spät ist es?', terms), '');
 });
 
@@ -79,6 +87,7 @@ it('the per-device store: memory only, three minutes, validated shape, another d
   t += 180_001;
   assert.deepEqual(store.terms('dev1'), [], 'gone after three minutes');
   assert.equal(store._byDevice.size, 0);
+  assert.equal(store.clear('dev1'), false);
   for (const bad of [null, [], {}, { reason: 'other', text: 'x' }, { reason: 'dictation' }, { reason: 'dictation', text: 5 }, { reason: 'session', text: 'x', extra: 1 }, { reason: 'session', text: 'x'.repeat(MAX_SCREEN_TEXT + 201) }, { reason: 'session', text: 'x', frameVersion: -1 }, { reason: 'session', text: 'x', title: 'x'.repeat(201) }])
     assert.throws(() => screenTextBody(bad), /Ungültiger Bildschirmtext/, JSON.stringify(bad)?.slice(0, 60));
   // a key that slipped through the app's redaction never becomes a term
@@ -114,6 +123,18 @@ it('dictation: the names on his screen reach every recogniser as hints and the c
   seen.mai = null;
   await media.dictate(wav, { process: 'chrome', fieldBefore: '', visibleIds: [], recentTerms: [], titles: [] }, { items: [] });
   assert.ok(!seen.mai.provider.options.azure.phraseList.phrases.includes('Oppel AI'));
+});
+
+it('three minutes in memory means three minutes: an entry nobody reads again is deleted by its own timer; a cleared screen takes its names with it', async () => {
+  const store = createScreenText({ ttlMs: 30 });
+  store.note('dev9', { reason: 'session', text: 'Outwing (Lund)' });
+  assert.equal(store._byDevice.size, 1);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(store._byDevice.size, 0, 'deleted without a read');
+  store.note('dev9', { reason: 'session', text: 'Outwing (Lund)' });
+  store.note('dev9', { reason: 'session', text: 'Nordgatan (Lund)' });
+  await new Promise((r) => setTimeout(r, 15));
+  assert.deepEqual(store.terms('dev9').slice(0, 1), ['Nordgatan'], 'the newer entry is not deleted by the older timer');
 });
 
 // ---- the route and the voice context, through the real server ----
@@ -182,6 +203,15 @@ it('with an older app (no screen text) the names come from the picture descripti
   assert.equal((await postText({ reason: 'foreground', process: 'code', title: 'README.md', text: 'JevBench Rangliste\nKnowLine Gen1.5 gegen GLiDE loop' })).status, 200);
   assert.equal(ctxTexts.length, sent + 1, 'other names on screen: the context goes out without waiting for the next picture');
   assert.ok(ctxTexts.at(-1).includes('KnowLine'));
+});
+
+it('an excluded window, a pause or a lock clears the names: they cannot come back through a hint', async () => {
+  assert.equal((await postText({ reason: 'session', process: 'chrome', title: 'Telegram Web', text: SCREEN })).status, 200);
+  assert.equal((await postFrame()).status, 200);
+  assert.ok(app.devices.vision.names(sid).includes('Oppel AI'));
+  app.devices.vision.clear(sid, 'excluded');
+  assert.deepEqual(app.devices.vision.names(sid), []);
+  assert.deepEqual(app.devices.screenText.terms(deviceId), []);
 });
 
 it('refresh(): his speech start asks the app for a fresh frame, but not when the picture is seconds old and never twice in a row', async () => {

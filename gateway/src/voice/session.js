@@ -448,6 +448,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
     runningTools += 1;
+    const callTurn = turnId; // the user turn this call answers: a hearing hint belongs to it and to no later one
     const label = activityLabel(name, args);
     activity({ id, phase: 'start', tool: name, label });
     sendJson({ ...evt, status: 'start' });
@@ -460,7 +461,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
       output = String(res.content ?? '').slice(0, voiceCap(name));
       // A name on his screen that sounds like what the recogniser wrote ("OpenAI" understood, "Opnar AI" on screen): the model reads it with the result of its first tool for that sentence, before it answers
-      if (lastFinal && lastFinal.turn !== hintedTurn && now() - lastFinal.at < 20_000 && !lastFinal.typed) {
+      if (lastFinal && lastFinal.turn === callTurn && myEpoch === contentEpoch && !fromFragment && !oldChain && lastFinal.turn !== hintedTurn && now() - lastFinal.at < 20_000 && !lastFinal.typed) {
         const hint = hearingHint(lastFinal.text, deps.vision?.names?.(sid) ?? []);
         if (hint) { hintedTurn = lastFinal.turn; output = `${output}\n${hint}`; trace.event('screen.heard', { turn: lastFinal.turn, tool: name }); }
       }

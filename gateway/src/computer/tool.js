@@ -22,7 +22,7 @@ export async function computerTask({ goal }, ctx, clock = ctx.clock ?? defaultCl
   if (!ctx.computer?.begin) return release(g, 'computer_task'), out(false, 'Die Computer-Steuerung ist in diesem Kontext nicht verfügbar. Nichts passiert.');
   // unrestricted: his sentence may only be "ja, mach", so the loop also gets the task as the voice model understood it
   const text = unrestricted() && goal ? `${goal}${g.text ? ` (Florians Worte: ${g.text})` : ''}`.replace(/\s+/g, ' ') : g.text;
-  const r = await ctx.computer.begin(ctx.sid ?? 'desk', { text, goalArg: goal });
+  const r = await ctx.computer.begin(ctx.sid ?? 'desk', unrestricted() ? { text, goalArg: goal, turn: g.vt?.turn, said: g.text } : { text, goalArg: goal });
   if (!r.ok) release(g, 'computer_task'); // a refused start may be asked for again
   return out(r.ok, r.text);
 }

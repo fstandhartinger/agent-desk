@@ -214,3 +214,46 @@ test('a long run stays small: the two newest pictures are kept, older tool resul
   assert.ok(tools.at(-1).content.length > 20_000, 'the newest result is whole');
   assert.ok(JSON.stringify(last).length < 120_000);
 });
+
+test('he steers by voice while the run works: every spoken sentence reaches the loop in his words, also a negation, a correction and a sentence that grows', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = setup({
+    app: async (w) => { if (w.op === 'action' && w.tool === 'wait') await gate; return w.op === 'action' ? shot() : { ok: true, code: 'done' }; },
+    turns: [[{ name: 'wait', args: { ms: 100 } }], [{ name: 'screenshot', args: {} }], done('Entwurf geöffnet, nicht gesendet.')],
+  });
+  await h.computer.begin('s1', { text: 'Gmail öffnen und die Mail senden (Florians Worte: Öffne Gmail und sende die Mail.)', goalArg: 'x', turn: 4, said: 'Öffne Gmail und sende die Mail.' });
+  await until(() => h.actions().some((w) => w.tool === 'wait'));
+  h.computer.userFinal('s1', { text: 'Öffne Gmail und sende die Mail.', turn: 4, at: 1 }); // the opening final again: nothing new
+  h.computer.userFinal('s1', { text: 'Öffne Gmail und sende die Mail, aber sende sie nicht sofort.', turn: 4, at: 2 }); // his sentence went on after the run began
+  h.computer.userFinal('s1', { text: 'Nein, nimm', turn: 5, at: 3 });
+  h.computer.userFinal('s1', { text: 'Nein, nimm den Entwurf von gestern.', turn: 5, at: 4 }); // a sentence that grows replaces its shorter self
+  h.computer.userFinal('s1', { text: 'Das hast du doch gerade gesagt', turn: 6, at: 5, echo: true }); // the Desk's own voice is not him
+  release();
+  await until(h.ended);
+  const second = h.calls[1].messages;
+  assert.match(second[1].content, /Seit dem Start hat Florian gesagt/);
+  assert.ok(second[1].content.includes('aber sende sie nicht sofort') && second[1].content.includes('Nein, nimm den Entwurf von gestern.'));
+  assert.ok(!second[1].content.includes('"Nein, nimm"') && !second[1].content.includes('gerade gesagt'));
+  assert.match(second.at(-1).content, /Florian hat gerade gesprochen, während du arbeitest \(wörtlich\): "Nein, nimm den Entwurf von gestern\."/);
+  assert.match(second.at(-1).content, /geht dem bisherigen Auftrag vor/);
+  const steer = h.session.events.filter((e) => e.type === 'computer.steer');
+  assert.deepEqual(steer.map((e) => e.opener), [true, false, false]);
+  assert.ok(!JSON.stringify(steer).includes('Entwurf'), 'the trace has lengths, not his words');
+  assert.ok(h.calls[2].messages[1].content.includes('Nein, nimm den Entwurf von gestern.'), 'it stays in the task for every later turn');
+});
+
+test('a stop word still ends the run at once, and a cap reached inside one answer stops before the next action', async () => {
+  const h = setup({ app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [Array.from({ length: 6 }, () => ({ name: 'click', args: { x: 1, y: 1 } })), done()] });
+  await h.computer.begin('s1', { text: 'Klick sechsmal', goalArg: 'x' });
+  const R = h.computer.runOf('s1');
+  R.actions = 996; // bootstrap screenshot + 3 clicks reach the cap of 1000
+  await until(h.ended);
+  const stop = h.session.events.find((e) => e.type === 'computer.run.stop');
+  assert.equal(stop.why, 'actions');
+  assert.ok(stop.actions <= 1000, `ran ${stop.actions} actions`);
+  const h2 = setup({ app: (w) => (w.op === 'action' ? shot() : { ok: true, code: 'done' }), turns: [() => { h2.computer.userPartial('s1', 'stopp, hör auf'); return [{ name: 'click', args: { x: 1, y: 1 } }]; }] });
+  await h2.computer.begin('s1', { text: 'Klick', goalArg: 'x' });
+  await until(h2.ended);
+  assert.equal(h2.session.events.find((e) => e.type === 'computer.run.stop').why, 'voice-stop');
+});

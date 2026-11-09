@@ -86,13 +86,16 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     if (timer && !runs.size && !guards.size) { clearInterval(timer); timer = null; }
   }
 
-  function makeRun(sid, s, { text, goalArg, scopeWords }) {
+  function makeRun(sid, s, { text, goalArg, scopeWords, turn = null, said = '' }) {
     const R = {
       sid, run: hex('r'), startedAt: now(), goalText: String(text).slice(0, GOAL_CHARS), scopeWords, actions: 0, cost: 0, seq: 0, asks: 0, expiries: 0, questions: 0,
       ended: false, why: null, paused: false, awaitingGo: false, stepLimit: unrestricted() ? Infinity : STEP_REPORT, pending: null, answer: null, inflight: 0, lastActivity: now(), appBeatAt: now(), nextBeat: now() + BEAT_MS,
       note: null, extTurn: null, waiters: [], abort: new AbortController(), tools: {}, model: cfg.computerModel(), signal: null,
     };
     R.signal = R.abort.signal;
+    R.startTurn = turn; R.startSaid = String(said ?? ''); R.later = new Map(); // unrestricted: what he said after the run began, by voice turn (steer())
+    /** For the loop's first message: his sentences since the start, oldest first; the newest one counts when they disagree. */
+    R.spokenSince = () => [...R.later.values()];
     R.sessionRef = s;
     R.complete = async (o) => { R.inflight += 1; try { return await complete(o); } finally { R.inflight -= 1; R.touch(); } }; // a model call in flight is no idle time
     const ev = (type, data) => { try { s.trace?.(type, { ...data }); } catch { /* a trace failure never stops the run */ } };
@@ -298,7 +301,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       resume(R);
       return;
     }
-    if (e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
+    if (unrestricted()) steer(R, e);
+    else if (e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
   }
   async function resume(R) {
     if (R.resuming) return;
@@ -312,6 +316,22 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       else { R.awaitingGo = false; R.stepLimit = Math.min(MAX_ACTIONS, R.actions + STEP_REPORT); R.note = 'Florian hat gesagt, dass es weitergehen soll.'; }
       R.waiters.splice(0).forEach((f) => f());
     } finally { R.resuming = false; }
+  }
+  /**
+   * Unrestricted mode: he supervises by voice while the run works, so EVERY spoken sentence of his reaches the loop, in his words: a correction ("nein, die
+   * andere Karte"), a limit ("aber noch nicht senden"), an addition. No imperative filter (it dropped negations and corrections) and no once-per-turn rule: a
+   * sentence that grows replaces its shorter self, also the sentence that opened the run (the run starts 0.7 s after his last sound, he may go on talking).
+   */
+  function steer(R, e) {
+    const text = String(e.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
+    if (!text) return;
+    const opener = e.turn !== undefined && e.turn !== null && e.turn === R.startTurn;
+    if (opener && text === R.startSaid) return; // the final that opened the run, delivered again
+    if (R.later.get(e.turn) === text) return;
+    R.later.delete(e.turn); R.later.set(e.turn, text);
+    while (R.later.size > 6) R.later.delete(R.later.keys().next().value);
+    R.note = `Florian hat gerade gesprochen, während du arbeitest (wörtlich): ${JSON.stringify(text)}. ${opener ? 'Das ist sein Auftragssatz, der weiterging: der vollständige Satz gilt. ' : ''}Betrifft es den Auftrag (Korrektur, Einschränkung, Verneinung, Ergänzung, ein anderes Ziel), gilt es ab sofort und geht dem bisherigen Auftrag vor; hast du schon etwas getan, das dem widerspricht, mach es wenn möglich rückgängig und sag es in der Zusammenfassung. Hat es nichts mit dem Auftrag zu tun, arbeite unverändert weiter.`;
+    R.ev('computer.steer', { run: R.run, chars: text.length, opener });
   }
   async function extend(R, e) {
     if (R.pending || R.answer || R.extending) { R.ev('computer.extend.skipped', { run: R.run, why: R.pending ? 'ask-open' : 'busy' }); return; }
@@ -369,7 +389,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   /**
    * computer_task after the trigger gate. {ok, text}: the sentence for the voice model. `text` = his verbatim final.
    */
-  async function begin(sid, { text, goalArg }) {
+  async function begin(sid, { text, goalArg, turn = null, said = '' }) {
     const s = sessions.get(sid);
     if (!s) return { ok: false, text: 'Keine Sprachsitzung: die Computer-Steuerung gibt es nur im Sprachgespräch. Nichts passiert.' };
     // s.client is the object from web/src/lib/clientInfo.ts: {app, version, commit, device}
@@ -378,7 +398,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     if (!vision.computerReady?.(sid)) return { ok: false, text: 'Nichts passiert: der Screen Agent auf Florians Computer kann das gerade nicht (Computer-Steuerung ist dort ausgeschaltet, nicht erlaubt oder die App ist zu alt). Sag das Florian in einem Satz; er schaltet sie im Tray unter "Computer-Steuerung erlauben" ein.' };
     const spend = limits.check(sid, 'spend');
     if (!spend.ok || dayCost() >= cfg.computerDayUsd()) return { ok: false, text: `Nichts gestartet: ${spend.ok ? 'das Tageslimit für Computer-Läufe ist erreicht' : spend.reason}. Sag das Florian in einem Satz.` };
-    const R = makeRun(sid, s, { text, goalArg, scopeWords: scopeWordsOf(text) });
+    const R = makeRun(sid, s, { text, goalArg, scopeWords: scopeWordsOf(text), turn, said });
     runs.set(sid, R);
     R.ev('computer.run.start', { run: R.run, goal: goalForTrace(text), modelGoal: short(goalArg ?? '', 120), scope: R.scopeWords.length, model: R.model });
     audit({ action: 'computer.start', detail: `${R.run} scope=${R.scopeWords.length}` });

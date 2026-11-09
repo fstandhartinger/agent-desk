@@ -101,6 +101,7 @@ export function soundsLike(a, b) {
  * Pairs {heard, screen}: a word (or two or three words in a row) of his recognised sentence that is NOT on the screen but sounds like a name that is.
  * "OpenAI" heard, "Opnar AI" on screen. Same first sound, at least 5 letters, similarity >= 0.7; the same spelling is no pair.
  */
+const PLAIN_MIN = 0.8; // one plain capitalised word is most often just a German noun ("Notizen" next to a product called alike): it needs a closer match
 export function heardLikeScreen(heard, terms, { min = 0.7 } = {}) {
   const words = (String(heard ?? '').match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*/gu) ?? []).map(trimTail);
   const plain = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
@@ -122,7 +123,7 @@ export function heardLikeScreen(heard, terms, { min = 0.7 } = {}) {
       // a misheard name is written as a name: at least one word with a capital (or a digit) that is no everyday word. "Wie viele" or "wissen will" stay ordinary speech.
       if (!words.slice(i, i + n).some((w) => /^[\p{Lu}\p{N}]/u.test(w) && !COMMON.has(w.toLowerCase()))) continue;
       const s = soundsLike(span, term);
-      if (s >= min && (!best || s > best.s)) best = { heard: span, screen: term, s };
+      if (s >= (n === 1 && !/\p{Ll}\p{Lu}|\p{N}/u.test(span) ? Math.max(min, PLAIN_MIN) : min) && (!best || s > best.s)) best = { heard: span, screen: term, s };
     }
     if (best && !used.has(best.heard.toLowerCase())) { used.add(best.heard.toLowerCase()); out.push({ heard: best.heard, screen: best.screen, score: Number(best.s.toFixed(2)) }); }
   }
@@ -132,7 +133,8 @@ export function heardLikeScreen(heard, terms, { min = 0.7 } = {}) {
 export function hearingHint(heard, terms) {
   const pairs = heardLikeScreen(heard, terms);
   if (!pairs.length) return '';
-  return `[Hinweis vom Desk, nicht von Florian: Die Spracherkennung hat vermutlich einen Namen verhört. Auf Florians Bildschirm steht ${pairs.map((p) => `"${p.screen}" (erkannt wurde "${p.heard}")`).join(', ')}. Er meint sehr wahrscheinlich den Namen vom Bildschirm: antworte dazu, ohne nachzufragen und ohne den Hörfehler zu erwähnen.]`;
+  // An assumption for the model to weigh and to say aloud, never a certainty: "Internet" next to a product with a similar name is still the internet.
+  return `[Hinweis vom Desk, nicht von Florian, Daten: Auf Florians Bildschirm steht gerade ${pairs.map((p) => `"${p.screen}"; erkannt wurde "${p.heard}", das ähnlich klingt`).join('. Außerdem ')}. Spracherkennung verhört Namen oft. Ergibt das erkannte Wort als gewöhnliches Wort im Satz Sinn (zum Beispiel "Internet" oder "Notizen"), oder unterscheidet Florian die beiden ausdrücklich, dann bleib beim erkannten Wort. Spricht er dagegen über das, was er gerade sieht, meint er wahrscheinlich den Namen vom Bildschirm: antworte dann dazu, ohne vorher nachzufragen, und sag in einem Halbsatz, dass du den Namen vom Bildschirm annimmst, damit er dich korrigieren kann.]`;
 }
 
 /** Validated body of POST /api/device/screen-text; throws a plain Error with .status 400 on a wrong shape. */
@@ -151,17 +153,21 @@ export function createScreenText({ now = Date.now, ttlMs = SCREEN_TEXT_TTL_MS, m
     const clean = screenTextBody(body);
     // the app redacts before sending; the gateway redacts again, so a key that slipped through never reaches a recogniser prompt
     const terms = screenTerms(redact(`${clean.title}\n${clean.text}`));
-    if (!byDevice.has(deviceId) && byDevice.size >= maxDevices) byDevice.delete(byDevice.keys().next().value);
-    byDevice.set(deviceId, { terms, at: now(), reason: clean.reason, chars: clean.text.length });
+    if (!byDevice.has(deviceId) && byDevice.size >= maxDevices) { const oldest = byDevice.keys().next().value; clearTimeout(byDevice.get(oldest)?.timer); byDevice.delete(oldest); }
+    clearTimeout(byDevice.get(deviceId)?.timer);
+    const entry = { terms, at: now(), reason: clean.reason, chars: clean.text.length };
+    // gone after ttlMs also when nobody reads it again (three minutes in memory means three minutes)
+    entry.timer = setTimeout(() => { if (byDevice.get(deviceId) === entry) byDevice.delete(deviceId); }, ttlMs); entry.timer.unref?.();
+    byDevice.set(deviceId, entry);
     return { ok: true, terms: terms.length, chars: clean.text.length, reason: clean.reason };
   }
   /** Fresh terms of a device (best first), or [] when nothing arrived in the last ttlMs. */
   function terms(deviceId, max = MAX_TERMS) {
     const e = byDevice.get(deviceId);
     if (!e) return [];
-    if (now() - e.at > ttlMs) { byDevice.delete(deviceId); return []; }
+    if (now() - e.at > ttlMs) { clearTimeout(e.timer); byDevice.delete(deviceId); return []; }
     return e.terms.slice(0, max);
   }
   const age = (deviceId) => { const e = byDevice.get(deviceId); return e ? now() - e.at : null; };
-  return { note, terms, age, clear: (deviceId) => byDevice.delete(deviceId), _byDevice: byDevice };
+  return { note, terms, age, clear: (deviceId) => { clearTimeout(byDevice.get(deviceId)?.timer); return byDevice.delete(deviceId); }, _byDevice: byDevice };
 }
