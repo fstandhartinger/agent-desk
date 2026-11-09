@@ -197,3 +197,16 @@ prompt on its long poll as `{fresh:false, prompt:{id,text}}` (older apps ignore 
 `POST /api/device/session/:sid/commands/:id/result {state: received|done|failed, code, landed, chars}`; with no Screen Agent (or one that
 does not answer within 6 s) the browser gets `{type:"main_agent_prompt", text}` to show with a copy button. Traces carry no text.
 
+
+## Computer control v2 and screen names for speech (9 Nov 2026)
+
+**Computer control.** In the unrestricted mode (the default; `DESK_COMPUTER_GUARDS=on` keeps the guarded tool set and rules) the loop drives the Screen Agent app with the free tool set of `docs/computer-contract-v2.md`: screenshots with a coordinate frame, clicks by coordinates, drag, wheel, typing and key chords, windows, UI Automation, clipboard, PowerShell / cmd / WSL / Python, files, and Chrome over CDP on his running browser.
+- The run starts with a screenshot, every acting tool returns a picture of the result, the model may send several actions in one answer (they run in order, a failure skips the rest), the two newest pictures stay in the context, older results shrink.
+- An app older than 0.1.14 (`clientHasV2`) keeps the earlier tool set, prompt and one call per answer.
+- `computer_task` starts 0.7 s after his last sound. What he says while a run works reaches the loop in his words, in every state of the run (`steer()`); a stop word still ends it at once. Caps: 60 minutes, 1,000 actions, `DESK_COMPUTER_RUN_USD`, `DESK_COMPUTER_DAY_USD`.
+- `scripts/computer-e2e.mjs` runs the real run/loop code against an app in `--computer-serve` mode (a real Windows desktop) with any OpenAI-compatible vision model, saves a picture per step and verifies every task with an independent command.
+
+**Screen names for speech.** The app posts the visible text of his screen (`POST /api/device/screen-text`, redacted in the app and again here, at most 6,000 characters). `screenText.js` keeps name-like terms per device in memory for three minutes (nothing is traced, logged or written; a cleared screen clears them).
+- Dictation: the names are hints for every recogniser (phrase list, prompt), context plus a rule for the clean-up, and known to the word guard.
+- Voice: the screen context lists them (`namen`); when a recognised word sounds like a name on screen but is spelled differently, the first tool result of that sentence carries a hint. The hint is an assumption for the model to weigh and to say aloud, never a silent substitution.
+- His speech start asks the app for a fresh frame.
