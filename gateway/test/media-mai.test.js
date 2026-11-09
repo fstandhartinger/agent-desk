@@ -12,7 +12,7 @@ const isMai = (url) => String(url).includes('openrouter');
 describe('MAI-Transcribe-2 as a dictation source', () => {
   it('sends the documented JSON with dictionary terms and title words as phrases (never replace_from) and reports providers', async () => {
     let seen;
-    const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async (url, opts) => { assert(isMai(url)); assert.equal(opts.headers.authorization, 'Bearer k'); seen = JSON.parse(opts.body); return mai('Hallo Karpathy'); } });
+    const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async (url, opts) => { assert(isMai(url)); assert.equal(opts.headers.authorization, 'Bearer k'); if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: 'Hallo Karpathy.' } }] }); seen = JSON.parse(opts.body); return mai('Hallo Karpathy'); } });
     const r = await media.dictate(wav(), ctx, dict);
     assert.equal(seen.model, 'microsoft/mai-transcribe-2');
     assert.equal(seen.language, 'de');
@@ -22,11 +22,11 @@ describe('MAI-Transcribe-2 as a dictation source', () => {
     assert.deepEqual(phrases.slice(0, 2), ['Karpathy', 'Bittensor']);
     for (const w of ['Lock', 'Engine', 'REAX', 'JevBench', 'Rangliste']) assert(phrases.includes(w), w);
     assert(!phrases.includes('Karpati') && !phrases.includes('Bit Tensor'));
-    assert.equal(r.text, 'Hallo Karpathy');
+    assert.equal(r.text, 'Hallo Karpathy.', 'one source is cleaned up too');
     assert.equal(r.sources.mai, 'Hallo Karpathy');
     assert.equal(r.providers.mai.ok, true);
     assert.equal(typeof r.providers.mai.ms, 'number');
-    assert.equal(r.merged, false); assert.equal(r.seconds, 1);
+    assert.equal(r.merged, true); assert.equal(r.seconds, 1);
     assert.equal(r.degraded, false, 'one configured provider and it worked');
   });
 
@@ -49,7 +49,7 @@ describe('MAI-Transcribe-2 as a dictation source', () => {
 
   it('a 4xx with a phrase list is retried once without the list and the retry is reported', async () => {
     const bodies = [];
-    const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async (_url, opts) => { const b = JSON.parse(opts.body); bodies.push(b); return b.provider ? new Response('{"error":"too long"}', { status: 400 }) : mai('Ohne Liste'); } });
+    const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async (url, opts) => { if (String(url).includes('chat/completions')) return Response.json({ choices: [{ message: { content: 'Ohne Liste' } }] }); const b = JSON.parse(opts.body); bodies.push(b); return b.provider ? new Response('{"error":"too long"}', { status: 400 }) : mai('Ohne Liste'); } });
     const r = await media.dictate(wav(), ctx, dict);
     assert.equal(bodies.length, 2); assert.equal(bodies[1].provider, undefined);
     assert.equal(r.text, 'Ohne Liste'); assert.equal(r.providers.mai.retried, true);
