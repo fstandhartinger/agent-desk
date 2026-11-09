@@ -374,15 +374,16 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       sendJson(res, 200, { ok: true, summary, ids: all.map(id => `a#${id}`) });
     } else if (path === '/api/device/polish' && req.method === 'POST') {
       // The text clean-up (9 Nov 2026): "final" once per dictation after its chunks, "live" for the subtitle while he talks. Text only, no audio.
+      // Since 10 Nov: `format: true` asks for light structure (line breaks only, same words), and mode "format" is that alone for a dictation of one chunk.
       const body = await readJson(req, 64 * 1024);
-      if (!body || typeof body !== 'object' || Array.isArray(body) || !['final', 'live'].includes(body.mode) || typeof body.text !== 'string' || body.text.length > (body.mode === 'live' ? 3000 : 40000)) throw fail('Ungültige Nachbearbeitung.');
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !['final', 'live', 'format'].includes(body.mode) || (body.format !== undefined && typeof body.format !== 'boolean') || typeof body.text !== 'string' || body.text.length > (body.mode === 'live' ? 3000 : 40000)) throw fail('Ungültige Nachbearbeitung.');
       const pctx = body.context && typeof body.context === 'object' && !Array.isArray(body.context) ? body.context : {};
       if ((pctx.process !== undefined && (typeof pctx.process !== 'string' || pctx.process.length > 100)) || (pctx.fieldBefore !== undefined && (typeof pctx.fieldBefore !== 'string' || pctx.fieldBefore.length > 500))) throw fail('Ungültiger Kontext.');
       rate(`polish-${body.mode}:${record.deviceId}`, body.mode === 'live' ? 90 : 20);
       const dict_ = await Promise.race([dictionary().catch(() => ({})), new Promise(resolve => setTimeout(() => resolve({}), 600).unref?.())]);
       try {
-        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '' }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId });
-        if (body.mode === 'final') dlog(record.deviceId, 'dictation.polish', { ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed });
+        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '' }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId, format: body.format === true });
+        if (body.mode !== 'live') dlog(record.deviceId, 'dictation.polish', { mode: body.mode, ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed, undone: r.undone ?? 0, breaks: r.breaks ?? 0 });
         sendJson(res, 200, r);
       } catch (err) { throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'polish-failed' } }); }
     } else if (path === '/api/device/dictate' && req.method === 'POST') {
@@ -413,9 +414,10 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
           });
           return { ...dctx, visibleArtifacts: artifactData(bounded), titles: items.map(item => item.title) };
         }).catch(() => ({ ...dctx, visibleArtifacts: artifactData([]), titles: [] }));
-        return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })));
+        // a chunk that is not the last: he is still talking, nobody waits for it, every recogniser gets its time
+        return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })), { patient: chunk ? !chunk.final : false });
       }).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
-      dlog(record.deviceId, 'dictation.result', { ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(chunk ?? {}) });
+      dlog(record.deviceId, 'dictation.result', { ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}) });
       sendJson(res, 200, result);
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
