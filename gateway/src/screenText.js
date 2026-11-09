@@ -14,7 +14,7 @@ ich du er sie es wir ihr mich dich sich uns euch mein dein sein unser euer ihre 
 ist sind war waren bin bist sein hat haben hatte hatten wird werden wurde wurden kann können konnte muss müssen soll sollen will wollen darf dürfen mag möchte
 mit ohne für von vom zu zum zur bei beim nach vor über unter auf aus in im an am um durch gegen bis seit während wegen als wenn dann dass weil ob damit
 hier dort da jetzt heute gestern morgen später gleich sofort immer nie oft wieder neu neue neuer neues alt alte gut gute besser beste schlecht groß klein
-ja nein okay ok bitte danke dran laut hallo tschüss gern gerne genau vielleicht natürlich
+ja nein okay ok bitte danke dran laut agent agents agenten modell modelle model models kunde kunden hallo tschüss gern gerne genau vielleicht natürlich
 senden sende gesendet ändern nicht jetzt abbrechen speichern öffnen schließen löschen bearbeiten datei ansicht hilfe einstellungen suchen suche weiter zurück
 fertig start stopp ende kopieren einfügen ausschneiden drucken anmelden abmelden login logout konto profil nachricht nachrichten antwort antworten
 mail post betreff anhang entwurf entwürfe gesendete papierkorb posteingang ordner seite seiten fenster tab tabs menü liste tabelle titel text bild bilder
@@ -72,6 +72,8 @@ export function screenTerms(text, { max = MAX_TERMS } = {}) {
       if (isShaped(x.t)) bump(x.t, 5);
       else if (isAllCaps(x.t) && !common(x.t) && x.t.length >= 3) bump(x.t, 1);
       else if (isCap(x.t) && !common(x.t)) bump(x.t, (n > 0 ? 1 : 0.5) + (/^ \(/.test(after) ? 2 : 0) - (GERMAN_NOUN.test(x.t) ? 1 : 0));
+      // a name inside a German compound ("FizzVille-Zwilling", "Opnar-Karte"): the name part on its own is what he says
+      if (x.t.includes('-')) for (const part of x.t.split('-')) if (part.length >= 4 && /\p{Ll}\p{Lu}/u.test(part)) bump(part, 5);
     });
     flush();
   }
@@ -80,7 +82,7 @@ export function screenTerms(text, { max = MAX_TERMS } = {}) {
 
 // ---- "heard X, the screen says Y" ----
 const sound = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/ß/g, 's').replace(/[^a-z0-9]/g, '')
-  .replace(/ph/g, 'f').replace(/ck/g, 'k').replace(/c(?=[aou]|$)/g, 'k').replace(/th/g, 't').replace(/y/g, 'i').replace(/v/g, 'f').replace(/z/g, 's').replace(/ie/g, 'i').replace(/(.)\1+/g, '$1');
+  .replace(/ph/g, 'f').replace(/w/g, 'f').replace(/ck/g, 'k').replace(/c(?=[aou]|$)/g, 'k').replace(/th/g, 't').replace(/y/g, 'i').replace(/v/g, 'f').replace(/z/g, 's').replace(/ie/g, 'i').replace(/(.)\1+/g, '$1');
 function distance(a, b) {
   const row = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i += 1) {
@@ -103,14 +105,22 @@ export function heardLikeScreen(heard, terms, { min = 0.7 } = {}) {
   const words = (String(heard ?? '').match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*/gu) ?? []).map(trimTail);
   const plain = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   const onScreen = new Set(terms.map(plain)); // spelled the same = heard right; sounding the same but spelled differently ("Netty Gate") is exactly the case
+  const said = ` ${words.map(plain).filter(Boolean).join(' ')} `;
   const out = [], used = new Set();
   for (const term of terms) {
     const key = sound(term);
     if (key.length < 5) continue;
+    // he said the name itself (the recogniser wrote it right): no hint, also not for "<name> und" that merely sounds like the name
+    if (said.includes(` ${term.split(/\s+/).map(plain).filter(Boolean).join(' ')} `)) continue;
     let best = null;
     for (let n = 1; n <= 3; n += 1) for (let i = 0; i + n <= words.length; i += 1) {
       const span = words.slice(i, i + n).join(' '), k = sound(span);
-      if (k.length < 5 || k[0] !== key[0] || onScreen.has(plain(span)) || (n === 1 && COMMON.has(span.toLowerCase()))) continue;
+      if (n > 1 && words.slice(i, i + n).some((w) => w.length >= 4 && onScreen.has(plain(w)))) continue; // a word of the span IS a name on the screen, heard right: the words next to it are ordinary speech
+      if (k.length < 5 || k[0] !== key[0] || onScreen.has(plain(span))) continue;
+      const ps = plain(span), pt = plain(term);
+      if (ps.startsWith(pt) || pt.startsWith(ps)) continue; // an inflected form or a compound of the word on screen ("Agenten" for "Agent") is no mishearing
+      // a misheard name is written as a name: at least one word with a capital (or a digit) that is no everyday word. "Wie viele" or "wissen will" stay ordinary speech.
+      if (!words.slice(i, i + n).some((w) => /^[\p{Lu}\p{N}]/u.test(w) && !COMMON.has(w.toLowerCase()))) continue;
       const s = soundsLike(span, term);
       if (s >= min && (!best || s > best.s)) best = { heard: span, screen: term, s };
     }

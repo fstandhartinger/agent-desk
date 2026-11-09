@@ -38,6 +38,7 @@ it('screenTerms: the names on the screen come out, buttons and headings do not',
   for (const junk of ['Senden', 'Ändern', 'Nicht', 'DU BIST DRAN', 'DU', 'Mail', 'Angebot', 'Why']) assert.ok(!terms.includes(junk), `${junk} is no name`);
   assert.ok(terms.indexOf('Oppel AI') < 8, 'a name of two words ranks high');
   assert.ok(terms.length <= 60 && terms.every((t) => t.length <= 40));
+  assert.ok(screenTerms('Why: Nordgatan wertet Feedback aus, ein FizzVille-Zwilling.').includes('FizzVille'), 'the name inside a compound');
   assert.deepEqual(screenTerms(''), []);
   assert.deepEqual(screenTerms('und oder aber 123 456'), []);
   assert.ok(screenTerms(`${'Lorem '.repeat(4000)}\nOutwing (Lund)`).length <= 60, 'a huge text stays bounded');
@@ -50,6 +51,12 @@ it('heardLikeScreen: a better-known word that sounds like a name on the screen i
   assert.deepEqual(heardLikeScreen('Was ist mit Nordgarten?', terms).map((p) => p.screen), ['Nordgatan']);
   assert.deepEqual(heardLikeScreen('Schick das Angebot an Outwink.', terms).map((p) => p.screen), ['Outwing']);
   assert.deepEqual(heardLikeScreen('Erklär mir, worum es bei Oppel AI geht.', terms), [], 'heard right');
+  assert.deepEqual(heardLikeScreen('Schick das an Outwing und sag Bescheid.', terms), [], 'heard right, a neighbouring word does not make it a mishearing');
+  assert.deepEqual(heardLikeScreen('Ist Hugging Face eine Option, oder decisionmodels.io?', terms), []);
+  assert.deepEqual(heardLikeScreen('Unser Kunde Fizwil braucht das.', ['FizzVille', 'Nordgatan']).map((p) => [p.heard, p.screen]), [['Fizwil', 'FizzVille']], 'a name written by ear');
+  assert.deepEqual(heardLikeScreen('Wir wollen wissen, was Wilma wirklich will.', ['FizzVille', 'Nordgatan', 'Outwing']), [], 'ordinary words with w');
+  assert.deepEqual(heardLikeScreen('Die Outwings und Nordgatans dieser Welt.', ['Outwing', 'Nordgatan']), [], 'inflected forms of a name on screen');
+  assert.deepEqual(heardLikeScreen('Wie viele Anfragen sind über die Knöpfe hereingekommen, und was wissen wir?', ['FizzVille', 'Nordgatan', 'Outwing']), [], 'an everyday phrase that happens to sound like a name');
   assert.deepEqual(heardLikeScreen('Erklär mir bitte den Unterschied zwischen Sonnet und Opus.', terms), []);
   assert.deepEqual(heardLikeScreen('Wie spät ist es und wie wird das Wetter morgen?', terms), []);
   assert.deepEqual(heardLikeScreen('OpenAI', []), []);
