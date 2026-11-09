@@ -145,3 +145,11 @@ it('stitching never cuts inside a change only one window made: the source words 
 it('sentences do not end at abbreviations, dates or ordinals', () => {
   assert.deepEqual(sentences('Das gilt z. B. ab dem 10.11. für ca. 3 Kunden. Dr. Meier kommt am 3. Mai.'), ['Das gilt z. B. ab dem 10.11. für ca. 3 Kunden.', 'Dr. Meier kommt am 3. Mai.']);
 });
+it('known names get their proper capitals, nothing else changes', async () => {
+  const { properNames } = await import('../src/dictationGuard.js');
+  const names = ['REAX', 'decisionmodels.io', 'Claude Code', 'JevBench', 'LeChonk', 's1-pro', 'Beispiel GmbH'];
+  assert.equal(properNames('Von Jevbench über Reax, Decisionmodels.io und claude code bis Lechonk.', names), 'Von JevBench über REAX, decisionmodels.io und Claude Code bis LeChonk.');
+  assert.equal(properNames('Das Modell S1-Pro läuft\n\nbei der beispiel gmbh.', names), 'Das Modell s1-pro läuft\n\nbei der Beispiel GmbH.', 'line breaks and punctuation stay');
+  assert.equal(properNames('Der Code von Claude ist da, Reaxx auch.', names), 'Der Code von Claude ist da, Reaxx auch.', 'only the exact letters, only the whole name');
+  assert.equal(properNames('ohne Namen', []), 'ohne Namen'); assert.equal(properNames('', names), '');
+});

@@ -181,6 +181,30 @@ export function guardText(source, cleaned, ctx = {}) {
   return { text: out.join(' '), changes, undone };
 }
 
+// ---- known names in their proper spelling ----
+
+/**
+ * A known name that is written with the right letters but the wrong capitals gets its spelling ("Reax" -> "REAX", "Decisionmodels.io" -> "decisionmodels.io",
+ * "claude code" -> "Claude Code"). Letters and digits must match exactly; punctuation around the word stays. He fixed these by hand on 9 Nov.
+ */
+export function properNames(text, names) {
+  const byKey = new Map();
+  for (const name of names) { const words = splitWords(name); if (words.length && words.length <= 4 && wordKey(name).length >= 3) byKey.set(words.map(wordKey).join(' '), words); }
+  if (!byKey.size) return String(text ?? '');
+  const parts = String(text ?? '').split(/(\s+)/); // words and the white space between them (line breaks stay)
+  const at = []; parts.forEach((p, i) => { if (i % 2 === 0 && p) at.push(i); });
+  const shape = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/su;
+  for (let n = 0; n < at.length; n++) {
+    for (let len = Math.min(4, at.length - n); len >= 1; len--) {
+      const idx = at.slice(n, n + len), key = idx.map(i => wordKey(parts[i])).join(' '), proper = byKey.get(key);
+      if (!proper) continue;
+      proper.forEach((w, k) => { const m = shape.exec(parts[idx[k]]); if (wordKey(m[2]) === wordKey(w) && m[2].toLowerCase() === w.toLowerCase()) parts[idx[k]] = m[1] + w + m[3]; });
+      n += len - 1; break;
+    }
+  }
+  return parts.join('');
+}
+
 // ---- windows that overlap: no sentence is judged at the edge of what the model can see ----
 
 /** Where source word k of a window ended up in its cleaned text (index of the first cleaned word for it). */

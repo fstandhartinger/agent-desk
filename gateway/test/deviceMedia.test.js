@@ -250,3 +250,13 @@ it('after the soft limit the first recogniser with words ends the wait, not the 
   const t = Date.now(), r = await createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k', OPENAI_API_KEY: 'o' }, fetchImpl }).dictate(wav(2), ctx, {});
   assert.equal(r.text, 'Spät, aber da'); assert(Date.now() - t < 3500, `took ${Date.now() - t} ms`);
 });
+it('one recogniser says a word, one heard nothing, one is down: in a quiet clip that is noise; names come back in their spelling', async () => {
+  const w = world({ mai: 503, openai: 'Ja.', assembly: '' });
+  const r = await createDeviceMedia({ env: allKeys, geminiFallbackMs: 20, fetchImpl: w.fetchImpl }).dictate(pcmQuiet(4), ctx, {});
+  assert.equal(r.text, ''); assert.equal(r.providers.openai.dropped, 'noise');
+  const loud = world({ mai: 503, openai: 'Ja.', assembly: '' }, 'Ja.');
+  assert.equal((await createDeviceMedia({ env: allKeys, geminiFallbackMs: 20, fetchImpl: loud.fetchImpl }).dictate(wav(4), ctx, {})).text, 'Ja.');
+  const names = world({ mai: 'frag die beispiel gmbh nach reax', openai: 'frag die Beispiel GmbH nach Reax', assembly: 'frag die beispiel gmbh nach reax' }, 'Frag die beispiel gmbh nach Reax.');
+  const n = await createDeviceMedia({ env: { ...allKeys, DESK_DICTATION_TERMS_EXTRA: 'Beispiel GmbH' }, fetchImpl: names.fetchImpl }).dictate(wav(4), ctx, {});
+  assert.equal(n.text, 'Frag die Beispiel GmbH nach REAX.');
+});
