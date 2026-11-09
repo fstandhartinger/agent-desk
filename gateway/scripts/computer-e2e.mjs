@@ -91,7 +91,7 @@ async function runTask(task) {
       try { return opts.validate ? opts.validate(r) : r; } catch (err) { steps.at(-1).invalid = String(err.message); return { ok: false, code: 'unclear', note: 'invalid result' }; }
     },
   };
-  const session = { client: { app: 'screen-agent', version: 'e2e', device: 'windows' }, say: (t) => { said.push(t); return true; }, trace: (type, data) => events.push({ type, ...data }), activity: () => {} };
+  const session = { client: { app: 'screen-agent', version: '0.1.14', device: 'windows' }, say: (t) => { said.push(t); return true; }, trace: (type, data) => events.push({ type, ...data }), activity: () => {} };
   const computer = createComputer({ vision, hub: {}, complete, tickMs: 1000, statePath: '', limits: { check: () => ({ ok: true }), addCost() {} } });
   computer.attach('e2e', session);
   const t0 = Date.now();

@@ -4,11 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setEnv } from './helpers/env.js';
-import { fakeSession, fakeVision, until } from './helpers/computer.js';
+import { fakeSession, fakeVision, SCREEN_AGENT, until } from './helpers/computer.js';
 
 setEnv({});
 delete process.env.DESK_COMPUTER_GUARDS; // the live default; every other computer test file runs with the older rules
-const { FREE_TOOLS, FREE_TOOL_NAMES, FREE_PROMPT, LOOP_TOOL_NAMES, checkArgs, toWire, waitMsFor, toolsNow } = await import('../src/computer/loop.js');
+const { FREE_TOOLS, FREE_TOOL_NAMES, FREE_PROMPT, FREE_PROMPT_V1, LOOP_TOOLS, LOOP_TOOL_NAMES, checkArgs, clientHasV2, toWire, waitMsFor, toolsNow } = await import('../src/computer/loop.js');
 const { createComputer, validateResult, activityLine, maxJpegChars } = await import('../src/computer/run.js');
 
 const JPEG = (n = 40) => 'A'.repeat(n);
@@ -16,7 +16,7 @@ const shot = (text = 'frame: screen 1280x720 (Monitor 0, 2560x1440 @150 %)\ncurs
 const done = (summary = 'fertig') => [{ name: 'done', args: { summary } }];
 
 /** A model that answers each turn with a LIST of tool calls (v2 allows several per answer). */
-function setup({ turns, app }) {
+function setup({ turns, app, clientVersion = '0.1.14' }) {
   const clock = { t: 1_000_000, now: () => clock.t };
   const vision = fakeVision();
   vision.app = app;
@@ -28,7 +28,7 @@ function setup({ turns, app }) {
     i += 1;
     return { message: { content: '', tool_calls: (step ?? []).map((c, k) => ({ id: `t${i}_${k}`, name: c.name, args: JSON.stringify(c.args ?? {}) })) }, usage: { in: 100, out: 20 }, costUsd: 0.01, ms: 5 };
   };
-  const session = fakeSession();
+  const session = fakeSession({ client: { ...SCREEN_AGENT, version: clientVersion } });
   const computer = createComputer({ vision, hub: { call: async () => ({ text: 'ok' }) }, now: clock.now, complete, tickMs: 1e9, limits: { check: () => ({ ok: true }), addCost() {} }, statePath: '' });
   computer.attach('s1', session);
   return { clock, vision, calls, session, computer, ended: () => computer.runOf('s1') === null, actions: () => vision.ofOp('action') };
@@ -256,4 +256,16 @@ test('a stop word still ends the run at once, and a cap reached inside one answe
   await h2.computer.begin('s1', { text: 'Klick', goalArg: 'x' });
   await until(h2.ended);
   assert.equal(h2.session.events.find((e) => e.type === 'computer.run.stop').why, 'voice-stop');
+});
+
+test('an app older than 0.1.14 keeps the run it had: the earlier tool set, prompt and one call per answer, no screenshot before the first turn', async () => {
+  for (const [v, want] of [['0.1.14', true], ['0.1.15+abc', true], ['0.2.0', true], ['1.0.0', true], ['0.1.13', false], ['0.1.9', false], ['0.0.99', false], ['', false], [undefined, false], ['e2e', false]]) assert.equal(clientHasV2(v), want, String(v));
+  const h = setup({ clientVersion: '0.1.13', app: (w) => (w.op === 'action' ? { ok: true, code: 'done', result: { text: 'w1 chrome' } } : { ok: true, code: 'done' }), turns: [[{ name: 'ui_windows', args: {} }, { name: 'ui_tree', args: {} }], done()] });
+  await h.computer.begin('s1', { text: 'Lies die Fenster', goalArg: 'x' });
+  await until(h.ended);
+  assert.deepEqual(h.actions().map((w) => w.tool), ['ui_windows'], 'no bootstrap screenshot, the second call of the answer is dropped');
+  assert.equal(h.calls[0].tools, LOOP_TOOLS);
+  assert.equal(h.calls[0].parallel, false);
+  assert.equal(h.calls[0].messages[0].content, FREE_PROMPT_V1);
+  assert.equal(h.session.events.find((e) => e.type === 'computer.run.start').v2, false);
 });

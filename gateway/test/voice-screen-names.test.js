@@ -37,7 +37,7 @@ function harness(t, { names = [], fakeTool = null, script = [{ name: 'done', arg
   const adapter = { sendAudio() {}, sendText() {}, interrupt() {}, close() {}, sendToolResult: (id, name, output) => h.results.push({ id, name, output }), recover() {} };
   runVoiceSession(ws, deps, { provider: 'xai', apiKey: 'k', now: () => clockNow, mergeMs: 5, noAnswerMs: () => 60_000, create: (_o, e) => { emit = e; return adapter; } });
   const msg = (o) => ws.emit('message', Buffer.from(JSON.stringify(o)), false);
-  msg({ type: 'start', client: SCREEN_AGENT });
+  msg({ type: 'start', client: { ...SCREEN_AGENT, version: '0.1.14' } });
   t.after(() => msg({ type: 'stop' }));
   Object.assign(h, {
     say: (text, itemId = 'i1') => { emit({ t: 'speech_started' }); clockNow += 300; emit({ t: 'transcript', role: 'user', final: true, text, itemId }); },

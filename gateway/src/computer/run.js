@@ -11,7 +11,7 @@ import { ABOUT } from '../voiceActions.js';
 import { askInstruction, ASK_MS, buildAsk, isGoWord, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
 import { unrestricted, UNRESTRICTED_ACTIONS, UNRESTRICTED_RUN_MS } from './mode.js';
-import { goalForTrace, openrouterComplete, runLoop, toWire, waitMsFor } from './loop.js';
+import { clientHasV2, goalForTrace, openrouterComplete, runLoop, toWire, waitMsFor } from './loop.js';
 import { serverRead } from './serverRead.js';
 
 export const BEAT_MS = 5000, BEAT_DEAD_MS = 15_000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, STEP_REPORT = 25, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
@@ -93,6 +93,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       note: null, extTurn: null, waiters: [], abort: new AbortController(), tools: {}, model: cfg.computerModel(), signal: null,
     };
     R.signal = R.abort.signal;
+    R.v2 = unrestricted() && clientHasV2(s.client?.version); // the free tool set needs an app that implements it; an older app keeps the run it had
     R.startTurn = turn; R.startSaid = String(said ?? ''); R.later = new Map(); // unrestricted: what he said after the run began, by voice turn (steer())
     /** For the loop's first message: his sentences since the start, oldest first; the newest one counts when they disagree. */
     R.spokenSince = () => [...R.later.values()];
@@ -160,7 +161,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       s.activity?.({ id: `computer-${R.run}-${seq}`, phase: 'start', tool: 'computer_task', label: activityLine(tool, null, step) });
       R.inflight += 1;
       let res;
-      try { res = await vision.computerSend(sid, { id, run: R.run, seq, op: 'action', tool, args: toWire(tool, args) }, { waitMs: unrestricted() ? waitMsFor(tool, args) : tool === 'screenshot' ? 20_000 : 30_000, validate: validateResult }); } finally { R.inflight -= 1; touch(); }
+      try { res = await vision.computerSend(sid, { id, run: R.run, seq, op: 'action', tool, args: toWire(tool, args) }, { waitMs: R.v2 ? waitMsFor(tool, args) : tool === 'screenshot' ? 20_000 : 30_000, validate: validateResult }); } finally { R.inflight -= 1; touch(); }
       R.actions += 1;
       const meta = res?.result && typeof res.result === 'object' ? res.result : {};
       ev('computer.action', { run: R.run, seq, tool, class: res.class, rule: res.rule, ...(typeof meta.target === 'string' ? { target: letters(meta.target, 60) } : {}), ...(typeof meta.domain === 'string' ? { domain: letters(meta.domain.replace(/\./g, ' '), 60).replace(/ /g, '.') } : {}), ...(typeof meta.process === 'string' ? { process: letters(meta.process, 40) } : {}), ...(typeof args?.text === 'string' ? { chars: args.text.length } : {}), ok: res.ok, code: res.code, ms: now() - t0, ...(unrestricted() && typeof meta.jpeg === 'string' ? { image: true } : {}), ...(res.ok ? {} : { reason: res.note ?? res.code }) });
@@ -400,7 +401,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     if (!spend.ok || dayCost() >= cfg.computerDayUsd()) return { ok: false, text: `Nichts gestartet: ${spend.ok ? 'das Tageslimit für Computer-Läufe ist erreicht' : spend.reason}. Sag das Florian in einem Satz.` };
     const R = makeRun(sid, s, { text, goalArg, scopeWords: scopeWordsOf(text), turn, said });
     runs.set(sid, R);
-    R.ev('computer.run.start', { run: R.run, goal: goalForTrace(text), modelGoal: short(goalArg ?? '', 120), scope: R.scopeWords.length, model: R.model });
+    R.ev('computer.run.start', { run: R.run, goal: goalForTrace(text), modelGoal: short(goalArg ?? '', 120), scope: R.scopeWords.length, model: R.model, ...(unrestricted() ? { v2: R.v2 } : {}) });
     audit({ action: 'computer.start', detail: `${R.run} scope=${R.scopeWords.length}` });
     const wire = { id: hex('c'), run: R.run, seq: ++R.seq, op: 'start', goal: R.goalText, scopeWords: R.scopeWords };
     const res = await vision.computerSend(sid, wire, { waitMs: 14_000, validate: validateResult }); // "hier" connects to Chrome inside the start: up to 10 s with its allow dialog
