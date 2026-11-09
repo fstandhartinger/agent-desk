@@ -11,6 +11,7 @@ import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, Trans
 import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
 import { deskStamp, SETTLE_MS } from '../voiceActions.js';
+import { hearingHint } from '../screenText.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -108,6 +109,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // Florian's own words (speech finals, typed turns): the only thing the action tools' trigger is checked against (voiceActions.js).
   // Marker turns, context turns, tool results and screen/registry text never get in.
   const spoken = []; // the last SPOKEN_KEEP {text, at, turn}
+  let hintedTurn = null; // the user turn that already got a hearing hint (screenText.js)
   let speechAt = -Infinity; // when he last made a sound or a transcript piece arrived: speaking() = within SETTLE_MS
   let speechOpen = false; // he started speaking and that sound has no final transcript yet
   let heardBack = { text: '', at: -Infinity }; // what the agent said last: its own voice through his speakers must not count as his words
@@ -446,6 +448,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     if (myEpoch === contentEpoch) { pending.overlap = false; restartNoAnswer(); }
     runningTools += 1;
+    const callTurn = turnId; // the user turn this call answers: a hearing hint belongs to it and to no later one
     const label = activityLabel(name, args);
     activity({ id, phase: 'start', tool: name, label });
     sendJson({ ...evt, status: 'start' });
@@ -454,7 +457,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     audit({ action: 'voice.tool', detail: `${provider}:${name} ${JSON.stringify(args).slice(0, 120)}` });
     let output;
     try {
-      const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
+      const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
       const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
       output = String(res.content ?? '').slice(0, voiceCap(name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
@@ -485,6 +488,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     await waitForFacts(name);
     if (closed) return;
+    if (cancelledCalls.delete(id)) { // voided while it waited for the early facts: the same exit as above
+      audit({ action: 'voice.tool.cancelled', detail: `${provider}:${name}` });
+      trace.event('tool.cancelled', { turn: turnId, id, name, reason: 'vendor-voided-late' });
+      return;
+    }
     // An action tool's answer is never swallowed: xAI can call before the transcript of the same sentence arrives (which moves the epoch), and a refusal must reach the model so it calls again or says why
     if (myEpoch !== contentEpoch && !ACTION_TOOLS.has(name)) {
       audit({ action: 'voice.tool.stale', detail: `${provider}:${name}` });
@@ -505,6 +513,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       restartNoAnswer(); // the model now has the results: same clock for its answer (the adapter nudge runs first, this is the last resort)
     }
     const route = name === 'knowledge_read' ? routingHint(question) : '';
+    // A name on his screen that sounds like what the recogniser wrote ("OpenAI" understood, "Opnar AI" on screen): the model reads it with the first CURRENT result
+    // of that sentence, before it answers. Attached here, after the cancelled and stale exits, so a result that is never delivered cannot use the hint up.
+    if (lastFinal && lastFinal.turn === callTurn && myEpoch === contentEpoch && !fromFragment && !oldChain && lastFinal.turn !== hintedTurn && now() - lastFinal.at < 20_000 && !lastFinal.typed) {
+      const hint = hearingHint(lastFinal.text, deps.vision?.names?.(sid) ?? []);
+      if (hint) { hintedTurn = lastFinal.turn; output = `${output}\n${hint}`; trace.event('screen.heard', { turn: lastFinal.turn, tool: name }); }
+    }
     adapter.sendToolResult(id, requestedName, route ? `${output}\n\n${route}` : output);
     trace.event('tool.result_sent', { turn: turnId, id, name, reachedModel: true, responseRequested: true, routed: Boolean(route) });
   }
@@ -528,6 +542,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         onTranscript(e);
         break;
       case 'speech_started':
+        deps.vision?.refresh?.(sid); // a current picture for the sentence he is starting (never waits)
         speechAt = now();
         lastSpeechStart = now();
         speechStartSeen = true;

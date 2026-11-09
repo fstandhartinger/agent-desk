@@ -170,9 +170,9 @@ export function withGlossaryTerms(dictionary, extra = []) {
 const NAME_LIKE = /\p{Lu}.*\p{Lu}|\d|\p{Ll}\p{Lu}/u;
 const PUBLIC_NAMES = (DICTATION_GLOSSARY.match(/[\p{L}\p{N}][\p{L}\p{N}.+-]{2,}/gu) ?? []).filter(w => NAME_LIKE.test(w));
 /** The names the word guard accepts as "written properly": glossary names, private names (both env vars) and the app's dictionary. */
-export function guardTerms(dictionary, env = process.env) {
+export function guardTerms(dictionary, env = process.env, screen = []) {
   const extra = (String(env.DESK_DICTATION_CONTEXT_EXTRA ?? '').match(/\p{Lu}[\p{L}\p{N}.+-]{2,}/gu) ?? []);
-  return termKeys([...knownNames(dictionary, env), ...PUBLIC_NAMES, ...extra]);
+  return termKeys([...knownNames(dictionary, env), ...PUBLIC_NAMES, ...extra, ...screen]); // screen: names visible on his screen right now (screenText.js)
 }
 /** Names with one right spelling: the app's dictionary (his own words first), private names, the glossary's list. */
 export function knownNames(dictionary, env = process.env) {
@@ -349,9 +349,11 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       await Promise.race([job, new Promise(resolve => { waitTimer = setTimeout(resolve, promptWaitMs); })]);
       clearTimeout(waitTimer);
     };
+    // Names visible on his screen when he started to speak (devices.js puts them into the context; screenText.js): hints for every recogniser and the clean-up
+    const screenNames = () => (Array.isArray(resolvedContext.bildschirmNamen) ? resolvedContext.bildschirmNamen : []);
     const transcript = async (url, key, model) => {
       if (!dictionarySettled) await settled(dictionaryJob);
-      const prompt = vocabularyPrompt(withGlossaryTerms(resolvedDictionary, privateTerms(env)), 700);
+      const prompt = vocabularyPrompt(withGlossaryTerms(resolvedDictionary, [...screenNames().slice(0, 25), ...privateTerms(env)]), 700); // names on his screen first: they are what he most likely talks about
       const body = new FormData(); body.set('model', model); body.set('language', 'de'); if (prompt) body.set('prompt', `${STT_LEAD} Begriffe: ${prompt}`); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
       if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
       limits.addCost(duration / 60 * 0.03);
@@ -390,7 +392,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       mai: async () => {
         await hints();
         if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
-        const r = await mai(audio, phraseList(resolvedDictionary, resolvedContext.titles, [...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
+        const r = await mai(audio, phraseList(resolvedDictionary, resolvedContext.titles, [...screenNames(), ...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
         limits.addCost(maiCost(r, duration));
         extra.mai = { phrases: r.phrases, ...(r.retried ? { retried: true } : {}) };
         if (r.text === null) throw Object.assign(Error('bad reply'), { reason: 'bad-reply' }); // a 200 without a transcript is an outage, not "he said nothing"
@@ -398,7 +400,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       },
       scribe: async () => {
         await hints(); spend(duration / 60 * 0.006);
-        return scribe(audio, phraseList(resolvedDictionary, [], [...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
+        return scribe(audio, phraseList(resolvedDictionary, [], [...screenNames(), ...privateTerms(env), ...GLOSSARY_TERMS]), controller.signal);
       },
       assembly: async () => { spend(duration / 60 * 0.006); return (await routed('assemblyai/universal-3-6-pro', audio, controller.signal)).text; },
       voxtral: async () => { spend(duration / 60 * 0.004); return (await routed('mistralai/voxtral-mini-transcribe-3-0', audio, controller.signal)).text; },
@@ -456,7 +458,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         const kept = plausible(answer) && got >= 0.75 * longest && got <= 1.3 * longest + 4 && (longest < 5 || overlap(answer, ref) >= 0.3);
         if (!expired && kept) {
           // every change of the model is checked on its own; what no recogniser heard and no rule explains is undone (dictationGuard.js)
-          const g = guardText(ref, answer, { ...variantContext(ref, Object.values(variants)), terms: guardTerms(resolvedDictionary, env) });
+          const g = guardText(ref, answer, { ...variantContext(ref, Object.values(variants)), terms: guardTerms(resolvedDictionary, env, screenNames()) });
           text = g.text; merged = true; providers.merge = { ok: true, ms: Date.now() - t0, ...(g.undone ? { undone: g.undone } : {}) };
         }
         else providers.merge ??= { ok: false, ms: Date.now() - t0, reason: expired ? 'timeout' : !answer ? 'empty' : !plausible(answer) ? 'implausible' : got < 0.75 * longest ? 'short' : 'different', ...(answer ? { words: got, longest, shortfall: Math.max(0, longest - got) } : {}) };

@@ -6,8 +6,9 @@ import { cfg } from './config.js';
 import { originOk, readSession, validSessionId, issueCookie } from './auth.js';
 import { readBody, readJson, sendJson, clientIp } from './http.js';
 import { createScreenVision } from './screenVision.js';
+import { createScreenText } from './screenText.js';
 import { createBriefing } from './briefing.js';
-import { createComputer, validateResult, MAX_RESULT_BYTES } from './computer/run.js';
+import { createComputer, validateResult, maxResultBytes } from './computer/run.js';
 import { lateTs } from './trace.js';
 import { audit } from './audit.js';
 import { short } from './redact.js';
@@ -36,7 +37,7 @@ function chunkInfo(raw) {
 }
 const SCOPES = ['dictate', 'dictionary', 'screen', 'exists'];
 const TTL = 90 * 24 * 3600_000;
-export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), vision = createScreenVision({ media, artifacts, now }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }), computer = createComputer({ vision, hub, now, audit }) } = {}) {
+export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), screenText = createScreenText({ now }), vision = createScreenVision({ media, artifacts, now, screenText }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }), computer = createComputer({ vision, hub, now, audit }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
   function rate(key, max, cost = 1) {
@@ -265,7 +266,8 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     const cmdResult = /^\/api\/device\/session\/([^/]+)\/commands\/(p[0-9a-f]{16})\/result$/.exec(path);
     const computerRes = /^\/api\/device\/session\/([^/]+)\/computer\/(c[0-9a-f]{16})\/result$/.exec(path);
     const computerBeat = /^\/api\/device\/session\/([^/]+)\/computer\/beat$/.exec(path);
-    const scope = computerRes || computerBeat ? 'computer' : target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' || path === '/api/device/polish' ? 'dictate' : path.split('/')[3];
+    const screenTextPost = path === '/api/device/screen-text' && req.method === 'POST';
+    const scope = screenTextPost ? (record.scopes.includes('dictate') ? 'dictate' : 'screen') : computerRes || computerBeat ? 'computer' : target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' || path === '/api/device/polish' ? 'dictate' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
     if ((target || cmdResult || computerRes || computerBeat) && !validSessionId((target ?? cmdResult ?? computerRes ?? computerBeat)[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
     if (path === '/api/device/exists' && req.method === 'GET') {
@@ -308,7 +310,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       sendJson(res, 200, vision.commandResult(cmdResult[1], record, cmdResult[2], await readJson(req, 2048)));
     } else if (computerRes && req.method === 'POST') {
       rate(`computerres:${record.deviceId}`, 240);
-      sendJson(res, 200, vision.computerResult(computerRes[1], record, computerRes[2], await readJson(req, MAX_RESULT_BYTES + 8192)));
+      sendJson(res, 200, vision.computerResult(computerRes[1], record, computerRes[2], await readJson(req, maxResultBytes() + 8192)));
     } else if (computerBeat && req.method === 'POST') {
       rate(`computerbeat:${record.deviceId}`, 120);
       sendJson(res, 200, computer.beat(computerBeat[1], record, await readJson(req, 512)));
@@ -386,6 +388,14 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
         if (body.mode !== 'live') dlog(record.deviceId, 'dictation.polish', { mode: body.mode, ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed, undone: r.undone ?? 0, breaks: r.breaks ?? 0 });
         sendJson(res, 200, r);
       } catch (err) { throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'polish-failed' } }); }
+    } else if (screenTextPost) {
+      // The visible text of his screen (UI Automation + OCR, redacted in the app) when a dictation starts or the picture changes in a voice session.
+      // Memory only, three minutes, per device; the log line carries counts, never the text.
+      rate(`screen-text:${record.deviceId}`, 60);
+      let noted; try { noted = screenText.note(record.deviceId, await readJson(req, 64 * 1024)); } catch (err) { throw err.status === 400 ? fail(err.message) : err; }
+      dlog(record.deviceId, 'screen.text', { reason: noted.reason, chars: noted.chars, terms: noted.terms });
+      vision.textArrived?.(record.deviceId);
+      sendJson(res, 200, { ok: true, terms: noted.terms });
     } else if (path === '/api/device/dictate' && req.method === 'POST') {
       rate(`dictate-in:${record.deviceId}`, 130); // before the 1.9 MB body is read and parsed; single clips and chunks are limited exactly below
       if (!/^multipart\/form-data;\s*boundary=/i.test(req.headers['content-type'] ?? '')) throw fail('Multipart erforderlich.', 415);
@@ -401,6 +411,8 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       if (chunk) { rate(`chunk:${record.deviceId}`, 120); chunkGate(record.deviceId, chunk); } else rate(`media:${record.deviceId}`, 12);
       const buffer = Buffer.from(await audio.arrayBuffer());
       wavDuration(buffer);
+      // names on his screen when he started to speak (the app posted the visible text, screenText.js): hints for the recognisers and the clean-up
+      const names = screenText.terms(record.deviceId, 40), onScreen = names.length ? { bildschirmNamen: names } : {};
       const result = await limited(record, chunk ? `dictate:${chunk.dictationId}` : 'dictate', async () => {
         const context = artifacts.visibleTitles(dctx.visibleIds).then(items => {
           // Titles first (all of them that fit), then a one-line summary excerpt per artifact while the 2500-char total holds.
@@ -412,15 +424,15 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
             bounded[i].summary = line;
             if (artifactData(bounded).length > 2500) delete bounded[i].summary;
           });
-          return { ...dctx, visibleArtifacts: artifactData(bounded), titles: items.map(item => item.title) };
-        }).catch(() => ({ ...dctx, visibleArtifacts: artifactData([]), titles: [] }));
+          return { ...dctx, ...onScreen, visibleArtifacts: artifactData(bounded), titles: items.map(item => item.title) };
+        }).catch(() => ({ ...dctx, ...onScreen, visibleArtifacts: artifactData([]), titles: [] }));
         // a chunk that is not the last: he is still talking, nobody waits for it, every recogniser gets its time
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })), { patient: chunk ? !chunk.final : false });
       }).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
-      dlog(record.deviceId, 'dictation.result', { ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}) });
+      dlog(record.deviceId, 'dictation.result', { screenNames: names.length, ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}) });
       sendJson(res, 200, result);
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary, authorizeSession, vision, briefing, computer, computerEnabled: id => computerOn.has(id), flushCaptionStats: (deviceId) => flushStats(deviceId) };
+  return { route, dictionary, authorizeSession, vision, screenText, briefing, computer, computerEnabled: id => computerOn.has(id), flushCaptionStats: (deviceId) => flushStats(deviceId) };
 }
