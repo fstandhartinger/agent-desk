@@ -140,6 +140,16 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     for (const type of ['session.start', 'session.end', 'tool.call', 'gateway.x', 'Activity.start']) assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type }] }))).status, 400, type);
   });
 
+  it('log route: data null (events without fields) and a hyphen in the type do not reject the whole batch', async () => {
+    // The app serialises a data-less event as "data":null and emits capture.exclusion-failed; both made a 400 and the app drops a 4xx batch (live 10 Nov).
+    const r = await post('/api/device/log', JSON.stringify({ events: [{ type: 'dictation.stop.idle', data: null }, { type: 'capture.exclusion-failed', data: { window: 'panel' } }, { type: 'client.app.stop', data: null }] }));
+    assert.equal(r.status, 200); assert.equal((await r.json()).accepted, 3);
+    await app.traces.flushAll(1000);
+    assert.deepEqual((await until(() => deviceEvents('dictation.stop.idle')[0])).data, {});
+    for (const bad of [[], 'x', 5]) assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type: 'ui.status', data: bad }] }))).status, 400, JSON.stringify(bad));
+    assert.equal((await post('/api/device/log', JSON.stringify({ events: [{ type: 'ui.-x' }] }))).status, 400);
+  });
+
   it('device.error: a failed device request leaves path, status, code, ms and bytes (ids in the path are folded)', async () => {
     const r = await post('/api/device/session/not-a-session/trace', JSON.stringify({ events: [] }));
     assert.equal(r.status, 403);
