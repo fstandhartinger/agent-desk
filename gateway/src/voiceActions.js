@@ -1,7 +1,9 @@
 // The two voice action tools (output_main_agent_prompt, start_agent_job). They act on Florian's desktop or start a real job with no
 // click, and the model that calls them also reads untrusted screen text. So a model call alone is never enough: the tool runs only
 // when Florian's OWN WORDS in this session (speech finals and typed turns, never screen/registry/marker text) contain the trigger.
+// The trigger words are checked first; when they miss, a small model judges his intent in the same words (intentTrigger.js).
 import crypto from 'node:crypto';
+import { classifyIntent, intentEnabled, intentText, INTENT_KEY } from './intentTrigger.js';
 import { redact, short } from './redact.js';
 import { limits as defaultLimits } from './limits.js';
 import { TEXT } from './messages.js';
@@ -105,18 +107,50 @@ export function checkTrigger(name, spoken, now = Date.now()) {
   return { ok: true, entries };
 }
 export const hasTrigger = (name, spoken, now) => checkTrigger(name, spoken, now).ok;
+
+// ---- intent fallback (Florian 10 Nov, a#41ec11: "es muss nur meine Intention erkannt werden") ----
+// The hard words come first and stay instant. Only these refusals ask the model; 'used' (a word opens one action) never does.
+const SOFT = new Set(['no-trigger', 'means-main-agent', 'question']);
+const classifierOf = (ctx) => (ctx.askIntent ? (text) => classifyIntent(text, { ask: ctx.askIntent }) : intentEnabled() ? classifyIntent : null);
+/** {hard, entries, text} when the hard rule refused softly and the window holds his words to judge, else {hard}. */
+function intentCase(name, spoken, now) {
+  const hard = checkTrigger(name, spoken, now);
+  if (hard.ok || !SOFT.has(hard.why) || !INTENT_KEY[name]) return { hard };
+  const entries = triggerWindow(name, spoken, now);
+  const text = entries.length ? intentText(entries, (t) => YES.test(t)) : '';
+  return text ? { hard, entries, text } : { hard };
+}
+/** Start the model call while he settles (the gate waits ~2.5 s anyway); the check after the settle reuses it when the words did not change. */
+export function prefetchIntent(name, spoken, now, ctx = {}) {
+  const c = intentCase(name, spoken, now), classify = classifierOf(ctx);
+  if (c.text && classify) classify(c.text).catch(() => /* failed: the check after the settle will try again */ null);
+}
+/** The hard rule, then his intent: {ok:true, entries, intent?} or the hard rule's refusal. Never throws. */
+export async function checkTriggerOrIntent(name, spoken, now, ctx = {}) {
+  const c = intentCase(name, spoken, now), classify = classifierOf(ctx);
+  if (!c.text || !classify) return c.hard;
+  const t0 = Date.now();
+  const verdict = await classify(c.text).catch(() => /* failed: fail closed, traced below as verdict none */ null);
+  const yes = verdict?.[INTENT_KEY[name]] === true;
+  ctx.trace?.()?.event?.('action.intent', { turn: ctx.voiceTurn?.turn, tool: name, hard: c.hard.why, verdict: verdict ? (yes ? 'yes' : 'no') : 'none', ms: Date.now() - t0 });
+  ctx.audit?.({ action: 'action.intent', detail: `${name} hard=${c.hard.why} verdict=${verdict ? (yes ? 'yes' : 'no') : 'none'}` });
+  return yes ? { ok: true, entries: c.entries, intent: true } : c.hard;
+}
 export const release = (g, name) => { for (const e of g.entries ?? []) if (e.used) delete e.used[name]; };
 
 /**
  * The shared gate. {ok:true, spoken} when the tool may act now, else a ready {ok:false} tool result.
  * Order: voice session -> not a fragment's / an old question's call -> settle (he may still be talking) -> trigger in his words.
  */
-export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigger(name, spoken, now), extraSay = {}, { settleMs } = {}) {
+export async function gate(name, ctx, clock, check = null, extraSay = {}, { settleMs } = {}) {
   const raw = ctx.voiceTurn;
+  const intentful = !check && Boolean(INTENT_KEY[name]); // the two voice actions; computer_task keeps its own stricter check
+  check ??= (spoken, now) => (INTENT_KEY[name] ? checkTriggerOrIntent(name, spoken, now, ctx) : checkTrigger(name, spoken, now));
   // settleMs (computer_task in the unrestricted mode): he watches and a longer sentence extends the run, so the start waits only this long after his last sound instead of SETTLE_MS (trace a#ba7990: 2.5 s before anything moved)
   const vt = raw && settleMs != null && raw.sinceSpeech ? { ...raw, speaking: () => raw.sinceSpeech() < settleMs } : raw;
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
+  if (intentful) prefetchIntent(name, vt.spoken(), clock.now(), ctx);
   let epoch = vt.epoch();
   const t0 = clock.now();
   const heard = () => vt.spoken().at(-1)?.at; // a sentence that grows while we wait keeps the epoch but makes the task out of date
@@ -133,7 +167,9 @@ export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigg
   if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); }
   if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
-  const verdict = check(spoken, clock.now());
+  const verdict = await check(spoken, clock.now());
+  // the intent check took a moment: a new sentence in that time ("nein, warte") wins
+  if (vt.epoch() !== epoch || heard() !== before) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   if (!verdict.ok) {
     const say = {
       'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',
