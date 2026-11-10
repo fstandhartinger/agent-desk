@@ -1,7 +1,9 @@
 // The two voice action tools (output_main_agent_prompt, start_agent_job). They act on Florian's desktop or start a real job with no
 // click, and the model that calls them also reads untrusted screen text. So a model call alone is never enough: the tool runs only
 // when Florian's OWN WORDS in this session (speech finals and typed turns, never screen/registry/marker text) contain the trigger.
+// The trigger words are checked first; when they miss, a small model judges his intent in the same words (intentTrigger.js).
 import crypto from 'node:crypto';
+import { classifyIntent, intentEnabled, intentText, INTENT_KEY } from './intentTrigger.js';
 import { redact, short } from './redact.js';
 import { limits as defaultLimits } from './limits.js';
 import { TEXT } from './messages.js';
@@ -105,18 +107,52 @@ export function checkTrigger(name, spoken, now = Date.now()) {
   return { ok: true, entries };
 }
 export const hasTrigger = (name, spoken, now) => checkTrigger(name, spoken, now).ok;
+
+// ---- intent fallback (Florian 10 Nov, a#41ec11: "es muss nur meine Intention erkannt werden") ----
+// The hard words come first and stay instant. Only these refusals ask the model; 'used' (a word opens one action) never does.
+const SOFT = new Set(['no-trigger', 'means-main-agent', 'question']);
+const classifierOf = (ctx) => (ctx.askIntent ? (text) => classifyIntent(text, { ask: ctx.askIntent }) : intentEnabled() ? classifyIntent : null);
+/** {hard, entries, text} when the hard rule refused softly and the window holds his words to judge, else {hard}. */
+function intentCase(name, spoken, now) {
+  const hard = checkTrigger(name, spoken, now);
+  if (hard.ok || !SOFT.has(hard.why) || !INTENT_KEY[name]) return { hard };
+  const entries = triggerWindow(name, spoken, now);
+  // the assistant's question as context for a bare "ja" only where nothing runs unseen: the Main-Agent prompt is typed, not sent. A job needs his own words (critic SHOULD 3).
+  const text = entries.length ? intentText(entries, (t) => YES.test(t), { withQuestion: name === 'output_main_agent_prompt' }) : '';
+  return text ? { hard, entries, text } : { hard };
+}
+/** Start the model call while he settles (the gate waits ~2.5 s anyway); the check after the settle reuses it when the words did not change. */
+export function prefetchIntent(name, spoken, now, ctx = {}) {
+  const c = intentCase(name, spoken, now), classify = classifierOf(ctx);
+  if (c.text && classify) classify(c.text).catch(() => /* failed: the check after the settle will try again */ null);
+}
+/** The hard rule, then his intent: {ok:true, entries, intent?} or the hard rule's refusal. Never throws. */
+export async function checkTriggerOrIntent(name, spoken, now, ctx = {}) {
+  const c = intentCase(name, spoken, now), classify = classifierOf(ctx);
+  if (!c.text || !classify) return c.hard;
+  const t0 = Date.now();
+  const verdict = await classify(c.text).catch(() => /* failed: fail closed, traced below as verdict none */ null);
+  const yes = verdict?.[INTENT_KEY[name]] === true;
+  ctx.trace?.()?.event?.('action.intent', { turn: ctx.voiceTurn?.turn, tool: name, hard: c.hard.why, verdict: verdict ? (yes ? 'yes' : 'no') : 'none', ms: Date.now() - t0 });
+  ctx.audit?.({ action: 'action.intent', detail: `${name} hard=${c.hard.why} verdict=${verdict ? (yes ? 'yes' : 'no') : 'none'}` });
+  return yes ? { ok: true, entries: c.entries, intent: true } : c.hard;
+}
 export const release = (g, name) => { for (const e of g.entries ?? []) if (e.used) delete e.used[name]; };
 
 /**
  * The shared gate. {ok:true, spoken} when the tool may act now, else a ready {ok:false} tool result.
  * Order: voice session -> not a fragment's / an old question's call -> settle (he may still be talking) -> trigger in his words.
  */
-export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigger(name, spoken, now), extraSay = {}, { settleMs } = {}) {
+export async function gate(name, ctx, clock, check = null, extraSay = {}, { settleMs } = {}) {
   const raw = ctx.voiceTurn;
+  const intentful = !check && Boolean(INTENT_KEY[name]); // the two voice actions; computer_task keeps its own stricter check
+  check ??= (spoken, now) => (INTENT_KEY[name] ? checkTriggerOrIntent(name, spoken, now, ctx) : checkTrigger(name, spoken, now));
   // settleMs (computer_task in the unrestricted mode): he watches and a longer sentence extends the run, so the start waits only this long after his last sound instead of SETTLE_MS (trace a#ba7990: 2.5 s before anything moved)
   const vt = raw && settleMs != null && raw.sinceSpeech ? { ...raw, speaking: () => raw.sinceSpeech() < settleMs } : raw;
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
+  const prefetch = () => { if (intentful) prefetchIntent(name, vt.spoken(), clock.now(), ctx); };
+  if (!vt.awaitingFinal?.()) prefetch(); // xAI: while the final of this call is due, the window lacks the sentence (critic: one wasted call)
   let epoch = vt.epoch();
   const t0 = clock.now();
   const heard = () => vt.spoken().at(-1)?.at; // a sentence that grows while we wait keeps the epoch but makes the task out of date
@@ -124,16 +160,23 @@ export async function gate(name, ctx, clock, check = (spoken, now) => checkTrigg
   // xAI can call a tool before the transcript of the same sentence arrives: that first final belongs to this call
   let finalDue = Boolean(vt.awaitingFinal?.());
   while (vt.speaking() || vt.awaitingFinal?.()) {
-    if (finalDue && !vt.awaitingFinal()) { finalDue = false; epoch = vt.epoch(); before = heard(); continue; }
+    if (finalDue && !vt.awaitingFinal()) { finalDue = false; epoch = vt.epoch(); before = heard(); prefetch(); continue; }
     if (vt.epoch() !== epoch && !finalDue) break;
     if (heard() !== before && !finalDue) break;
     if (clock.now() - t0 >= SETTLE_MAX_MS) break;
     await clock.sleep(POLL_MS);
   }
-  if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); }
+  if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); prefetch(); }
   if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
-  const verdict = check(spoken, clock.now());
+  const checkFrom = clock.now();
+  const verdict = await check(spoken, checkFrom);
+  // the check may have waited for the intent model: a new sound in that time ("nein, warte") wins, even before its transcript (critic MUST 2)
+  // sinceSpeech: any sound since the check began, independent of how the model timeout compares with AWAIT_FINAL_MS (critic 2 NIT)
+  if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.() || (vt.sinceSpeech && vt.sinceSpeech() < clock.now() - checkFrom)) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
+  // and a second call of the same tool on the same sentence waited too: the first one that resumes marks the words, the other is refused (critic MUST 1)
+  // its outcome is still open (it may fail and release), so this one must not claim it happened (critic 2 SHOULD 1)
+  if (verdict.ok && verdict.entries?.some((e) => e.used?.[name])) return { refused: refuse(ctx, name, 'parallel', 'Hier nichts getan: ein anderer Aufruf desselben Werkzeugs für diesen Satz läuft schon. Richte dich nach dessen Ergebnis und sag Florian nur das.') };
   if (!verdict.ok) {
     const say = {
       'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',
@@ -214,10 +257,12 @@ async function mainPrompt({ text }, ctx, clock) {
 }
 
 // ---- start_agent_job ----
+// a bare "ja" to the assistant's question never starts a job, so asking for one would loop (a#41ec11 t10/t11): ask for his own sentence
+const JOB_NO_TRIGGER = 'Nichts passiert: aus Florians eigenen Worten geht nicht hervor, dass jetzt ein Agent im Hintergrund etwas erledigen soll. Frag ihn in einem kurzen Satz, ob und was im Hintergrund laufen soll; ein bloßes Ja startet keinen Job, sein eigener Satz schon.';
 const CARD_WORD = { sent: 'gesendet', queued: 'unterwegs', pending: 'unterwegs', 'not-sent': 'nicht gesendet' };
 
 async function agentJob({ title, prompt, host }, ctx, clock) {
-  const g = await gate('start_agent_job', ctx, clock);
+  const g = await gate('start_agent_job', ctx, clock, null, { 'no-trigger': JOB_NO_TRIGGER });
   if (g.refused) return g.refused;
   if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'start_agent_job');
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);

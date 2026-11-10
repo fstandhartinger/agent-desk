@@ -190,7 +190,8 @@ Two voice-only tools (`voiceOnly: true` in `TOOL_DEFS`; the text chat and the pr
 Agent command `main-agent-prompt`, not submitted) and `start_agent_job {title, prompt, host?}` starts a real Claude Code job on Sandy or
 LeChonk (bridge method `job.start`, Sandy bridge) and announces it with a Telegram card. Both run only when Florian's OWN words in the
 session (`spoken`: the last 12 speech finals and typed Desk turns; never marker, context, screen or tool text) contain the trigger
-(`gateway/src/voiceActions.js`: Main Agent / Hauptagent / Stabschef / Chief of Staff, resp. Claude Code / Agent Job / "auf Sandy|LeChonk"),
+(`gateway/src/voiceActions.js`: Main Agent / Hauptagent / Stabschef / Chief of Staff, resp. Claude Code / Agent Job / "auf Sandy|LeChonk";
+since 10 Nov, when those words miss, one model call judges his intent in the same words, `gateway/src/intentTrigger.js`, see below),
 the call does not answer a fragment or an older question, and no new speech arrived for 2.5 s. Dedupe: the same prompt text within 60 s;
 a job with the same title or a word overlap of 0.6 within 3 minutes. `agentJob` is limited to 20 per day. The Screen Agent receives the
 prompt on its long poll as `{fresh:false, prompt:{id,text}}` (older apps ignore it) and answers on
@@ -198,6 +199,24 @@ prompt on its long poll as `{fresh:false, prompt:{id,text}}` (older apps ignore 
 does not answer within 6 s) the browser gets `{type:"main_agent_prompt", text}` to show with a copy button. Traces carry no text.
 
 
+
+### Intent fallback for the two voice actions (10 Nov 2026)
+
+Florian (desk trace a#41ec11): "Es muss nicht unbedingt der Begriff Main Agent verwendet werden, sondern es muss nur meine Intention
+erkannt werden." The hard words stay the first check and cost nothing. Only when they refuse softly (`no-trigger`, `means-main-agent`,
+`question`; never `used`) does `intentTrigger.js` ask `DESK_INTENT_MODEL` (default: the text model,
+`deepseek/deepseek-v4.1-flash-20261017:nitro`, reasoning off, JSON `{"main_agent","agent_job"}` yes/no) about the same trigger window:
+his own finals and typed turns as `Florian:` lines; for `output_main_agent_prompt` only (typed, never sent), when the window ends in a
+bare "ja", also the closing QUESTION of the assistant's reply before it as an `Assistent:` line (a statement or order in the assistant's
+words is never shown). A job needs his own words: a bare "ja" to the assistant's proposal never starts one, and the refusal asks him
+for his own sentence instead of a yes. Fail closed: no key, a timeout
+(3.5 s), an error or anything but "yes" for exactly this tool keeps the old refusal. The call starts while the gate waits for him to
+settle (2.5 s; with xAI only once the final of the call arrived) and is cached per text for 60 s, so the added latency is usually
+zero; any new sound during the check wins (`still-speaking`), and of two calls of one tool on the same sentence only the first opens. Every verdict is traced as `action.intent` (tool, hard reason, verdict,
+ms). Kill switch: `DESK_INTENT_TRIGGER=off`. Live check: `node gateway/test/manual/intent-eval.mjs 3 out.json off [cases.json]`
+(10 Nov, final prompt, three sets of 58/90/80 sentences x3, two written blind by another model: 0 false alarms on 1113 negative
+verdicts; 3 misses on 255 positive verdicts, all one sentence that names "Hauptagent" and so opens by the hard words anyway;
+p50 0.3 s, p90 0.4 s).
 ## Computer control v2 and screen names for speech (9 Nov 2026)
 
 **Computer control.** In the unrestricted mode (the default; `DESK_COMPUTER_GUARDS=on` keeps the guarded tool set and rules) the loop drives the Screen Agent app with the free tool set of `docs/computer-contract-v2.md`: screenshots with a coordinate frame, clicks by coordinates, drag, wheel, typing and key chords, windows, UI Automation, clipboard, PowerShell / cmd / WSL / Python, files, and Chrome over CDP on his running browser.

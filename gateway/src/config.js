@@ -14,6 +14,8 @@ export const cfg = {
   explainerContextToken: () => env('EXPLAINER_CONTEXT_TOKEN'), // bearer for the private context.json / deepdive.md (never sent to the browser)
   textModel: () => env('DESK_TEXT_MODEL', 'deepseek/deepseek-v4.1-flash-20261017:nitro'),
   vizModel: () => env('DESK_VIZ_MODEL') || cfg.textModel(),
+  intentModel: () => env('DESK_INTENT_MODEL') || cfg.textModel(), // the intent fallback of the voice action triggers (intentTrigger.js)
+  intentTrigger: () => env('DESK_INTENT_TRIGGER', 'on') !== 'off', // kill switch: off = only the hard trigger words open the two voice actions
   canvasModel: () => env('DESK_CANVAS_MODEL') || 'deepseek/deepseek-v4.1-flash-20261017:nitro',
   canvasDebounceMs: () => Number(env('DESK_CANVAS_DEBOUNCE_MS', '1200')),
   canvasTimeoutMs: () => Number(env('DESK_CANVAS_TIMEOUT_MS', '25000')),

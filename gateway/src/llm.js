@@ -101,12 +101,12 @@ export async function* streamChat({ model, messages, tools, signal }) {
 }
 
 /** One non-streaming call that must return a JSON object; null on any failure. */
-export async function completeJSON({ model, messages, maxTokens = 800 }) {
+export async function completeJSON({ model, messages, maxTokens = 800, timeoutMs = 20_000, reasoning = { effort: 'minimal' } }) {
   if (!cfg.openrouterKey()) return null;
   try {
     const response = await postOpenRouter(`${cfg.openrouterBase()}/chat/completions`, HEADERS(),
-      { model, messages, max_tokens: maxTokens, response_format: { type: 'json_object' }, usage: { include: true }, reasoning: { effort: 'minimal' } },
-      AbortSignal.timeout(20_000));
+      { model, messages, max_tokens: maxTokens, temperature: 0, response_format: { type: 'json_object' }, usage: { include: true }, reasoning },
+      AbortSignal.timeout(timeoutMs));
     if (!response.ok) return null;
     const json = await response.json();
     record(json.usage);

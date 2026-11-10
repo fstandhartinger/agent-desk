@@ -175,7 +175,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (role === 'assistant') {
       deps.computer?.assistantFinal(sid, text);
       heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
-      if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) spoken.at(-1).answered = true; }
+      if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) { spoken.at(-1).answered = true; spoken.at(-1).asked = text.slice(-300); } } // asked: what a bare "ja" after it answers (intent fallback, intentTrigger.js)
     }
     if (role === 'user') { speechOpen = false; lastUserText = text; lastFinal = { text, norm: normText(text), itemId: turn.itemId ?? null, turn: turnId, at: now() }; noteSpoken(text, lastFinal.at, turnId, { started: speechStartSeen ? lastSpeechStart : undefined }); partialTail = ''; deps.computer?.userFinal(sid, spoken.at(-1)); }
     else if (isGermanText(lastUserText)) text = stripCjk(text, [...cjkKnown]); // a stray CJK glyph in a German answer is a model slip
