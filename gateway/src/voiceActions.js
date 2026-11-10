@@ -117,7 +117,8 @@ function intentCase(name, spoken, now) {
   const hard = checkTrigger(name, spoken, now);
   if (hard.ok || !SOFT.has(hard.why) || !INTENT_KEY[name]) return { hard };
   const entries = triggerWindow(name, spoken, now);
-  const text = entries.length ? intentText(entries, (t) => YES.test(t)) : '';
+  // the assistant's question as context for a bare "ja" only where nothing runs unseen: the Main-Agent prompt is typed, not sent. A job needs his own words (critic SHOULD 3).
+  const text = entries.length ? intentText(entries, (t) => YES.test(t), { withQuestion: name === 'output_main_agent_prompt' }) : '';
   return text ? { hard, entries, text } : { hard };
 }
 /** Start the model call while he settles (the gate waits ~2.5 s anyway); the check after the settle reuses it when the words did not change. */
@@ -150,7 +151,8 @@ export async function gate(name, ctx, clock, check = null, extraSay = {}, { sett
   const vt = raw && settleMs != null && raw.sinceSpeech ? { ...raw, speaking: () => raw.sinceSpeech() < settleMs } : raw;
   if (!vt) return { refused: refuse(ctx, name, 'no-voice', 'Dieses Werkzeug gibt es nur in einem Sprachgespräch. Es ist nichts passiert.') };
   if (vt.fromFragment || vt.oldChain) return { refused: refuse(ctx, name, vt.fromFragment ? 'fragment' : 'old-chain', 'Nichts passiert: dieser Aufruf gehörte zu einem Satzfetzen oder einer früheren Frage. Rufe das Werkzeug nach Florians Satz erneut auf, wenn es noch gilt.') };
-  if (intentful) prefetchIntent(name, vt.spoken(), clock.now(), ctx);
+  const prefetch = () => { if (intentful) prefetchIntent(name, vt.spoken(), clock.now(), ctx); };
+  if (!vt.awaitingFinal?.()) prefetch(); // xAI: while the final of this call is due, the window lacks the sentence (critic: one wasted call)
   let epoch = vt.epoch();
   const t0 = clock.now();
   const heard = () => vt.spoken().at(-1)?.at; // a sentence that grows while we wait keeps the epoch but makes the task out of date
@@ -158,18 +160,20 @@ export async function gate(name, ctx, clock, check = null, extraSay = {}, { sett
   // xAI can call a tool before the transcript of the same sentence arrives: that first final belongs to this call
   let finalDue = Boolean(vt.awaitingFinal?.());
   while (vt.speaking() || vt.awaitingFinal?.()) {
-    if (finalDue && !vt.awaitingFinal()) { finalDue = false; epoch = vt.epoch(); before = heard(); continue; }
+    if (finalDue && !vt.awaitingFinal()) { finalDue = false; epoch = vt.epoch(); before = heard(); prefetch(); continue; }
     if (vt.epoch() !== epoch && !finalDue) break;
     if (heard() !== before && !finalDue) break;
     if (clock.now() - t0 >= SETTLE_MAX_MS) break;
     await clock.sleep(POLL_MS);
   }
-  if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); }
+  if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); prefetch(); }
   if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
   const verdict = await check(spoken, clock.now());
-  // the intent check took a moment: a new sentence in that time ("nein, warte") wins
-  if (vt.epoch() !== epoch || heard() !== before) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
+  // the check may have waited for the intent model: a new sound in that time ("nein, warte") wins, even before its transcript (critic MUST 2)
+  if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
+  // and a second call of the same tool on the same sentence waited too: the first one that resumes marks the words, the other is refused (critic MUST 1)
+  if (verdict.ok && verdict.entries?.some((e) => e.used?.[name])) return { refused: refuse(ctx, name, 'used', 'Für diesen Satz ist das schon passiert; kein zweites Mal. Sag nur einen kurzen Satz.') };
   if (!verdict.ok) {
     const say = {
       'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',
@@ -250,10 +254,12 @@ async function mainPrompt({ text }, ctx, clock) {
 }
 
 // ---- start_agent_job ----
+// a bare "ja" to the assistant's question never starts a job, so asking for one would loop (a#41ec11 t10/t11): ask for his own sentence
+const JOB_NO_TRIGGER = 'Nichts passiert: aus Florians eigenen Worten geht nicht hervor, dass jetzt ein Agent im Hintergrund etwas erledigen soll. Frag ihn in einem kurzen Satz, ob und was im Hintergrund laufen soll; ein bloßes Ja startet keinen Job, sein eigener Satz schon.';
 const CARD_WORD = { sent: 'gesendet', queued: 'unterwegs', pending: 'unterwegs', 'not-sent': 'nicht gesendet' };
 
 async function agentJob({ title, prompt, host }, ctx, clock) {
-  const g = await gate('start_agent_job', ctx, clock);
+  const g = await gate('start_agent_job', ctx, clock, null, { 'no-trigger': JOB_NO_TRIGGER });
   if (g.refused) return g.refused;
   if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'start_agent_job');
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);

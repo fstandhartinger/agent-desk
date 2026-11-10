@@ -206,11 +206,13 @@ Florian (desk trace a#41ec11): "Es muss nicht unbedingt der Begriff Main Agent v
 erkannt werden." The hard words stay the first check and cost nothing. Only when they refuse softly (`no-trigger`, `means-main-agent`,
 `question`; never `used`) does `intentTrigger.js` ask `DESK_INTENT_MODEL` (default: the text model,
 `deepseek/deepseek-v4.1-flash-20261017:nitro`, reasoning off, JSON `{"main_agent","agent_job"}` yes/no) about the same trigger window:
-his own finals and typed turns as `Florian:` lines, and only when the window ends in a bare "ja", the closing QUESTION of the assistant's
-reply before it as an `Assistent:` line (a statement or order in the assistant's words is never shown). Fail closed: no key, a timeout
+his own finals and typed turns as `Florian:` lines; for `output_main_agent_prompt` only (typed, never sent), when the window ends in a
+bare "ja", also the closing QUESTION of the assistant's reply before it as an `Assistent:` line (a statement or order in the assistant's
+words is never shown). A job needs his own words: a bare "ja" to the assistant's proposal never starts one, and the refusal asks him
+for his own sentence instead of a yes. Fail closed: no key, a timeout
 (3.5 s), an error or anything but "yes" for exactly this tool keeps the old refusal. The call starts while the gate waits for him to
-settle (2.5 s) and is cached per text for 60 s, so both tools in one sentence share it and the added latency is usually zero; a new
-sentence that arrives during the check wins (`still-speaking`). Every verdict is traced as `action.intent` (tool, hard reason, verdict,
+settle (2.5 s; with xAI only once the final of the call arrived) and is cached per text for 60 s, so the added latency is usually
+zero; any new sound during the check wins (`still-speaking`), and of two calls of one tool on the same sentence only the first opens. Every verdict is traced as `action.intent` (tool, hard reason, verdict,
 ms). Kill switch: `DESK_INTENT_TRIGGER=off`. Live check: `node gateway/test/manual/intent-eval.mjs 3 out.json off [cases.json]`
 (10 Nov: 0 misses on 249 positive verdicts, 1 false alarm on 1089 negative verdicts over three sets, two of them written blind by
 another model; p50 0.6-0.7 s, p90 0.9 s).

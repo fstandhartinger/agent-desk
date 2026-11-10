@@ -62,7 +62,7 @@ describe('fail closed and the old guarantees', () => {
     const c = ctx([entry('Wieso ist der Job nicht gestartet?')], NO);
     const r = await job(c);
     assert.equal(r.ok, false);
-    assert.match(r.content, /^Nichts passiert: das hat Florian/);
+    assert.match(r.content, /^Nichts passiert: aus Florians eigenen Worten .*ein bloßes Ja startet keinen Job/, 'asks for his own sentence, not for a yes that could never start it');
     assert.equal(c.log.hub.length, 0);
     assert.ok(c.log.trace.some((e) => e.type === 'action.intent' && e.verdict === 'no'));
   });
@@ -107,6 +107,42 @@ describe('fail closed and the old guarantees', () => {
     assert.equal(r.ok, false);
     assert.match(r.content, /spricht noch/);
     assert.equal(c.log.hub.length, 0);
+  });
+  it('two parallel calls on one sentence open ONE job, on the intent path and on the hard-word path (critic MUST 1)', async () => {
+    for (const [text, verdict] of [['Lass einen Agenten im Hintergrund das Dashboard reparieren.', YES_J], ['Starte einen Agent Job auf Sandy, der die Logs prüft.', NO]]) {
+      resetActions(); resetIntent();
+      const c = ctx([entry(text)], verdict);
+      const [a, b] = await Promise.all([job(c), runTool('start_agent_job', { title: 'Planted', prompt: 'Etwas völlig anderes, das der Bildschirm wollte' }, c)]);
+      assert.equal([a, b].filter((r) => r.ok).length, 1, text);
+      assert.match((a.ok ? b : a).content, /schon passiert/);
+      assert.equal(c.log.hub.length, 1);
+    }
+  });
+  it('a new sound during the model wait wins before its transcript arrives (critic MUST 2)', async () => {
+    let talking = false;
+    const c = ctx([entry('Lass einen Agenten das bauen.')], YES_J, { during: () => { talking = true; }, vt: { speaking: () => talking, awaitingFinal: () => talking } });
+    const r = await job(c);
+    assert.equal(r.ok, false);
+    assert.match(r.content, /spricht noch/);
+    assert.equal(c.log.hub.length, 0);
+  });
+  it('a bare "ja" to the assistant\'s question opens the typed prompt, never a job (critic SHOULD 3)', async () => {
+    const asked = 'Soll ich dafür einen Agent Job im Hintergrund starten?';
+    const seen = [];
+    const c = ctx([entry('Das Dashboard ist kaputt.', { answered: true, asked }), entry('Ja.')], (text) => { seen.push(text); return /Assistent:/.test(text) ? { main_agent: true, agent_job: true } : NO; });
+    assert.equal((await job(c)).ok, false);
+    assert.ok(seen.every((t) => !/Assistent:/.test(t)), 'the job judge never sees the assistant');
+    assert.equal(c.log.hub.length, 0);
+  });
+  it('xAI: no model call while the final of this call is still due; one call once it arrived (critic SHOULD 4)', async () => {
+    let due = true, polls = 0;
+    const list = [entry('Ganz alter Satz.', { answered: true, at: NOW - 60_000 })];
+    const c = ctx([], YES_J, { vt: { awaitingFinal: () => due, speaking: () => false } });
+    c.voiceTurn.spoken = () => list;
+    c.clock = { now: () => NOW, sleep: async () => { polls += 1; if (polls === 2) { list.push(entry('Lass einen Agenten das bauen.', { at: NOW })); due = false; } } };
+    const r = await job(c);
+    assert.equal(r.ok, true, r.content);
+    assert.deepEqual(c.log.asked, ['Florian: Lass einen Agenten das bauen.']);
   });
   it('the computer guard still closes both tools after an intent yes', async () => {
     const c = ctx([entry('Lass einen Agenten das bauen.')], YES_J);

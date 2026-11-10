@@ -49,13 +49,13 @@ export function lastQuestion(text) {
  * The text the model judges: one "Florian:" line per entry of the trigger window, and the assistant's last question only right before
  * a bare yes that ends the window (`isYes` from voiceActions.js), and of that only its closing question. No other assistant, screen or tool text.
  */
-export function intentText(entries, isYes) {
+export function intentText(entries, isYes, { withQuestion = true } = {}) {
   const lines = [];
   entries.forEach((e, i) => {
     const next = entries[i + 1];
     lines.push(`Florian: ${flat(e.text, 1200)}`);
     const question = lastQuestion(e.asked); // a statement or an order in the assistant's words is no proposal he could say yes to
-    if (question && next && i + 1 === entries.length - 1 && isYes(String(next.text ?? ''))) lines.push(`Assistent: ${flat(question, 300)}`);
+    if (withQuestion && question && next && i + 1 === entries.length - 1 && isYes(String(next.text ?? ''))) lines.push(`Assistent: ${flat(question, 300)}`);
   });
   return lines.join('\n');
 }
@@ -85,7 +85,9 @@ export function classifyIntent(text, opts = {}) {
   if (hit) return hit.promise;
   const promise = Promise.resolve().then(() => (opts.ask ?? askModel)(key, opts)).catch(() => /* failed: fail closed, no verdict */ null);
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(key, { at: now, promise });
+  const entry = { at: now, promise };
+  cache.set(key, entry);
+  setTimeout(() => { if (cache.get(key) === entry) cache.delete(key); }, CACHE_MS).unref?.(); // his words do not stay in memory after the session (critic NIT 5)
   promise.then((v) => { if (!v) cache.delete(key); }); // a failure may be retried by the next call
   return promise;
 }
