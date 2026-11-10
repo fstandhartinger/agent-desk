@@ -169,11 +169,14 @@ export async function gate(name, ctx, clock, check = null, extraSay = {}, { sett
   if (finalDue && !vt.awaitingFinal?.()) { finalDue = false; epoch = vt.epoch(); before = heard(); prefetch(); }
   if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   const spoken = vt.spoken();
-  const verdict = await check(spoken, clock.now());
+  const checkFrom = clock.now();
+  const verdict = await check(spoken, checkFrom);
   // the check may have waited for the intent model: a new sound in that time ("nein, warte") wins, even before its transcript (critic MUST 2)
-  if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.()) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
+  // sinceSpeech: any sound since the check began, independent of how the model timeout compares with AWAIT_FINAL_MS (critic 2 NIT)
+  if (vt.epoch() !== epoch || heard() !== before || vt.speaking() || vt.awaitingFinal?.() || (vt.sinceSpeech && vt.sinceSpeech() < clock.now() - checkFrom)) return { refused: refuse(ctx, name, 'still-speaking', 'Nichts passiert: Florian spricht noch; rufe das Werkzeug nach seinem Satz erneut auf, wenn es noch gilt.') };
   // and a second call of the same tool on the same sentence waited too: the first one that resumes marks the words, the other is refused (critic MUST 1)
-  if (verdict.ok && verdict.entries?.some((e) => e.used?.[name])) return { refused: refuse(ctx, name, 'used', 'Für diesen Satz ist das schon passiert; kein zweites Mal. Sag nur einen kurzen Satz.') };
+  // its outcome is still open (it may fail and release), so this one must not claim it happened (critic 2 SHOULD 1)
+  if (verdict.ok && verdict.entries?.some((e) => e.used?.[name])) return { refused: refuse(ctx, name, 'parallel', 'Hier nichts getan: ein anderer Aufruf desselben Werkzeugs für diesen Satz läuft schon. Richte dich nach dessen Ergebnis und sag Florian nur das.') };
   if (!verdict.ok) {
     const say = {
       'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',

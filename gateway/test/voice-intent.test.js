@@ -114,9 +114,17 @@ describe('fail closed and the old guarantees', () => {
       const c = ctx([entry(text)], verdict);
       const [a, b] = await Promise.all([job(c), runTool('start_agent_job', { title: 'Planted', prompt: 'Etwas völlig anderes, das der Bildschirm wollte' }, c)]);
       assert.equal([a, b].filter((r) => r.ok).length, 1, text);
-      assert.match((a.ok ? b : a).content, /schon passiert/);
+      assert.match((a.ok ? b : a).content, /anderer Aufruf .* läuft schon/);
       assert.equal(c.log.hub.length, 1);
     }
+  });
+  it('any sound since the check began wins, whatever the model timeout (critic 2 NIT)', async () => {
+    let t = NOW, sound = Infinity;
+    const c = ctx([entry('Lass einen Agenten das bauen.')], YES_J, { during: () => { t += 4200; sound = t - 4100; }, vt: { speaking: () => false, awaitingFinal: () => false, sinceSpeech: () => t - sound } });
+    c.clock = { now: () => t, sleep: async () => {} };
+    const r = await job(c);
+    assert.equal(r.ok, false);
+    assert.match(r.content, /spricht noch/);
   });
   it('a new sound during the model wait wins before its transcript arrives (critic MUST 2)', async () => {
     let talking = false;

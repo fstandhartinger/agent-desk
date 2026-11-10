@@ -214,8 +214,9 @@ for his own sentence instead of a yes. Fail closed: no key, a timeout
 settle (2.5 s; with xAI only once the final of the call arrived) and is cached per text for 60 s, so the added latency is usually
 zero; any new sound during the check wins (`still-speaking`), and of two calls of one tool on the same sentence only the first opens. Every verdict is traced as `action.intent` (tool, hard reason, verdict,
 ms). Kill switch: `DESK_INTENT_TRIGGER=off`. Live check: `node gateway/test/manual/intent-eval.mjs 3 out.json off [cases.json]`
-(10 Nov: 0 misses on 249 positive verdicts, 1 false alarm on 1089 negative verdicts over three sets, two of them written blind by
-another model; p50 0.6-0.7 s, p90 0.9 s).
+(10 Nov, final prompt, three sets of 58/90/80 sentences x3, two written blind by another model: 0 false alarms on 1113 negative
+verdicts; 3 misses on 255 positive verdicts, all one sentence that names "Hauptagent" and so opens by the hard words anyway;
+p50 0.3 s, p90 0.4 s).
 ## Computer control v2 and screen names for speech (9 Nov 2026)
 
 **Computer control.** In the unrestricted mode (the default; `DESK_COMPUTER_GUARDS=on` keeps the guarded tool set and rules) the loop drives the Screen Agent app with the free tool set of `docs/computer-contract-v2.md`: screenshots with a coordinate frame, clicks by coordinates, drag, wheel, typing and key chords, windows, UI Automation, clipboard, PowerShell / cmd / WSL / Python, files, and Chrome over CDP on his running browser.

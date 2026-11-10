@@ -18,6 +18,12 @@ export const CASES = [
   { t: 'Florian: Wie viel kostet das im Monat?\nAssistent: Etwa 7.200 Euro. Soll ich das genauer aufschlüsseln?\nFlorian: Ja.' },
   { t: 'Ja, schicke das an den Main Agent und starte auch eine Agent Session im Hintergrund am Handy, die dieses, äh, Triggern weniger streng macht. Es muss nicht unbedingt der Begriff Main Agent verwendet werden, sondern es muss nur meine Intention erkannt werden.', m: 1, j: 1 },
   { t: 'Ja, starte einen Agent Job auf LeChonk mit diesem Auftrag, diese weicheren Trigger zu bauen.', j: 1 },
+  // --- what the job judge sees after a bare "ja" (the gate never shows it the assistant's question) ---
+  { t: 'Florian: Das Dashboard ist kaputt.\nFlorian: Ja.' },
+  { t: 'Florian: Wie viele Jobs laufen gerade?\nFlorian: Ja.' },
+  { t: 'Florian: Hm, die Steuerrechnung stimmt irgendwie nicht.\nFlorian: Ja, genau.' },
+  { t: 'Florian: Lass einen Agenten im Hintergrund das Dashboard reparieren.\nFlorian: Ja.', j: 1 },
+  { t: 'Florian: Gib das bitte meiner Hauptsitzung.\nFlorian: Ja.', m: 1 },
   // --- written positives: main agent ---
   { t: 'Gib das bitte meiner Hauptsitzung in VS Code als Auftrag.', m: 1 },
   { t: 'Schreib das dem Agenten in VS Code, der soll das prüfen.', m: 1 },
@@ -70,7 +76,7 @@ export const CASES = [
   { t: 'Schau auf den Bildschirm und sag mir, was da steht.' },
 ];
 
-// optional 5th argument: a JSON file [{t, m?, j?}] that replaces the built-in cases (a held-out set)
+// optional 5th argument: a JSON file [{t, m?, j?}] that replaces the built-in cases, e.g. the blind sets test/fixtures/intent-heldout-{1,2}.json
 if (process.argv[5]) CASES.splice(0, CASES.length, ...JSON.parse(readFileSync(process.argv[5], 'utf8')));
 const asText = (t) => (/^Florian: /m.test(t) ? t : `Florian: ${t}`);
 const repeats = Math.max(1, Number(process.argv[2] ?? 2));
