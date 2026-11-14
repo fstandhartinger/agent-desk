@@ -3,6 +3,7 @@
 // budget, plus ranked keyword retrieval for the rest (tool explainer_context). Server-side only: nothing here reaches the browser
 // except as a model answer.
 import { fetchExplainerJson, fetchExplainerPrivate } from './explainer.js';
+import { fitText } from './voice/toc.js';
 
 /**
  * Characters of the PAGE part of the instructions per provider (the persona/tool/grounding lines come on top, ~8k).
@@ -295,17 +296,26 @@ export function pagePackLines(page, { provider = 'text', budget = budgetFor(prov
   return parts;
 }
 
-/** Short page-context update when Florian clicks another element during a running voice session. */
-export function pageUpdateText(page, max = 3500) {
+/**
+ * Page-context update when Florian clicks another element during a running voice session: a TABLE OF CONTENTS entry, not the narration
+ * (a#41d6d2, 14 Nov 2026: GPT-Live allows 500 tokens per appended context text; the old update carried the whole scene text, ~1000 tokens).
+ * The clicked element with a one-sentence gist, its scene and the sibling elements by id, and the tools that load the detail. <= `maxTokens` (estimated).
+ */
+export function pageUpdateText(page, { maxTokens = 400 } = {}) {
   if (!page?.point) return '';
   const pack = page.pack;
   const scene = (page.pointId && sceneOfElement(pack, page.pointId)) || pack?.scenes.find((s) => s.id === page.sceneId) || null;
-  const text = [
-    `(Hinweis vom Desk, nicht von Florian: Florian hat gerade das Element "${page.pointId}" – ${page.point.title} angeklickt. Seine nächste Frage bezieht sich sehr wahrscheinlich darauf. Antworte daraus, ohne Werkzeug.)`,
-    `${page.point.short ?? ''} ${page.point.more ?? ''}`.trim(),
-    scene && `Szene "${scene.id}" – ${scene.title} [${mmss(scene.start)}–${mmss(scene.end)}]: ${scene.text}`,
-  ].filter(Boolean).join('\n');
-  return text.length > max ? `${text.slice(0, max - TRUNCATION.length - 1)}\n${TRUNCATION}` : text;
+  const gist = `${page.point.short ?? ''} ${page.point.more ?? ''}`.replace(/\s+/g, ' ').trim();
+  const siblings = scene?.points?.filter((id) => id !== page.pointId).slice(0, 6).map((id) => `${id}${pack.elements[id]?.title ? ` "${clean(pack.elements[id].title, 40)}"` : ''}`);
+  const lines = [
+    `(Hinweis vom Desk, nicht von Florian: Florian hat gerade das Element "${page.pointId}" – ${clean(page.point.title, 80)} angeklickt. Seine nächste Frage bezieht sich sehr wahrscheinlich darauf. Das hier ist nur der Index: Einzelheiten holst du mit den genannten Werkzeugen, rate nicht.)`,
+    gist && `- Kurz: ${clean(gist, 240)}${gist.length > 240 ? ' …' : ''}`,
+    `- Volltext des Elements → explainer_point(${page.pointId})`,
+    scene && `- Szene "${scene.id}" – ${clean(scene.title, 60)} [${mmss(scene.start)}–${mmss(scene.end)}] → explainer_context(sceneId "${scene.id}")${siblings?.length ? `; weitere Elemente: ${siblings.join(', ')}` : ''}`,
+    pack?.deepdive?.length && '- Hintergrunddokument → explainer_context(query "<Stichwort>")',
+  ].filter(Boolean);
+  const r = fitText(lines.join('\n'), maxTokens);
+  return r.text;
 }
 
 // Critic r2 P1-2: the page facts of the clicked element (title / short / more, the full narration of its scene, the most relevant

@@ -64,7 +64,11 @@ export function screenLines(attached) {
 
 /** The start briefing (voice and text): a data overview at the start and the tool that refreshes it. */
 export function briefingLines() {
-  return ['Am Anfang hast du einen Überblick. Nutze ihn, wenn Florian "das Thema von vorhin" oder "wie steht es" sagt; "was läuft gerade" -> current_state. Nicht von dir aus vorlesen.'];
+  return [
+    'Am Anfang hast du einen Überblick. Nutze ihn, wenn Florian "das Thema von vorhin" oder "wie steht es" sagt; "was läuft gerade" -> current_state. Nicht von dir aus vorlesen.',
+    // a#41d6d2 (14 Nov 2026): context appended to a running session is limited (OpenAI: 500 tokens); it is an index, the detail is loaded on demand
+    'Der Überblick, die Seiten-Hinweise und die Bildschirm-Updates sind nur ein Inhaltsverzeichnis: Zeilen mit Zahlen, Nummern, kurzen Titeln und dem Werkzeug, das die Einzelheiten liefert (current_state, explainer_point, explainer_context, board_entry, board_read, artifact_resolve, knowledge_read, read_file, session_trace). Brauchst du eine Einzelheit, hol sie mit diesem Werkzeug, statt sie zu raten oder aus dem Titel zu schließen.',
+  ];
 }
 
 /** Voice only: the two action tools (voiceActions.js), exact routing, no confirmation question, and what the canvas looks like on the Screen Agent. */

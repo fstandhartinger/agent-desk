@@ -115,10 +115,11 @@ it('attach: one briefing at start; the device part arriving later gives exactly 
   await sleep(40);
   assert.equal(sent.length, 1);
   assert.equal(asked.length, 1); assert.match(asked[0][1], /^[0-9a-f]{8}$/);
-  assert.deepEqual(dataOf(sent[0]).fehlt, ['geraet']);
+  assert.match(sent[0], /Fehlt: geraet/, 'the start text is the index (a#41d6d2); the full briefing stays behind current_state');
   const start = traces.find(([t]) => t === 'briefing.start')[1];
   assert.deepEqual(Object.keys(start.sources).sort(), ['board', 'geraet', 'karten', 'stand']);
-  assert.equal(start.chars, sent[0].length);
+  assert.ok(start.tocTokens > 0 && start.tocTokens <= 400, 'the index is within the 400-token budget');
+  assert.ok(start.chars > sent[0].length, 'chars = the full briefing (current_state), more than the index that was sent');
   b.deviceIn('s4', { windows: [{ process: 'code', title: 'Fake' }], mainSession: { source: 'vscode', messages: [{ role: 'user', at: '2026-11-03T10:00:00Z', text: 'Fake topic of earlier' }] } }, asked[0][1]);
   assert.equal(sent.length, 2, 'one update');
   assert.match(sent[1], /Fake topic of earlier/);
@@ -138,7 +139,7 @@ it('attach: a device part that is already there goes into the first briefing (no
   const sent = [];
   b.attach('s5', { setContext: (t) => { sent.push(t); return 'sent'; }, trace() {} });
   await sleep(40);
-  assert.equal(sent.length, 1); assert.match(sent[0], /Fake screen text/);
+  assert.equal(sent.length, 1); assert.match(sent[0], /Bildschirmtext: 16 Zeichen/);
   b.deviceIn('s5', { screenText: 'newer' });
   assert.equal(sent.length, 1);
 });
@@ -275,11 +276,11 @@ it('voice session: the briefing is held until the vendor is ready, goes through 
   assert.equal(briefed.length, 0, 'held until ready');
   assert.ok(traced.some((e) => e.type === 'briefing.start'), 'collected, size traced');
   emit({ t: 'ready', model: 'm' });
-  assert.equal(briefed.length, 1); assert.match(briefed[0], /^\[Überblick vom Desk/);
+  assert.equal(briefed.length, 1); assert.match(briefed[0], /^\[Inhaltsverzeichnis vom Desk/);
   assert.deepEqual(screen, [], 'the screen channel is untouched');
   assert.ok(traced.some((e) => e.type === 'briefing.context'));
   b.deviceIn('sv', { screenText: 'Late device part' });
-  assert.equal(briefed.length, 2); assert.match(briefed[1], /Late device part/);
+  assert.equal(briefed.length, 2); assert.match(briefed[1], /Bildschirmtext: 16 Zeichen/);
   const state = b._states.get('sv');
   assert.equal(state.handles.size, 1);
   ws.emit('message', Buffer.from(JSON.stringify({ type: 'stop' })), false);

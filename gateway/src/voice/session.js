@@ -543,6 +543,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
         if (briefingHeld) { const how = adapter?.setBriefing?.(briefingHeld); briefingHeld = null; trace.event('briefing.context', { how: how ?? 'unsupported', late: true }); }
         break;
+      case 'context_trimmed': // an appended context text was over the provider budget and got shortened (a#41d6d2); the session goes on
+        trace.event('context.trimmed', { provider: e.provider ?? provider, kind: e.kind, from: e.from, to: e.to });
+        break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
         if (!dropAudio && ws.readyState === ws.OPEN) ws.send(e.pcm, { binary: true });
@@ -795,15 +798,18 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
 
   // a#41d6d2 (14 Nov): Florian's click on a handoff card is an HTTP call outside this socket; the live model never saw it fail and guessed the cause.
   // The note goes out as passive context (no reply asked) on the briefing channel, which nothing else updates after the start; the notes come first
-  // because Gemini cuts the channel at 6200 characters.
+  // because every channel cuts its text to a token budget from the end (fitContext).
   function contextNote(text) {
     const note = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
     if (!note || closed || !adapter) return false;
     handoffNotes.push(note);
     if (handoffNotes.length > 3) handoffNotes.shift();
     let how;
-    if (readyAt === null) { briefingHeld = withNotes(briefingText); how = 'held-until-ready'; }
-    else how = adapter.setBriefing?.(withNotes(briefingText)) ?? 'unsupported';
+    // OpenAI appends only grow and are capped at 500 tokens each: re-sending the briefing would double it in the history (and break the limit),
+    // so there the note goes alone, newest first (the fit drops the oldest). xAI replaces its briefing item and Gemini its held text: they get the notes plus the index.
+    const out = provider === 'openai' ? [...handoffNotes].reverse().map((n) => `Hinweis des Desks: ${n}`).join('\n') : withNotes(briefingText);
+    if (readyAt === null) { briefingHeld = withNotes(briefingText); how = 'held-until-ready'; } // nothing went out yet: the held index and the notes go together
+    else how = adapter.setBriefing?.(out) ?? 'unsupported';
     trace.event('handoff.note', { how, chars: note.length });
     return true;
   }
