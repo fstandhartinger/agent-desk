@@ -1329,6 +1329,9 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         if (listed.ok) { audit({ action: 'canvas.form', ip: ctx.ip, detail: `${normalized.spec.id}: linear flow -> points (render)` }); normalized = listed; }
       }
       if (readingLoad(normalized.spec)) { const trimmed = normalizeCanvas(trimLoad(normalized.spec)); if (trimmed.ok) normalized = trimmed; }
+      // live 14 Nov: the voice model draws its points before it speaks them; its cues are checked in the browser against the
+      // spoken text (a cue that never comes is skipped there), so a voice render with cues follows the speech too
+      if (by === 'voice' && normalized.spec.kind === 'points' && !normalized.spec.sync && normalized.spec.points.some((p) => p.cue)) normalized = { ...normalized, spec: { ...normalized.spec, sync: 'speech' } };
       normalized.spec.id = ownId(normalized.spec.id);
       if (auto && mismatch && normalized.spec.id === auto.id) normalized.spec.id = ownId(`${normalized.spec.id.slice(0, 44)}-2`);
       // Round 11 (critic r10 defect 2): invented names go back to the agent once with the list; the second time they are dropped
