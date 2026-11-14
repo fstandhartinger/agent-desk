@@ -52,7 +52,7 @@ export type VoiceServerMsg =
   | MainAgentPromptEvent
   | ActivityEvent
   | { type: 'viz'; spec: VizSpec }
-  | { type: 'usage'; seconds: number; costUsd: number }
+  | { type: 'usage'; seconds: number; costUsd: number; dayUsd?: number }
   | { type: 'error'; message: string; fallback?: string }
   | { type: 'session'; aid: string }
   | { type: 'notice'; code?: string; message: string }

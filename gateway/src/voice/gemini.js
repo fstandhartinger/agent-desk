@@ -3,6 +3,7 @@ import { cfg } from '../config.js';
 import { createWatchdog, openSocket, parseArgs } from './adapter.js';
 import { geminiDeclarations } from './schema.js';
 import { Resampler } from './resample.js';
+import { fitContext } from './toc.js';
 
 const BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 export const LANGUAGE_HINT = 'Antworte Florian auf Deutsch, in kurzen gesprochenen Sätzen, auch wenn dieses Ergebnis englische Wörter enthält.';
@@ -15,7 +16,7 @@ const SELF_INTERRUPT_MS = 2000;
 const NUDGE = '(Hinweis vom Desk, nicht von Florian: Du hast die Werkzeugergebnisse. Beantworte jetzt Florians letzte Frage kurz auf Deutsch, aus dem, was du gefunden hast.)';
 export const MODELS = { thinking: 'models/gemini-3.8-live-extended-thinking', fast: 'models/gemini-3.8-live' };
 
-export function setupMessage({ instructions, tools, voice, model = MODELS.thinking }) {
+export function setupMessage({ instructions, tools, voice, model = MODELS.thinking, vocabulary = [] }) {
   const generationConfig = { responseModalities: ['AUDIO'] };
   if (model === MODELS.thinking) generationConfig.thinkingConfig = { thinkingLevel: 'medium' };
   if (voice) generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } };
@@ -25,7 +26,8 @@ export function setupMessage({ instructions, tools, voice, model = MODELS.thinki
       generationConfig,
       systemInstruction: { parts: [{ text: instructions }] },
       tools: [{ functionDeclarations: geminiDeclarations(tools) }],
-      inputAudioTranscription: {},
+      // customVocabulary (ai.google.dev live API reference, read 14 Nov 2026): speech biasing on gemini-3.8-live, up to 1000 terms, best with <= 100; a#41d6d2
+      inputAudioTranscription: vocabulary.length ? { customVocabulary: vocabulary.slice(0, 100) } : {},
       outputAudioTranscription: {},
     },
   };
@@ -53,6 +55,7 @@ export function translate(msg, model = MODELS.thinking) {
 export function createGemini(opts, emit) {
   const model = opts.model ?? MODELS.thinking;
   const mic = new Resampler(24000, 16000);
+  const fit = (text, kind) => fitContext(text, { provider: 'gemini', kind, emit }); // held texts ride along with a tool result: same token budget as the other providers
   // NON_BLOCKING tools (canvas_draw) answer "when idle": the result never interrupts or stalls the model's speech.
   const nonBlocking = new Set((opts.tools ?? []).filter((t) => t.async).map((t) => t.name));
   // Round 10 (critic r9 F4): Gemini answered q3 in English after an English-keyed ledger result and gave no answer to q1
@@ -99,9 +102,9 @@ export function createGemini(opts, emit) {
      * and rides along with the next typed turn or tool result; a spoken question without tool call is answered from the start instructions
      * plus the explainer_context tool (the session's page follows the click).
      */
-    updatePage: (text) => { pagePending = text; return 'held'; },
-    setScreenContext: (text) => { screenPending = String(text).slice(0, 4000); return 'held'; },
-    setBriefing: (text) => { briefingPending = String(text).slice(0, 6200); return 'held'; },
+    updatePage: (text) => { pagePending = fit(text, 'page'); return 'held'; },
+    setScreenContext: (text) => { screenPending = fit(text, 'screen'); return 'held'; },
+    setBriefing: (text) => { briefingPending = fit(text, 'briefing'); return 'held'; },
     interrupt() { watchdog.clear(); }, // new input interrupts the model; the session drops stale audio itself
     /** The early illustrator's facts for the current question: handed over with the next tool result (a separate turn would interrupt). */
     addContext: (text, { exact = false } = {}) => {

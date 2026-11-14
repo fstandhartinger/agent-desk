@@ -34,11 +34,15 @@ function checkStartup() {
     const code = takeHashCode();
     const error = code ? await linkLogin(code) : null;
     if (code && !error) return { phase: 'desk' as const, error };
-    try {
-      await auth.me();
-      return { phase: 'desk' as const, error: null };
-    } catch {
-      return { phase: 'gate' as const, error };
+    // a 5xx is a server blip (registry restart, deploy), not a logout: try again before showing the gate (14 Nov 13:52Z)
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await auth.me();
+        return { phase: 'desk' as const, error: null };
+      } catch (e) {
+        if (e instanceof ApiError && e.status >= 500 && attempt < 4) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        return { phase: 'gate' as const, error: error ?? (e instanceof ApiError && e.status >= 500 ? { text: 'Der Desk ist gerade kurz nicht erreichbar. Bitte gleich noch einmal laden.' } : null) };
+      }
     }
   })();
   return startup;

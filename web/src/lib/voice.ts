@@ -2,6 +2,7 @@ import { companionMuted, nativeHost } from './companion';
 import { ACTIVITY_LINGER_MS, isActivity, nextActivity, type ActivityLine } from './liveActivity';
 import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
+import { SpeechOnset } from './speechOnset';
 import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { SpeechTracker } from './speechCursor';
@@ -30,12 +31,19 @@ export interface VoiceHandlers {
   onMainAgentPrompt?(p: MainAgentPromptEvent): void;
   onFallback(provider: string, message: string, muted: boolean): void;
   onError(message: string): void;
-  onUsage(seconds: number, costUsd: number): void;
+  onUsage(seconds: number, costUsd: number, dayUsd?: number): void;
+  /** His speech started: the gateway's `speech_started` or the local mic onset (a#41d6d2: the history showed nothing while he talked). */
+  onSpeechStart?(): void;
+  /** The mic is still voiced. */
+  onSpeechActive?(): void;
   onNotice?(message: string): void;
 }
 
+/** Last `usage` tick of the gateway (every 10 s): this session's cost (USD) and today's whole Desk spend. */
+export interface VoiceUsage { seconds: number; costUsd: number; dayUsd?: number }
+
 /** `option` is the user's picker choice and never changes by itself; `active` is the provider of the running session. */
-export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null; muted: boolean; aid: string | null; serverNotice: string | null; activity: ActivityLine | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null, muted: false, aid: null, serverNotice: null, activity: null });
+export const voiceStore = createStore<{ state: VoiceState; option: string; active: string; model: string | null; error: string | null; notice: string | null; muted: boolean; aid: string | null; serverNotice: string | null; activity: ActivityLine | null; readyAt: number | null; usage: VoiceUsage | null }>({ state: 'idle', option: 'xai', active: 'xai', model: null, error: null, notice: null, muted: false, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null });
 
 /** Mic/speaker RMS (0..1). Read at animation rate, never pushed through React state. */
 export const levels = { mic: 0, speaker: 0 };
@@ -56,6 +64,7 @@ export class VoiceSession {
   private ready = false;
   private closed = false;
   private decay = 0;
+  private onset = new SpeechOnset();
   private readyTimer = 0;
   private unwatchFocus: (() => void) | null = null;
   /** Where the spoken answer is (canvas reveal, see speechCursor.ts). */
@@ -78,7 +87,7 @@ export class VoiceSession {
   async start() {
     this.gate.reset();
     this.gate.muted = this.startMuted;
-    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null }));
+    voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null }));
     this.set('connecting', '');
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
@@ -111,6 +120,7 @@ export class VoiceSession {
     this.mic = new AudioWorkletNode(ctx, 'mic-capture', { processorOptions: { targetRate: 24000 } });
     this.mic.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
       levels.mic = this.gate.muted ? 0 : Math.min(1, e.data.rms * 4);
+      this.watchOnset();
       const ws = this.ws;
       this.gate.frame(e.data.pcm, !companionMuted() && this.ready && ws?.readyState === WebSocket.OPEN, (pcm) => ws!.send(pcm));
     };
@@ -172,6 +182,7 @@ export class VoiceSession {
       case 'ready':
         this.ready = true;
         this.cursor.start();
+        voiceStore.set((s) => ({ ...s, readyAt: Date.now() })); // the session timer in the dock runs from here, like the billing clock
         this.set('listening', m.model);
         if (this.gate.muted) this.sendJson({ type: 'mute', muted: true, source: 'dock' });
         break;
@@ -192,6 +203,7 @@ export class VoiceSession {
         break;
       }
       case 'speech_started':
+        this.h.onSpeechStart?.(); // the placeholder shows even when barge-in is blocked (muted: the controller ignores it)
         if (!this.gate.allowBargeIn()) break;
         this.player?.port.postMessage('flush');
         this.cursor.reset();
@@ -217,7 +229,8 @@ export class VoiceSession {
         this.h.onMainAgentPrompt?.(m);
         break;
       case 'usage':
-        this.h.onUsage(m.seconds, m.costUsd);
+        voiceStore.set((s) => ({ ...s, usage: { seconds: m.seconds, costUsd: m.costUsd, ...(typeof m.dayUsd === 'number' ? { dayUsd: m.dayUsd } : {}) } }));
+        this.h.onUsage(m.seconds, m.costUsd, m.dayUsd);
         break;
       case 'error':
         if (m.fallback) {
@@ -231,6 +244,18 @@ export class VoiceSession {
         this.onGone();
         break;
     }
+  }
+
+  /**
+   * Local speech onset from the mic level: the bubble "Du sprichst …" appears before the vendor's VAD answers (GPT-Live has no speech-start event).
+   * Not while the assistant's own voice plays (its echo is no speech of his), not muted, not before the session is ready.
+   */
+  private watchOnset() {
+    const st = voiceStore.get().state;
+    if (this.gate.muted || companionMuted() || !this.ready || st === 'speaking' || st === 'connecting') { this.onset.reset(); return; }
+    const o = this.onset.feed(levels.mic);
+    if (o === 'onset') this.h.onSpeechStart?.();
+    else if (o === 'active') this.h.onSpeechActive?.();
   }
 
   /** The newest activity line in the dock (finished ones fade after a few seconds) and the same event to the native host. */

@@ -1,6 +1,6 @@
 import { setClientErrorSink } from './clientError';
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, convStore, finish, setText, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
+import { addMessage, appendText, convStore, finish, removeMessage, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -27,26 +27,102 @@ pageStore.subscribe(() => {
 const open: { user: string | null; assistant: string | null } = { user: null, assistant: null };
 let lastUser: string | null = null; // the finished user message, so a grown fragment (`replace`) can overwrite it in place
 
+/** How long an empty "Du sprichst …" bubble waits after the last sign of speech before it disappears (noise, breath, a barge-in that came to nothing). */
+export const SPEAKING_TIMEOUT_MS = 5000;
+let speakTimer: ReturnType<typeof setTimeout> | undefined;
+
+const messageOf = (id: string | null) => (id ? convStore.get().messages.find((m) => m.id === id) : undefined);
+/** The open user bubble when it is only the "he is speaking" placeholder (no text yet). */
+const emptyPlaceholder = () => {
+  const m = messageOf(open.user);
+  return m && m.speaking && !textOf(m).trim() ? m : undefined;
+};
+
+function clearSpeakTimer() {
+  clearTimeout(speakTimer);
+  speakTimer = undefined;
+}
+
+/** Drops the open placeholder when it is still empty; a bubble that already shows partial text stays. */
+function dropPlaceholder() {
+  clearSpeakTimer();
+  const m = emptyPlaceholder();
+  if (!m) return;
+  removeMessage(m.id);
+  open.user = null;
+}
+
+function armSpeakTimer() {
+  clearSpeakTimer();
+  speakTimer = setTimeout(() => {
+    speakTimer = undefined;
+    if (emptyPlaceholder()) dropPlaceholder();
+    else if (open.user) setSpeaking(open.user, false); // partial text without a final: stop the pulse, keep the words
+  }, SPEAKING_TIMEOUT_MS);
+}
+
+/** His speech started (server `speech_started` or the local mic onset): a user bubble "Du sprichst …" at the end of the history. */
+export function voiceSpeechStarted() {
+  if (voiceStore.get().muted) return; // nothing he says is heard while muted
+  const id = open.user;
+  if (id && messageOf(id)) {
+    setSpeaking(id, true); // still the same utterance (partials arrived first, or a second signal): just keep it alive
+    armSpeakTimer();
+    return;
+  }
+  closeTurn('assistant'); // an answer that was still streaming ends here; its late deltas open a new message AFTER this bubble
+  open.user = addMessage('user', 'voice', '', { status: 'streaming', speaking: true });
+  armSpeakTimer();
+}
+
+/** The mic is still voiced (local level): the placeholder stays. Never opens a bubble by itself. */
+export function voiceSpeechActive() {
+  if (open.user && messageOf(open.user)?.speaking && !voiceStore.get().muted) armSpeakTimer();
+}
+
+// Mute closes an empty placeholder at once.
+let lastMuted = false;
+voiceStore.subscribe(() => {
+  const { muted } = voiceStore.get();
+  if (muted && !lastMuted) dropPlaceholder();
+  lastMuted = muted;
+});
+
 function closeTurn(role: 'user' | 'assistant') {
   const id = open[role];
-  if (id) finish(id);
+  if (id) {
+    const m = messageOf(id);
+    if (role === 'user' && m && !textOf(m).trim() && !m.parts.length) { removeMessage(id); clearSpeakTimer(); } // never leave an empty user message behind
+    else finish(id);
+  }
   open[role] = null;
 }
 
 export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed = false, replace = false) {
+  if (typed || (replace && role === 'user' && final)) dropPlaceholder(); // typed text is not his speech; a grown fragment belongs to the earlier bubble
   if (replace && role === 'user' && final && lastUser && convStore.get().messages.some((m) => m.id === lastUser)) {
     // the gateway merged a growing fragment into the previous turn: same message, whole sentence
     setText(lastUser, text);
     return;
   }
-  closeTurn(role === 'user' ? 'assistant' : 'user');
+  if (!(role === 'assistant' && emptyPlaceholder())) closeTurn(role === 'user' ? 'assistant' : 'user'); // the assistant's words go AFTER his empty bubble; it stays open for his transcript
   let id = open[role];
+  const shown = messageOf(id);
+  if (role === 'user' && final && !text.trim() && !(shown && textOf(shown).trim())) { // an empty transcript (noise): no bubble
+    if (id) { removeMessage(id); open.user = null; }
+    clearSpeakTimer();
+    return;
+  }
   if (!id) {
     if (!text.trim() && !final) return;
     id = open[role] = addMessage(role, typed ? 'typed' : 'voice', '', role === 'user' ? { status: 'streaming' } : {});
   }
   if (isDelta) appendText(id, text);
   else if (text) setText(id, text);
+  if (role === 'user') {
+    if (!final && text.trim()) { setSpeaking(id, true); armSpeakTimer(); } // live partial: the pulse stays until the final
+    else if (final) clearSpeakTimer();
+  }
   if (final) {
     if (role === 'user') lastUser = id;
     closeTurn(role);
@@ -72,6 +148,8 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
   logActivity('voice', 'Sprachsitzung startet', opt.label, 'violet');
   const s = new VoiceSession(opt, currentContext(), {
     onTranscript: receiveVoiceTranscript,
+    onSpeechStart: voiceSpeechStarted,
+    onSpeechActive: voiceSpeechActive,
     onTool(t) {
       let id = open.assistant;
       if (!id) id = open.assistant = addMessage('assistant', 'voice');
@@ -106,6 +184,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
       toast(`${opt.label} nicht verfügbar – wechsle zu ${next.label}.`, 'info');
       logActivity('voice', 'Fallback', `${opt.label} → ${next.label}: ${message}`, 'amber');
       session = null;
+      dropPlaceholder(); // the new provider has not heard what the old one was listening to
       begin(next, picked, wasMuted);
       voiceStore.set((s) => ({ ...s, notice: voiceUnavailableNotice(picked, next) }));
     },

@@ -1,11 +1,13 @@
 // xAI Grok Voice Agent API (wss://api.x.ai/v1/realtime), OpenAI-realtime-shaped. Docs: docs.x.ai voice agent.
 import { cfg } from '../config.js';
 import { createWatchdog, openSocket, toolsOf, parseArgs, ToolBatch } from './adapter.js';
+import { fitContext } from './toc.js';
 
 const URL = 'wss://api.x.ai/v1/realtime?model=grok-voice-3.0';
 const MODEL = 'grok-voice-3.0';
 
-export function sessionUpdate({ instructions, tools, voice = 'eve', lang = 'de' }) {
+// keyterms (docs.x.ai speech-to-speech, read 14 Nov 2026): session.audio.input.transcription.keyterms, max 100 terms of up to 50 characters; a#41d6d2 ("Abstimmung" for "Abstammung")
+export function sessionUpdate({ instructions, tools, voice = 'eve', lang = 'de', vocabulary = [] }) {
   return {
     type: 'session.update',
     session: {
@@ -14,7 +16,7 @@ export function sessionUpdate({ instructions, tools, voice = 'eve', lang = 'de' 
       turn_detection: { type: 'server_vad', ...(cfg.xaiSilenceMs() > 0 ? { silence_duration_ms: cfg.xaiSilenceMs() } : {}) },
       tools: toolsOf(tools).map((t) => ({ type: 'function', ...t })),
       audio: {
-        input: { format: { type: 'audio/pcm', rate: 24000 }, transcription: { language_hint: lang } },
+        input: { format: { type: 'audio/pcm', rate: 24000 }, transcription: { language_hint: lang, ...(vocabulary.length ? { keyterms: vocabulary.slice(0, 100).map((t) => String(t).slice(0, 50)) } : {}) } },
         output: { format: { type: 'audio/pcm', rate: 24000 } },
       },
     },
@@ -57,9 +59,11 @@ export function translate(msg, state = {}) {
 
 export function createXai(opts, emit) {
   const state = {};
+  const fit = (text, kind) => fitContext(text, { provider: 'xai', kind, emit }); // safety net; xAI documents no per-item limit
   let screenId = null, screenSeq = 0, briefId = null, briefSeq = 0;
   const output = (r) => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: r.id, output: r.output } });
-  const watchdog = createWatchdog(opts.watchdogMs ?? (() => cfg.voiceWatchdogMs()), (n) => { send({ type: 'response.create' }); emit({ t: 'watchdog', n }); });
+  let speaking = false; // Florian's speech is in progress (speech_started .. speech_stopped / its transcript): the watchdog must not nudge the model meanwhile (a#41d6d2)
+  const watchdog = createWatchdog(opts.watchdogMs ?? (() => cfg.voiceWatchdogMs()), (n) => { send({ type: 'response.create' }); emit({ t: 'watchdog', n }); }, { hold: () => speaking });
   const batch = new ToolBatch((results) => {
     results.forEach(output);
     send({ type: 'response.create' });
@@ -70,6 +74,8 @@ export function createXai(opts, emit) {
     emit,
     onOpen: () => send(sessionUpdate(opts)),
     onMessage: (msg, out) => {
+      if (msg.type === 'input_audio_buffer.speech_started') speaking = true;
+      else if (msg.type === 'input_audio_buffer.speech_stopped' || /^conversation\.item\.input_audio_transcription\.(?:completed|updated)$/.test(msg.type ?? '')) speaking = false;
       for (const e of translate(msg, state)) {
         if (e.t === 'tool_call') batch.call();
         if (e.t === 'turn_done') batch.responseDone();
@@ -100,7 +106,7 @@ export function createXai(opts, emit) {
     setScreenContext: (text) => {
       const prev = screenId;
       screenId = `screen_ctx_${++screenSeq}`;
-      send({ type: 'conversation.item.create', event_id: `screen-add-${screenSeq}`, item: { id: screenId, type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      send({ type: 'conversation.item.create', event_id: `screen-add-${screenSeq}`, item: { id: screenId, type: 'message', role: 'user', content: [{ type: 'input_text', text: fit(text, 'screen') }] } });
       if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-${screenSeq}`, item_id: prev });
       return 'sent';
     },
@@ -108,7 +114,7 @@ export function createXai(opts, emit) {
     setBriefing: (text) => {
       const prev = briefId;
       briefId = `briefing_ctx_${++briefSeq}`;
-      send({ type: 'conversation.item.create', event_id: `screen-brief-${briefSeq}`, item: { id: briefId, type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+      send({ type: 'conversation.item.create', event_id: `screen-brief-${briefSeq}`, item: { id: briefId, type: 'message', role: 'user', content: [{ type: 'input_text', text: fit(text, 'briefing') }] } });
       if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-brief-${briefSeq}`, item_id: prev });
       return 'sent';
     },

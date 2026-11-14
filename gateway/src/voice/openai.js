@@ -2,6 +2,7 @@
 // Docs: developers.openai.com voice-websockets?api=live, live-delegation.
 import { cfg } from '../config.js';
 import { createWatchdog, openSocket, toolsOf, parseArgs, ToolBatch, unavailableError } from './adapter.js';
+import { fitContext } from './toc.js';
 
 const URL = 'wss://api.openai.com/v1/live/sessions';
 const MODEL = 'gpt-live-1';
@@ -16,6 +17,7 @@ export function delegateConfig(model = cfg.openaiDelegateModel(), effort = cfg.o
   return { model, reasoning: { effort: safe } };
 }
 
+// No input-transcription hint here: gpt-live-1's session.start has none (developers.openai.com live docs, read 14 Nov 2026); the vocabulary reaches it as the "Wortliste" in the instructions only.
 export function sessionStart({ instructions, tools, voice = 'marin', delegate = delegateConfig() }) {
   return {
     type: 'session.start',
@@ -113,6 +115,8 @@ function translateBackend(ev, state) {
 export function createOpenAI(opts, emit) {
   const state = {};
   endTypedTurn(state);
+  // every appended context text stays under the documented 500 tokens per append (a#41d6d2: the 6000-character briefing closed the session after 0 s); a trim is traced, never fatal
+  const fit = (text, kind) => fitContext(text, { provider: 'openai', kind, emit });
   let context = null; // the early illustrator's facts for the current question, handed over with the next tool output
   let screenSeq = 0;
   let handed = false; // they went out with a tool output already (this question)
@@ -161,13 +165,13 @@ export function createOpenAI(opts, emit) {
     addContext: (text, { final = false } = {}) => { if (final && handed) return; context = String(text ?? '').slice(0, 6000) || null; }, // round 12: the early run's later facts only while none went out
     newTurn: () => { context = null; handed = false; },
     /** Florian clicked another element: appended to the live model's instructions (documented `session.instructions.append`; delegation_id null like interrupt()). */
-    updatePage: (text) => { send({ type: 'session.instructions.append', delegation_id: null, content: text }); return 'sent'; },
+    updatePage: (text) => { send({ type: 'session.instructions.append', delegation_id: null, content: fit(text, 'page') }); return 'sent'; },
     // The Live API has no response.cancel (live-verified 24 Oct: "Supported values are ..."), and barge-in leaves the backend running (docs: live-delegation).
     // So: steer the live model to the new question; the session marks the old chain's tool results stale, which ends the chain.
     /** Passive screen description: instructions.append (the only context channel without a reply; no response.create). It only grows, so the session rate-limits it. */
-    setScreenContext: (text) => { send({ type: 'session.instructions.append', event_id: `screen-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
-    /** Start briefing: instructions.append like the screen context (only grows: the briefing goes out once, plus one update when the device part is late). */
-    setBriefing: (text) => { send({ type: 'session.instructions.append', event_id: `screen-brief-${++screenSeq}`, delegation_id: null, content: text }); return 'sent'; },
+    setScreenContext: (text) => { send({ type: 'session.instructions.append', event_id: `screen-${++screenSeq}`, delegation_id: null, content: fit(text, 'screen') }); return 'sent'; },
+    /** Start briefing (a table of contents, <= 400 tokens): instructions.append like the screen context (only grows: it goes out once, plus one update when the device part is late; appends persist in the history). */
+    setBriefing: (text) => { send({ type: 'session.instructions.append', event_id: `screen-brief-${++screenSeq}`, delegation_id: null, content: fit(text, 'briefing') }); return 'sent'; },
     interrupt: () => { watchdog.clear(); send({ type: 'session.instructions.append', delegation_id: null, content: 'Florian hat gerade eine neue Frage gestellt. Die Frage davor ist abgebrochen: antworte nur auf die neueste Frage und recherchiere dafür neu.' }); },
     sendToolResult: (id, _name, output, opts) => {
       let out = output;

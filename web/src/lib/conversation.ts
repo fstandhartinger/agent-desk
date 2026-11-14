@@ -26,6 +26,8 @@ export interface Msg {
   context?: string;
   /** Transient progress line from the server ("Ich schaue kurz in die Jobs …") while nothing else streams. */
   statusText?: string;
+  /** User bubble while he is talking and the transcript is not final yet (a#41d6d2, 14 Nov): empty = "Du sprichst …", with text = live partial. */
+  speaking?: boolean;
 }
 export interface Conversation { id: string; messages: Msg[] }
 
@@ -44,9 +46,10 @@ const initial = (): Conversation => ({ id: uid('c_'), messages: [] });
 // A reload interrupts any stream; never resurrect a spinner.
 const settle = (c: Conversation): Conversation => ({
   ...c,
-  messages: c.messages.map((m) => {
+  // an empty "he is speaking" bubble that was saved mid-sentence is no message
+  messages: c.messages.filter((m) => !(m.speaking && !textOf(m).trim())).map((m) => {
     const parts = m.parts.map((p) => ((p.kind === 'handoff' || p.kind === 'claude') && p.card.state === 'sending' ? { ...p, card: { ...p.card, state: 'pending' as const } } : p)) as Part[];
-    return m.status === 'streaming' ? { ...m, parts, status: 'stopped' as const } : { ...m, parts };
+    return m.status === 'streaming' ? { ...m, parts, speaking: undefined, status: 'stopped' as const } : { ...m, parts, speaking: undefined };
   }),
 });
 
@@ -195,6 +198,11 @@ export function appendText(id: string, text: string) {
   });
 }
 
+export const setSpeaking = (id: string, speaking: boolean) => patch(id, (m) => (Boolean(m.speaking) === speaking ? m : { ...m, speaking: speaking || undefined }));
+
+/** Removes one message (an empty "speaking" placeholder that never got a transcript). */
+export const removeMessage = (id: string) => convStore.set((c) => ({ ...c, messages: c.messages.filter((m) => m.id !== id) }));
+
 export const setStatusText = (id: string, statusText: string) => patch(id, (m) => ({ ...m, statusText: statusText || undefined }));
 
 export const setAid = (id: string, aid: string) => patch(id, (m) => ({ ...m, aid }));
@@ -281,7 +289,7 @@ export function finish(id: string, extra: Partial<Msg> = {}) {
     convStore.set((c) => ({ ...c, messages: c.messages.filter((m) => m.id !== id) }));
     return;
   }
-  patch(id, (m) => ({ ...m, status: m.status === 'streaming' ? 'done' : m.status, statusText: undefined, ...extra }));
+  patch(id, (m) => ({ ...m, status: m.status === 'streaming' ? 'done' : m.status, statusText: undefined, speaking: undefined, ...extra }));
 }
 
 export const fail = (id: string, error: string) => patch(id, (m) => ({ ...m, status: 'error', error, statusText: undefined }));

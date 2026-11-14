@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runVoiceSession, HARD_CAP_MS, USAGE_TICK_MS } from '../src/voice/session.js';
 
-function harness(t, { limit = { ok: true }, runTool } = {}) {
+function harness(t, { limit = { ok: true }, runTool, costToday } = {}) {
   const ws = new EventEmitter();
   ws.OPEN = 1; ws.CONNECTING = 0; ws.readyState = 1;
   ws.sent = [];
@@ -24,7 +24,7 @@ function harness(t, { limit = { ok: true }, runTool } = {}) {
   const noted = [];
   const deps = {
     sid: 's1', toolDefs: [], audit: (e) => audits.push(e), makeCtx: (p) => ({ page: p }),
-    limits: { check: () => limit, addCost: (c) => costs.push(c) },
+    limits: { check: () => limit, addCost: (c) => costs.push(c), ...(costToday ? { costToday } : {}) },
     createViz: () => ({ noteTurn: (t) => noted.push(t), noteEvent: (e) => noted.push(e), close() {} }),
     runTool: runTool ?? (async () => ({ summary: 's', content: 'x'.repeat(5000) })),
   };
@@ -101,6 +101,23 @@ test('usage ticks every 10 s add cost; 30 min hard cap closes the session', (t) 
   t.mock.timers.tick(HARD_CAP_MS);
   assert.ok(h.ws.sent.some((m) => m.type === 'error' && /30 Minuten/.test(m.message)));
   assert.equal(types(h).at(-1), 'closed');
+});
+
+test('usage message carries the day total of the Desk in cents (dayUsd), and stays valid without a ledger', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  const h = harness(t, { costToday: () => 1.5749 });
+  h.msg({ type: 'start' });
+  h.emit({ t: 'ready', model: 'm' });
+  t.mock.timers.tick(USAGE_TICK_MS);
+  const u = h.ws.sent.find((m) => m.type === 'usage');
+  assert.equal(u.dayUsd, 1.57);
+  assert.equal(u.seconds, 10);
+  assert.ok(u.costUsd > 0);
+  const bare = harness(t); // no costToday: no dayUsd, the browser just hides the day total
+  bare.msg({ type: 'start' });
+  bare.emit({ t: 'ready', model: 'm' });
+  t.mock.timers.tick(USAGE_TICK_MS);
+  assert.equal('dayUsd' in bare.ws.sent.find((m) => m.type === 'usage'), false);
 });
 
 test('a session that never reaches ready is not billed (failed vendor connect costs nothing)', (t) => {

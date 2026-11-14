@@ -505,8 +505,15 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       const gate = limits.captionCheck(deviceId);
       if (!gate.ok) throw Object.assign(deviceError('Untertitel-Budget erreicht.', 429), { code: 'caption-budget', retryAfter: gate.retryAfter });
       const data = JSON.stringify({ glossar, woerterbuch: terms, text: input }).replaceAll('<', '\\u003c');
-      const out = await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(timeoutMs ?? 2500), { system: LIVE_PROMPT, maxTokens: 900, free: true })
-        .catch(err => { throw Object.assign(deviceError('Nachbearbeitung nicht erreichbar.', 503), { code: 'polish-down', reason: reasonOf(err) }); });
+      // a#41d6d2 / 14 Nov 2026: one 2.5 s call to a single OpenRouter model (DESK_DICTATE_MERGE_MODEL, default openai/gpt-oss-120b:nitro; free:true = off the
+      // spend cap), no fallback, and a late answer was a 503 polish-down (reason timeout, 2504 ms). The subtitle is only a nicety: the raw text goes back with 200,
+      // failed:1 and a note, like a failed window of "final" mode. (A 429 caption budget and a missing key stay errors: those are not "slow".)
+      let out;
+      try { out = await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(timeoutMs ?? 2500), { system: LIVE_PROMPT, maxTokens: 900, free: true }); }
+      catch (err) {
+        const reason = reasonOf(err);
+        return { text: input, ms: Date.now() - started, windows: 1, changed: 0, failed: 1, reason, note: reason === 'timeout' ? 'Nachbearbeitung zu langsam – Rohtext' : 'Nachbearbeitung nicht erreichbar – Rohtext' };
+      }
       limits.captionAdd(deviceId, 0.0005);
       const ok = keptWords(input, out);
       return { text: ok ? applyCorrections(clean(out), dictionary) : input, ms: Date.now() - started, windows: 1, changed: ok && clean(out) !== input ? 1 : 0, failed: ok ? 0 : 1 };

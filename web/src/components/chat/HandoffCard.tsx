@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Bot, Check, ChevronDown, Loader2, X } from 'lucide-react';
 import type { HandoffCard as Card } from '../../lib/conversation';
-import { discardHandoff, handedOverLabel, submitHandoff } from '../../lib/handoff';
+import { discardHandoff, fallbackNote, handedOverLabel, submitHandoff } from '../../lib/handoff';
 
 const LONG = 240;
 
@@ -11,6 +11,8 @@ export default function HandoffCard({ card }: { card: Card }) {
   const long = card.task.length > LONG || card.task.includes('\n');
   const busy = card.state === 'sending';
   const settled = card.state === 'done' || card.state === 'discarded';
+  const retryable = card.retry !== false; // a#41d6d2: the gateway says when another click cannot help (unclear whether it arrived, invalid task)
+  const where = fallbackNote(card.where);
   return (
     <section aria-label="Übergabe an einen Agenten" data-testid="handoff-card" data-state={card.state}
       className={`my-3 animate-rise rounded-2xl border px-4 py-3.5 ${card.state === 'done' ? 'border-moss/30 bg-moss/[0.06]' : card.state === 'discarded' ? 'border-white/[0.06] bg-white/[0.02] opacity-70' : 'border-papaya/30 bg-papaya/[0.06]'}`}>
@@ -31,14 +33,21 @@ export default function HandoffCard({ card }: { card: Card }) {
         </>
       )}
       {card.state === 'error' && card.error && <p role="alert" className="mt-2 text-[13px] text-red-300">{card.error}</p>}
-      {card.state === 'done' && <p role="status" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-moss"><Check className="h-4 w-4" />{handedOverLabel(card.entryId)}</p>}
+      {card.state === 'done' && (
+        <p role="status" data-testid="handoff-done" className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] font-medium text-moss">
+          <Check className="h-4 w-4" />{handedOverLabel(card.entryId)}
+          {where && <span data-testid="handoff-where" className="font-normal text-dim">– {where}</span>}
+        </p>
+      )}
       {!settled && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" disabled={busy} onClick={() => void submitHandoff(card.id)}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-papaya px-4 text-[13px] font-semibold text-ink-900 transition-[filter,transform] hover:brightness-110 active:scale-[0.97] disabled:opacity-60">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-            {card.state === 'error' ? 'Erneut übergeben' : 'An Agenten übergeben'}
-          </button>
+          {(retryable || card.state !== 'error') && (
+            <button type="button" disabled={busy} onClick={() => void submitHandoff(card.id)}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-papaya px-4 text-[13px] font-semibold text-ink-900 transition-[filter,transform] hover:brightness-110 active:scale-[0.97] disabled:opacity-60">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+              {card.state === 'error' ? 'Erneut übergeben' : 'An Agenten übergeben'}
+            </button>
+          )}
           <button type="button" disabled={busy} onClick={() => void discardHandoff(card.id)}
             className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-dim transition-colors hover:bg-white/[0.06] hover:text-fg disabled:opacity-60">
             <X className="h-4 w-4" /> Verwerfen
