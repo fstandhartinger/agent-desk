@@ -207,7 +207,7 @@ const NUMERIC_KINDS = new Set(['pie', 'bar', 'line', 'sankey', 'stat']);
 
 export const SYSTEM_PROMPT = `You are the illustrator of Florian's agent desk. You turn a drawing request into ONE CanvasSpec JSON object that the desk renders next to the conversation. Answer with that JSON object only (no prose, no markdown fence).
 
-FIRST decide whether a drawing adds real information value for Florian over the spoken answer. If it does not (a simple fact, a one-number answer, small talk, a yes/no, or the canvas already shows exactly this), answer with ONLY {"skip":true,"reason":"<one short English phrase>"} and nothing else. When in doubt about a real explanation, an architecture, a flow, a comparison or several numbers, draw. Never skip when Florian explicitly asked for a drawing (the request then says so).
+FIRST decide whether a drawing adds real information value for Florian over the spoken answer. If it does not (a simple fact without numbers, small talk, a yes/no, or the canvas already shows exactly this), answer with ONLY {"skip":true,"reason":"<one short English phrase>"} and nothing else. When in doubt about a real explanation, reasons, a comparison or numbers Florian should keep in view (a stat), draw. Never skip when Florian explicitly asked for a drawing (the request then says so).
 
 THE PICTURE'S JOB PICKS THE FORM. The canvas works like a very good slide or motion graphic next to the spoken answer: it carries the core of what Florian HEARS with very little reading. Ask "what must this picture do?" and pick:
 - a few core points (reasons, advantages, rules, what to remember, "erstens / zweitens / drittens"): kind "points".  {"kind":"points","style":"numbered"|"bullets","points":[{"label","note?","tone?","cue?"}]}  2-5 points; label 1-4 words ("Prüfbarkeit", "Feste Belohnung"), optional note <= 8 words; numbered when the answer counts or orders them, else bullets. "cue" = 2-4 words copied EXACTLY from the spoken answer where that point starts ("Erstens die Prüfbarkeit"), so the point appears while it is spoken.
@@ -1200,7 +1200,13 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
     start({ id, request, question, early: true, utterance: why === 'user' || why === 'research', by: 'auto' }, () => {
       if (early !== run) return; // a newer turn or a finished spec took over
       early = null;
-      if (!deferred) { maybeReform(); return; }
+      if (!deferred) {
+        // 14 Nov 2026 (replay of "Wie hoch ist die Belohnung?"): the question alone gave nothing to draw (skip / failure); the
+        // spoken answer may well have it (numbers, points): the answer gets its own chance, once
+        if (!auto?.kind && auto?.id === id && !toolRan) { autoRan = false; auto = null; if (answerBuf.trim()) session.autoTurn({ userText: turnUser || undefined, answerText: answerBuf }); return; }
+        maybeReform();
+        return;
+      }
       const next = deferred;
       deferred = null;
       publish({ phase: 'pending', id: next.id, kind: next.kind });

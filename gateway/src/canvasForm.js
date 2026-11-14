@@ -77,7 +77,7 @@ export function numberFacts(text, { max = 8 } = {}) {
     const after = pcts.length === 1 ? [...s.slice(s.search(PCT_RE)).matchAll(/(?:,|und)\s*(\d+(?:[.,]\d+)?)\s+(?:an|für|bekomm|erhält|geh)/gi)].map((m) => num(m[1])) : [];
     const parts = [...pcts, ...after];
     const sum = Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
-    if (parts.length >= 2 && sum < 100 && sum > 0) line += ` [Desk gerechnet: Summe ${sum} %, Rest bis 100 %: ${Math.round((100 - sum) * 100) / 100} %]`;
+    if (parts.length >= 2 && sum < 100 && sum > 0) line += ` [Desk gerechnet: Summe ${sum} %, Rest bis 100 %: ${Math.round((100 - sum) * 100) / 100} % - als "Rest offen" zeigen, außer das Gespräch sagt, wer ihn bekommt]`;
     else if (parts.length >= 2 && Math.abs(sum - 100) < 0.01) line += ' [Desk gerechnet: Summe 100 %]';
     lines.push(line);
     if (lines.length >= max) break;

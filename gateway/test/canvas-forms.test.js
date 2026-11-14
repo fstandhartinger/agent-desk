@@ -239,9 +239,10 @@ describe('illustrator: form + load gates on the real turns', () => {
 
 // ------------------------------------------------------------------------------------------------ the session: when the picture is drawn
 describe('session: reasons wait for the answer; an early drawing is reformed once', () => {
-  let bus; let jobs;
-  const illustrator = () => ({ draw: async (job) => { jobs.push(job); return { ok: true }; }, cancel() {} });
-  beforeEach(() => { bus = createCanvasBus(); jobs = []; });
+  let bus; let jobs; let drawKind;
+  // the fake illustrator publishes what the early run "drew" (null = it skipped), like the real one before its run ends
+  const illustrator = () => ({ draw: async (job) => { jobs.push(job); if (drawKind && job.id) job.publish({ phase: 'ready', id: job.id, kind: drawKind, title: 'Belohnung', by: 'auto', spec: { v: 2, id: job.id, kind: drawKind, title: 'Belohnung', sources: SRC } }); return { ok: true }; }, cancel() {} });
+  beforeEach(() => { bus = createCanvasBus(); jobs = []; drawKind = null; });
   const session = () => createCanvasSession({ bus, illustrator: illustrator(), by: 'voice', provider: 'xai', emit: () => {}, ctx: {}, audit: () => {}, debounceMs: () => 10, researchMs: () => 5000 });
 
   it('"Wieso wollen wir das so tun?" draws nothing from the question; the answer starts the drawing', async () => {
@@ -261,11 +262,11 @@ describe('session: reasons wait for the answer; an early drawing is reformed onc
 
   it('a data question still draws early; when the answer splits in percent and the drawing is a flow, it is redrawn once', async () => {
     const s = session();
+    drawKind = 'flow';
     s.startTurn(); s.noteTurn({ role: 'user', text: CHAMPION.question });
     assert.equal(s.userTurn(CHAMPION.question), 'early');
     await s.idle();
     const id = jobs[0].id;
-    s.publish({ phase: 'ready', id, kind: 'flow', title: 'Belohnung', by: 'auto', spec: { v: 2, id, kind: 'flow', title: 'Belohnung', nodes: [], edges: [], sources: SRC } });
     s.noteTurn({ role: 'assistant', text: EMISSIONS.answer });
     assert.equal(s.autoTurn({ answerText: EMISSIONS.answer }), 'reform');
     await s.idle();
@@ -277,12 +278,24 @@ describe('session: reasons wait for the answer; an early drawing is reformed onc
 
   it('an early drawing that already has the answer\'s form is not redrawn', async () => {
     const s = session();
+    drawKind = 'bar';
     s.startTurn(); s.noteTurn({ role: 'user', text: CHAMPION.question });
     s.userTurn(CHAMPION.question);
     await s.idle();
-    const id = jobs[0].id;
-    s.publish({ phase: 'ready', id, kind: 'bar', title: 'Belohnung', by: 'auto', spec: { v: 2, id, kind: 'bar', title: 'Belohnung', items: [], sources: SRC } });
     s.noteTurn({ role: 'assistant', text: EMISSIONS.answer });
     assert.equal(s.autoTurn({ answerText: EMISSIONS.answer }), 'skipped');
+  });
+
+  it('the early run found nothing to draw from the question: the spoken answer gets its own chance (once)', async () => {
+    drawKind = null; // the early run skipped ("single reward figure")
+    const s = session();
+    s.startTurn(); s.noteTurn({ role: 'user', text: CHAMPION.question });
+    assert.equal(s.userTurn(CHAMPION.question), 'early');
+    await s.idle();
+    s.noteTurn({ role: 'assistant', text: CHAMPION.answer });
+    assert.equal(s.autoTurn({ answerText: CHAMPION.answer }), 'scheduled');
+    await s.idle();
+    assert.equal(jobs.length, 2);
+    assert.equal(jobs[1].request, 'Illustriere die letzte Antwort');
   });
 });
