@@ -7,6 +7,7 @@ import type { ActivityLine } from '../../lib/liveActivity';
 import { dismissVoiceError, interruptVoice, startVoice, stopVoice, toggleVoiceMuted } from '../../lib/voiceController';
 import LiveOrb from './LiveOrb';
 import SessionBadge from './SessionBadge';
+import SessionMeter from './SessionMeter';
 
 export const STATE_LABEL: Record<VoiceState, string> = {
   idle: 'Bereit',
@@ -41,7 +42,10 @@ export default function VoiceDock() {
     <div className="mx-3 mb-2 mt-3 animate-rise lg:mx-5">
       <div className={`mx-auto max-w-[760px] rounded-3xl border ${failed || mute ? 'border-danger/40 bg-gradient-to-r from-danger/[0.14] via-ink-800/80 to-ink-800/60' : 'border-violet/25 bg-gradient-to-r from-violet/[0.12] via-ink-800/80 to-ink-800/60 shadow-[0_20px_50px_-24px_rgb(139_92_246/0.6)]'}`}>
         <div className="relative flex items-center gap-3 p-3">
-          <SessionBadge className="absolute right-4 top-0.5" />
+          <div className="absolute right-4 top-0.5 flex items-center gap-2">
+            {!failed && <SessionMeter />}
+            <SessionBadge />
+          </div>
           <div className={`shrink-0 ${failed ? 'self-start' : ''}`}>
             <LiveOrb size={desktop ? 88 : 72} provider={opt.provider} />
           </div>

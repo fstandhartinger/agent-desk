@@ -1,0 +1,13 @@
+[Unit]
+Description=Agent Desk handoff self-check (thread active + pinned, bridge up, no failed handoff posts; heals the thread)
+After=network-online.target agent-desk-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Exit 1 = a problem remains (one finding went to the board, at most once per 24 h), 2 = the check itself broke: both show as failed in `systemctl --user --failed`.
+ExecStart=/usr/bin/node %h/apps/agent-desk-bridge-sandy/ops/handoff-selfcheck.mjs
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
+TimeoutStartSec=2min
+NoNewPrivileges=yes

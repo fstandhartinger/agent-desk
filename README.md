@@ -140,7 +140,8 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
   (`{"absatz":[..],"zeile":[..]}`); the gateway puts `\n\n` before a new topic or request and `\n` before a new thought or list item, never
   markup, and only where the cleaned text ends a sentence. Short texts (under 45 words or three sentences) stay one block. `format` mode is that
   alone (a dictation of one chunk). `live`: the subtitle so far, one call. Returns `{text,ms,windows,changed,failed,undone,breaks}`; a late or failed
-  model leaves the text as it came.
+  model leaves the text as it came. `live` never answers 503 for a slow or unreachable model any more (14 Nov 2026): 200 with the raw text,
+  `failed:1`, `reason` (`timeout`|`upstream`|`error`) and `note` ("Nachbearbeitung zu langsam – Rohtext"); only a missing key (503 `no-key`) and the caption budget (429) stay errors.
   Replay recordings through all of this before shipping a change: `node gateway/scripts/dictation-replay.mjs` (recordings are private, never commit them).
 - `POST /api/device/caption` (scope `dictate`): live caption, MAI only. Multipart `audio` (PCM16 16 kHz mono, raw samples or a WAV, 0.1 to 12 s),
   optional `context` JSON `{visibleIds,recentTerms}` (phrases: dictionary + titles of the visible ids + recent terms, titles cached 5 min per device).

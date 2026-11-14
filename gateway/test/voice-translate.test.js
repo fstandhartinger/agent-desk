@@ -34,11 +34,11 @@ test('gemini: interrupted maps to speech_started; setup uses thinking only for t
   assert.equal(ext.tools[0].functionDeclarations[0].name, 'job_status');
 });
 
-test('openai: session.start carries gpt-live-1 + the configured fast delegate (r10 default gpt-6.1-sol / low) with function tools', () => {
+test('openai: session.start carries gpt-live-1 + the configured fast delegate (14 Nov default gpt-6-astra / low) with function tools', () => {
   const s = sessionStart({ instructions: 'x', tools }).session;
   assert.equal(s.model, 'gpt-live-1');
   assert.deepEqual(s.delegation.responses.reasoning, { effort: 'low' });
-  assert.equal(s.delegation.responses.model, 'gpt-6.1-sol');
+  assert.equal(s.delegation.responses.model, 'gpt-6-astra');
   assert.equal(s.delegation.responses.tools[0].type, 'function');
 });
 

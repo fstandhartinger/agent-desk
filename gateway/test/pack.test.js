@@ -227,7 +227,7 @@ describe('no leaking to the browser', () => {
   });
   it('only the model-facing modules mention the deep-dive or the context token', () => {
     const src = path.resolve(import.meta.dirname, '../src');
-    const allowed = new Set(['pack.js', 'page.js', 'explainer.js', 'config.js', 'tools.js', 'prompt.js', 'vizFacts.js']);
+    const allowed = new Set(['pack.js', 'page.js', 'explainer.js', 'config.js', 'tools.js', 'prompt.js', 'vizFacts.js', 'vocabulary.js']); // vocabulary.js: page words for the voice recogniser hints
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
     for (const file of walk(src).filter((f) => f.endsWith('.js'))) {
       const body = fs.readFileSync(file, 'utf8');

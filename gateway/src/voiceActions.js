@@ -112,14 +112,52 @@ export const hasTrigger = (name, spoken, now) => checkTrigger(name, spoken, now)
 // The hard words come first and stay instant. Only these refusals ask the model; 'used' (a word opens one action) never does.
 const SOFT = new Set(['no-trigger', 'means-main-agent', 'question']);
 const classifierOf = (ctx) => (ctx.askIntent ? (text) => classifyIntent(text, { ask: ctx.askIntent }) : intentEnabled() ? classifyIntent : null);
-/** {hard, entries, text} when the hard rule refused softly and the window holds his words to judge, else {hard}. */
+
+// a#41d6d2 (14 Nov, Grok Voice): "Soll ich einen Agenten im Hintergrund die Regelwerks-Änderung für dich starten?" - "Ja." was refused twice, because the job judge
+// never saw the question. It sees it now, but only when the QUESTION ITSELF offers to start a background agent/job (hard words below, checked before any model call):
+// "Soll ich das genauer aufschlüsseln?" and every other offer never opens a job. The judge still has to say yes after that.
+const OFFER_FRAME = /\b(?:soll|sollen|darf|kann|möchtest|möchten|willst|wollen|shall|should|can i|may i|want me|would you like|do you want)\b/i; // asks permission / offers
+const OFFER_WHAT = new RegExp(`\\b(?:agent\\w*|jobs?|hintergrund\\w*|werkstatt|${CODE}|codex|background|worker\\w*)\\b`, 'i'); // not the bare server names: "Soll ich Sandy neu starten?" is no job
+const OFFER_DO = /\b(?:start\w*|los(?:schick|leg|setz|lass)\w*|schick\w*|ansetz\w*|anleg\w*|aufsetz\w*|draufsetz\w*|beauftrag\w*|auslös\w*|ausführ\w*|erledig\w*|übernehm\w*|lass(?:en|e)|launch\w*|spin\w*|kick\w*|run)\b/i;
+const OFFER_NOT = /\b(?:erklär\w*|erzähl\w*|aufschlüssel\w*|vorles\w*|zeig\w*|übergab\w*|übergeb\w*|karte\w*|vorschlag\w*|vorschläg\w*|handoff|card|show|explain|tell|how|why|what|which|wie|warum|wieso|was|wann|welche\w*|nicht|kein\w*|nie|niemals|ohne|not|never|without|oder|or|stoppen|abbrech\w*|beend\w*|stop|cancel)\b/i; // an explanation, a card, a negation or a choice is no offer he could accept with a yes
+/** Does the assistant's closing question explicitly offer to start a background agent/job? Hard words only; "Soll ich dafür einen Agent Job im Hintergrund starten?" yes, "Soll ich das aufschlüsseln?" no. */
+export const offersJob = (q) => { const t = String(q ?? ''); return t.length <= 300 && OFFER_FRAME.test(t) && OFFER_WHAT.test(t) && OFFER_DO.test(t) && !OFFER_NOT.test(t) && !MAIN_TRIGGER.test(t); };
+// the bare yes that accepts such an offer: no negation hiding behind "starte nichts" (YES also matches "start" + any word)
+const YES_NOT = /\b(?:nicht\w*|nichts|kein\w*|nein|nee|nie|niemals|ohne|noch\s+nicht|warte\w*|stopp?\w*|später|lass\s+mal|no|not|never|wait|stop)\b/i;
+const acceptsOffer = (q, yes) => offersJob(q) && !YES_NOT.test(yes);
+
+// a#41d6d2: "Ja, dann soll er das tun." only orders something after "Kann der Desk keine Agenten starten?" and the order before it. Short latest words get up to
+// CONTEXT_ENTRIES earlier answered sentences of his (and the closing sentence of each reply) as labelled context. Still fail closed, and only while HE said a job word
+// himself in one of those earlier sentences (not just in a question about the product): the assistant's words alone can never make the context count.
+const CONTEXT_ENTRIES = 2;
+const SHORT_WORDS = 12;
+const JOB_WORD = new RegExp(`\\b(?:agent\\w*|jobs?|hintergrund\\w*|werkstatt|${SERVER}|${CODE}|codex)\\b`, 'i'); // not "Session"/"Server": that may as well be the Main Agent or a status question
+const isShort = (t) => String(t ?? '').length <= 120 && norm(t).split(' ').filter(Boolean).length <= SHORT_WORDS;
+/** His earlier, still usable sentences right before the window (oldest first), only when his latest words are short and one of those earlier sentences has a job word of HIS (not an ABOUT question). */
+export function contextBefore(name, spoken, entries, now = Date.now()) {
+  const last = entries.at(-1);
+  if (name !== 'start_agent_job' || !last || !isShort(last.text)) return [];
+  const before = [];
+  for (let i = spoken.length - entries.length - 1; i >= 0 && before.length < CONTEXT_ENTRIES; i -= 1) {
+    if (!usable(spoken[i], name, now)) break;
+    before.unshift(spoken[i]);
+  }
+  // the context is only worth showing when the referent is in HIS earlier words: a latest line that names the job itself is judged alone, as before
+  return before.some((e) => JOB_WORD.test(String(e.text ?? '')) && !ABOUT.test(String(e.text ?? ''))) ? before : [];
+}
+
+/** {hard, entries, text, via} when the hard rule refused softly and the window holds his words to judge, else {hard}. via: 'offer' (the question was shown) | 'context'. */
 function intentCase(name, spoken, now) {
   const hard = checkTrigger(name, spoken, now);
   if (hard.ok || !SOFT.has(hard.why) || !INTENT_KEY[name]) return { hard };
   const entries = triggerWindow(name, spoken, now);
-  // the assistant's question as context for a bare "ja" only where nothing runs unseen: the Main-Agent prompt is typed, not sent. A job needs his own words (critic SHOULD 3).
-  const text = entries.length ? intentText(entries, (t) => YES.test(t), { withQuestion: name === 'output_main_agent_prompt' }) : '';
-  return text ? { hard, entries, text } : { hard };
+  // the assistant's question as context for a bare "ja": the Main-Agent prompt is typed, not sent, so any closing question. A job needs the question to offer a job (offersJob).
+  // That is the only assistant text a job judge ever sees, besides the closing sentences of replies BEFORE the window, labelled as not his.
+  const job = name === 'start_agent_job';
+  const before = job ? contextBefore(name, spoken, entries, now) : [];
+  const text = entries.length ? intentText(entries, (t) => YES.test(t), { withQuestion: true, shows: job ? acceptsOffer : undefined, before }) : '';
+  const via = !text ? undefined : /^Assistent: /m.test(text) && job ? 'offer' : before.length ? 'context' : undefined;
+  return text ? { hard, entries, text, via } : { hard };
 }
 /** Start the model call while he settles (the gate waits ~2.5 s anyway); the check after the settle reuses it when the words did not change. */
 export function prefetchIntent(name, spoken, now, ctx = {}) {
@@ -133,8 +171,8 @@ export async function checkTriggerOrIntent(name, spoken, now, ctx = {}) {
   const t0 = Date.now();
   const verdict = await classify(c.text).catch(() => /* failed: fail closed, traced below as verdict none */ null);
   const yes = verdict?.[INTENT_KEY[name]] === true;
-  ctx.trace?.()?.event?.('action.intent', { turn: ctx.voiceTurn?.turn, tool: name, hard: c.hard.why, verdict: verdict ? (yes ? 'yes' : 'no') : 'none', ms: Date.now() - t0 });
-  ctx.audit?.({ action: 'action.intent', detail: `${name} hard=${c.hard.why} verdict=${verdict ? (yes ? 'yes' : 'no') : 'none'}` });
+  ctx.trace?.()?.event?.('action.intent', { turn: ctx.voiceTurn?.turn, tool: name, hard: c.hard.why, verdict: verdict ? (yes ? 'yes' : 'no') : 'none', ms: Date.now() - t0, ...(c.via ? { via: c.via } : {}) });
+  ctx.audit?.({ action: 'action.intent', detail: `${name} hard=${c.hard.why} verdict=${verdict ? (yes ? 'yes' : 'no') : 'none'}${c.via ? ` via=${c.via}` : ''}` });
   return yes ? { ok: true, entries: c.entries, intent: true } : c.hard;
 }
 export const release = (g, name) => { for (const e of g.entries ?? []) if (e.used) delete e.used[name]; };
@@ -179,7 +217,7 @@ export async function gate(name, ctx, clock, check = null, extraSay = {}, { sett
   if (verdict.ok && verdict.entries?.some((e) => e.used?.[name])) return { refused: refuse(ctx, name, 'parallel', 'Hier nichts getan: ein anderer Aufruf desselben Werkzeugs für diesen Satz läuft schon. Richte dich nach dessen Ergebnis und sag Florian nur das.') };
   if (!verdict.ok) {
     const say = {
-      'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; erst sein eigener Satz löst es aus.',
+      'no-trigger': 'Nichts passiert: das hat Florian in seinem letzten Satz nicht so gesagt. Frage ihn in einem kurzen Satz, ob das jetzt passieren soll, ohne den Werkzeugnamen zu nennen; sein Ja auf diese Frage oder sein eigener Satz löst es aus.',
       'means-main-agent': 'Nichts gestartet: Florian meint seinen Main Agent, die Claude-Code-Sitzung in VS Code. Rufe stattdessen output_main_agent_prompt auf.',
       used: 'Für diesen Satz ist das schon passiert; kein zweites Mal. Sag nur einen kurzen Satz.',
       question: 'Nichts gestartet: das war eine Frage über Claude Code, kein Auftrag. Beantworte sie.',
@@ -220,7 +258,7 @@ const PROMPT_FAIL = {
 
 // During a computer run and for 5 minutes after it, these two tools would need the app's confirm (code on the overlay). That confirm exists only for
 // computer actions, so here they stay closed: text the loop could have influenced must not reach a prompt box or start a job unconfirmed.
-const guardedOut = (g, ctx, name) => { release(g, name); return refuse(ctx, name, 'computer-guard', 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach sind Prompts an den Main Agent und neue Jobs gesperrt. Sag Florian in einem Satz, dass er es danach noch einmal sagen kann.'); };
+const guardedOut = (g, ctx, name) => { release(g, name); return refuse(ctx, name, 'computer-guard', 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach sind Prompts an den Main Agent und neue Jobs gesperrt. Sag Florian in EINEM Satz, warum (Sicherheitssperre nach der Computer-Steuerung) und dass er es nach den fünf Minuten noch einmal sagen kann.'); };
 
 async function mainPrompt({ text }, ctx, clock) {
   const g = await gate('output_main_agent_prompt', ctx, clock);
@@ -257,8 +295,12 @@ async function mainPrompt({ text }, ctx, clock) {
 }
 
 // ---- start_agent_job ----
-// a bare "ja" to the assistant's question never starts a job, so asking for one would loop (a#41ec11 t10/t11): ask for his own sentence
-const JOB_NO_TRIGGER = 'Nichts passiert: aus Florians eigenen Worten geht nicht hervor, dass jetzt ein Agent im Hintergrund etwas erledigen soll. Frag ihn in einem kurzen Satz, ob und was im Hintergrund laufen soll; ein bloßes Ja startet keinen Job, sein eigener Satz schon.';
+// a#41d6d2 (14 Nov): the model got "Nichts passiert" twice and told Florian only "Das hat nicht geklappt". Now ONE plain why and ONE next step, spoken to him.
+// Echo trap (voice/session.js echoOf): a sentence of his that is >= 80 % made of words the agent said in the last 20 s is NOT his word. So the advice names no ready-made
+// sentence: the open start "Starte einen Agenten, der ..." is 4 words and needs his own task words after it; the model is told not to dictate or read out the task.
+// A "Ja" to an explicit offer ("Soll ich einen Agenten im Hintergrund starten, der ...?") is the way without that risk: offersJob() lets that question through to the judge. The offer must not
+// come with a "Ja" of the agent's own in the same reply: his bare "Ja." would then be >= 80 % the agent's words, an echo, and is dropped (hence the hint in the text).
+const JOB_NO_TRIGGER = 'Nichts passiert: kein klarer Auftrag in Florians Worten. Sag ihm in EINEM kurzen Satz, warum und was er tun kann: du hast seinen Satz nicht sicher als Auftrag für einen Hintergrund-Agenten erkannt; er soll den Auftrag mit eigenen Worten sagen (zum Beispiel „Starte einen Agenten, der …“ und dann die Aufgabe), oder du zeigst ihm die Übergabe-Karte zum Antippen (handoff_propose). Diktiere keinen ganzen Satz zum Nachsprechen und lies den Auftrag nicht vor; was du sagst, zählt nie als sein Wort. Ruf das Werkzeug erst wieder auf, wenn Florian danach etwas Neues gesagt hat. Fragst du ihn stattdessen, dann genau so, mit der Aufgabe in wenigen Worten und ohne „Ja“ oder „Genau“ in derselben Antwort: „Soll ich einen Agenten im Hintergrund starten, der …?“; sein Ja darauf genügt. Hast du diese Frage schon gestellt und es ging trotzdem nicht, bitte ihn stattdessen um den Auftrag in eigenen Worten.';
 const CARD_WORD = { sent: 'gesendet', queued: 'unterwegs', pending: 'unterwegs', 'not-sent': 'nicht gesendet' };
 
 async function agentJob({ title, prompt, host }, ctx, clock) {
@@ -267,7 +309,7 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'start_agent_job');
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   const p = String(prompt ?? '').trim();
-  if (!t || !p) return release(g, 'start_agent_job'), out(false, 'Titel und Auftrag dürfen nicht leer sein. Nichts gestartet.');
+  if (!t || !p) return release(g, 'start_agent_job'), out(false, 'Titel und Auftrag dürfen nicht leer sein. Nichts gestartet; rufe das Werkzeug mit beidem noch einmal auf.');
   const stampedPrompt = stamped(p, await deskStamp(ctx)); // the only await before the checks below: nothing can change between the limit check and job.start
   const sid = ctx.sid ?? 'desk', now = clock.now();
   sweep(now);
@@ -277,9 +319,9 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
     ctx.trace?.()?.event?.('action.agent_job', { turn: g.vt.turn, id: twin.requestId, name: twin.name ?? null, host: twin.host, card: twin.card ?? null, duplicate: true });
     return out(true, `Der Job läuft schon${twin.name ? ` (${twin.name})` : ' (wird gerade gestartet)'}; kein zweiter gestartet. Korrekturen schickt Florian per Antwort auf die Telegram-Karte. Sag nur einen kurzen Satz.`);
   }
-  if (!ctx.hub?.call) return release(g, 'start_agent_job'), out(false, 'Nichts gestartet: keine Verbindung zur Werkstatt. Sag das Florian in einem Satz.');
+  if (!ctx.hub?.call) return release(g, 'start_agent_job'), out(false, 'Nichts gestartet: keine Verbindung zur Werkstatt. Sag Florian in EINEM Satz, dass die Werkstatt gerade nicht erreichbar ist und er es später noch einmal sagen kann.');
   const verdict = (ctx.limits ?? defaultLimits).check(sid, 'agentJob');
-  if (!verdict.ok) return release(g, 'start_agent_job'), refuse(ctx, 'start_agent_job', 'limit', `Nichts gestartet: ${verdict.reason}. Sag das Florian in einem Satz.`);
+  if (!verdict.ok) return release(g, 'start_agent_job'), refuse(ctx, 'start_agent_job', 'limit', `Nichts gestartet: ${verdict.reason}. Sag Florian in EINEM Satz warum und dass er den Auftrag später noch einmal geben kann.`);
   const requestId = crypto.randomUUID();
   const entry = remember('job', sid, { title: t, prompt: p, requestId, host: host ?? 'auto', at: now });
   const traced = ctx.trace?.();
@@ -294,10 +336,10 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
     ctx.audit?.({ action: 'action.agent_job', detail: `${aid ?? 'a#?'} title=${t} failed: ${msg.slice(0, 80)}` });
     traced?.event?.('action.agent_job', { turn: g.vt.turn, id: requestId, name: null, host: host ?? 'auto', card: null, duplicate: false, failed: true });
     if (unclear) return out(false, 'Unklar, ob der Job gestartet wurde (die Werkstatt hat nicht rechtzeitig geantwortet). Starte nicht nochmal; sag Florian in einem Satz, er soll auf die Telegram-Karte achten.');
-    return out(false, `Der Job wurde nicht gestartet (${/^limit$/.test(msg) ? 'Stunden- oder Tageslimit der Werkstatt erreicht' : /offline|getrennt/.test(msg) ? 'die Werkstatt auf Sandy ist offline' : /unknown method/.test(msg) ? 'die Sandy-Werkstatt kennt das Werkzeug noch nicht' : 'die Werkstatt hat den Start abgelehnt'}). Sag das Florian in einem Satz.`);
+    return out(false, `Der Job wurde nicht gestartet (${/^limit$/.test(msg) ? 'Stunden- oder Tageslimit der Werkstatt erreicht' : /offline|getrennt/.test(msg) ? 'die Werkstatt auf Sandy ist offline' : /unknown method/.test(msg) ? 'die Sandy-Werkstatt kennt das Werkzeug noch nicht' : 'die Werkstatt hat den Start abgelehnt'}). Sag Florian in EINEM Satz warum und dass er es später noch einmal sagen kann.`);
   }
   const name = typeof res?.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{2,119}$/.test(res.name) ? res.name : null;
-  if (!name) { forget('job', sid, entry); release(g, 'start_agent_job'); return out(false, 'Der Job wurde nicht bestätigt. Sag das Florian in einem Satz.'); }
+  if (!name) { forget('job', sid, entry); release(g, 'start_agent_job'); return out(false, 'Der Job wurde nicht bestätigt. Sag Florian in EINEM Satz, dass die Werkstatt den Start nicht bestätigt hat und er auf die Telegram-Karte achten soll, bevor er es nochmal sagt.'); }
   entry.name = name; entry.card = res.card;
   ctx.audit?.({ action: 'action.agent_job', detail: `${aid ?? 'a#?'} ${name} title=${t} host=${res.host ?? host ?? 'auto'} card=${res.card ?? '-'}` });
   traced?.event?.('action.agent_job', { turn: g.vt.turn, id: requestId, name, host: res.host ?? host ?? 'auto', card: res.card ?? null, duplicate: false });

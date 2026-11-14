@@ -5,6 +5,7 @@ import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
 import { short } from '../redact.js';
 import { asksForDrawing, cjkRuns, isGermanText, stripCjk } from '../canvas.js';
 import { buildInstructions } from './instructions.js';
+import { collectVocabulary, fetchSpeechDictionary } from './vocabulary.js';
 import { pageUpdateText } from '../pack.js';
 import { estimateCost } from './prices.js';
 import { isFiller, knownWords, limitFillers, repairGlued, stripToolMarkup, TranscriptMarkupFilter } from './transcript.js';
@@ -55,6 +56,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let thoughtFor = 0; // the user turn the 'thinking' activity was sent for
   let adapter = null;
   let artifactBlock = '';
+  // The registry's shared speech dictionary for the recogniser vocabulary (a#41d6d2). Fetched when the connection opens (cached 5 min), never awaited:
+  // the adapter is created synchronously as before; the client's start message comes later, so the value is normally there by then.
+  let speechDictionary = null;
+  const warm = (deps.speechDictionary ?? fetchSpeechDictionary)();
+  if (typeof warm?.then === 'function') warm.then((v) => { speechDictionary = v ?? null; }, () => { /* registry unavailable: page words and glossary still make the list */ });
+  else speechDictionary = warm ?? null;
   let unregisterText = null;
   let starting = false;
   let page = null;
@@ -130,6 +137,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let detachVision = null;
   let screenHeld = null; // screen context that arrived before the vendor was ready
   let briefingHeld = null; // the start briefing (item G), same: held until the vendor is ready
+  let briefingText = ''; // the last briefing sent (a context note carries it along: xAI replaces its briefing item)
+  const handoffNotes = []; // a#41d6d2: failed handoff-card clicks told to the model as passive context, newest last
+  const withNotes = (briefing) => [...handoffNotes.map((n) => `Hinweis des Desks: ${n}`), briefing].filter(Boolean).join('\n\n');
   let detachBriefing = null;
   let detachComputer = null;
   let muted = false;
@@ -458,7 +468,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     let output;
     try {
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
-      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn });
+      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote });
       output = String(res.content ?? '').slice(0, voiceCap(name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
@@ -608,7 +618,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const costUsd = estimateCost(provider, seconds);
     limits.addCost(estimateCost(provider, seconds - billedSeconds));
     billedSeconds = seconds;
-    sendJson({ type: 'usage', seconds, costUsd: Math.round(costUsd * 10_000) / 10_000 });
+    // dayUsd: today's whole Desk spend (chat, dictation, voice; limits.costToday, UTC day) in cents, shown next to the session cost (a#41d6d2, 14 Nov: he could not see what a voice session costs)
+    const day = Number(limits.costToday?.());
+    sendJson({ type: 'usage', seconds, costUsd: Math.round(costUsd * 10_000) / 10_000, ...(Number.isFinite(day) ? { dayUsd: Math.round(day * 100) / 100 } : {}) });
   }
 
   async function begin(msg) {
@@ -645,7 +657,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     inScreenAgent = msg.client?.app === 'screen-agent';
     // In the app the Desk window is hidden: a handoff button there is out of his sight, and with no page open there is no explainer to look up (trace a#92a698: "Gerade ist keine Erklärseite offen" as the answer to his marking).
     const sessionTools = inScreenAgent ? toolDefs.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : toolDefs;
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent }) + artifactBlock, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de' }, onEvent);
+    const vocab = collectVocabulary({ page, dictionary: speechDictionary });
+    trace?.event('voice.vocabulary', { provider, terms: vocab.hints.length, wordlist: vocab.wordlist.length });
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
@@ -653,8 +667,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     } });
     // Start briefing (item G): its own passive channel (adapter.setBriefing), so it never replaces the screen description.
     detachBriefing = deps.briefing?.attach(sid, { trace: (type, data) => trace.event(type, data), setContext: (text) => {
-      if (readyAt === null) { briefingHeld = text; return 'held-until-ready'; }
-      return adapter?.setBriefing?.(text) ?? 'unsupported';
+      briefingText = text;
+      const out = withNotes(text); // = text while no handoff click failed
+      if (readyAt === null) { briefingHeld = out; return 'held-until-ready'; }
+      return adapter?.setBriefing?.(out) ?? 'unsupported';
     } });
     // Computer runs (item F): the manager hears his finals, partials and the assistant's finals through the hooks above and speaks through say().
     detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj) });
@@ -687,7 +703,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     page = loaded;
     canvas?.setPage?.(loaded); // the voice canvases draw from the element Florian clicked now (critic r2 P1-2)
     if (!changed || !loaded.point) return;
-    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent }) + artifactBlock });
+    const how = adapter?.updatePage?.(pageUpdateText(loaded), { instructions: () => buildInstructions(loaded, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: collectVocabulary({ page: loaded, dictionary: speechDictionary }).wordlist }) + artifactBlock });
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
@@ -774,6 +790,21 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     armNoAnswer(text);
     trace.event('transcript.user.final', quiet ? { turn: turnId, marker: true, computer: true, chars: text.length } : { turn: turnId, text: text.replace(/\d/g, '#'), marker: true }); // what he circled is screen data: numbers stay out of the durable trace
     adapter.sendText(text);
+    return true;
+  }
+
+  // a#41d6d2 (14 Nov): Florian's click on a handoff card is an HTTP call outside this socket; the live model never saw it fail and guessed the cause.
+  // The note goes out as passive context (no reply asked) on the briefing channel, which nothing else updates after the start; the notes come first
+  // because Gemini cuts the channel at 6200 characters.
+  function contextNote(text) {
+    const note = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (!note || closed || !adapter) return false;
+    handoffNotes.push(note);
+    if (handoffNotes.length > 3) handoffNotes.shift();
+    let how;
+    if (readyAt === null) { briefingHeld = withNotes(briefingText); how = 'held-until-ready'; }
+    else how = adapter.setBriefing?.(withNotes(briefingText)) ?? 'unsupported';
+    trace.event('handoff.note', { how, chars: note.length });
     return true;
   }
 

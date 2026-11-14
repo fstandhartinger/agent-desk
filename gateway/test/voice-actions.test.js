@@ -5,7 +5,7 @@ import { setEnv } from './helpers/env.js';
 
 setEnv({});
 const { runTool } = await import('../src/tools.js');
-const { hasTrigger, MAIN_TRIGGER, JOB_TRIGGER, jaccard, resetActions } = await import('../src/voiceActions.js');
+const { hasTrigger, MAIN_TRIGGER, JOB_TRIGGER, jaccard, resetActions, offersJob } = await import('../src/voiceActions.js');
 const { Limits } = await import('../src/limits.js');
 const { TEXT } = await import('../src/messages.js');
 const { syn } = await import('./synthetic.js');
@@ -73,6 +73,19 @@ describe('refusals', () => {
     const j = await job(c);
     assert.ok(!/Claude Code|Main Agent|Hauptagent/.test(j.content), 'the refusal does not put the trigger words into the agent\'s mouth');
     assert.equal(c.log.hub.length, 0);
+  });
+  it('start_agent_job without his words: ONE plain why, ONE next step, no ready-made sentence to repeat (a#41d6d2)', async () => {
+    const j = await job(ctx([entry('Mach mal was mit dem Bildschirm')]));
+    assert.equal(j.ok, false);
+    assert.match(j.content, /^Nichts passiert: kein klarer Auftrag in Florians Worten\. .*nicht sicher als Auftrag für einen Hintergrund-Agenten erkannt/, 'why');
+    assert.match(j.content, /mit eigenen Worten sagen .*Starte einen Agenten, der …/, 'next step: his own words, only an open start');
+    assert.match(j.content, /Übergabe-Karte .*\(handoff_propose\)/, 'or the card');
+    assert.match(j.content, /Diktiere keinen ganzen Satz zum Nachsprechen/, 'a sentence the agent says counts as an echo, never as his word');
+    assert.match(j.content, /Ruf das Werkzeug erst wieder auf, wenn Florian danach etwas Neues gesagt hat/, 'no retry loop on the same words');
+    const offer = j.content.match(/„(Soll ich einen Agenten im Hintergrund starten, der …\?)“/)?.[1];
+    assert.ok(offer, 'the explicit offer whose yes now counts');
+    assert.equal(offersJob(offer.replace('…', 'die Logs prüft')), true, 'and it is exactly the shape the gate lets through');
+    assert.ok(!/Claude Code|Main Agent|Hauptagent|Agent Job|auf Sandy|auf LeChonk/i.test(j.content), 'no trigger words in the agent\'s mouth');
   });
   it('fragment / old chain: refused with the call-again hint', async () => {
     for (const vt of [{ fromFragment: true }, { oldChain: true }]) {
@@ -212,13 +225,14 @@ describe('start_agent_job', () => {
     const r = await job(c);
     assert.equal(r.ok, false);
     assert.match(r.content, /Tageslimit für Agent-Jobs/);
+    assert.match(r.content, /Sag Florian in EINEM Satz warum und dass er den Auftrag später noch einmal geben kann\./, 'one reason, one next step');
     assert.equal(c.log.hub.length, 0);
   });
   it('bridge offline: German failure, no retry, and the same task may be tried again later', async () => {
     const c = ctx(say, { hubError: TEXT.bridgeOffline('sandy') });
     const r = await job(c);
     assert.equal(r.ok, false);
-    assert.match(r.content, /nicht gestartet \(die Werkstatt auf Sandy ist offline\)\. Sag das Florian in einem Satz\./);
+    assert.match(r.content, /nicht gestartet \(die Werkstatt auf Sandy ist offline\)\. Sag Florian in EINEM Satz warum und dass er es später noch einmal sagen kann\./, 'one reason, one next step');
     assert.equal(c.log.hub.length, 1);
     await job(c);
     assert.equal(c.log.hub.length, 2, 'a failure is not a duplicate');

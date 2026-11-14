@@ -15,7 +15,7 @@ const SELF_INTERRUPT_MS = 2000;
 const NUDGE = '(Hinweis vom Desk, nicht von Florian: Du hast die Werkzeugergebnisse. Beantworte jetzt Florians letzte Frage kurz auf Deutsch, aus dem, was du gefunden hast.)';
 export const MODELS = { thinking: 'models/gemini-3.8-live-extended-thinking', fast: 'models/gemini-3.8-live' };
 
-export function setupMessage({ instructions, tools, voice, model = MODELS.thinking }) {
+export function setupMessage({ instructions, tools, voice, model = MODELS.thinking, vocabulary = [] }) {
   const generationConfig = { responseModalities: ['AUDIO'] };
   if (model === MODELS.thinking) generationConfig.thinkingConfig = { thinkingLevel: 'medium' };
   if (voice) generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } };
@@ -25,7 +25,8 @@ export function setupMessage({ instructions, tools, voice, model = MODELS.thinki
       generationConfig,
       systemInstruction: { parts: [{ text: instructions }] },
       tools: [{ functionDeclarations: geminiDeclarations(tools) }],
-      inputAudioTranscription: {},
+      // customVocabulary (ai.google.dev live API reference, read 14 Nov 2026): speech biasing on gemini-3.8-live, up to 1000 terms, best with <= 100; a#41d6d2
+      inputAudioTranscription: vocabulary.length ? { customVocabulary: vocabulary.slice(0, 100) } : {},
       outputAudioTranscription: {},
     },
   };

@@ -1,7 +1,8 @@
 // System prompt for the voice agents: same persona and tools as the text agent, tuned for speech.
-import { actionLines, canvasLines, briefingLines, groundingLines, readToolLines, screenAgentLines, screenLines } from '../prompt.js';
+import { actionLines, canvasLines, briefingLines, groundingLines, limitLines, readToolLines, screenAgentLines, screenLines } from '../prompt.js';
 import { knowledgeLines } from '../knowledge.js';
 import { pagePackLines } from '../pack.js';
+import { wortlisteLines } from './vocabulary.js';
 
 /** OpenAI GPT-Live asked back instead of researching (critic r7: "Kannst du mir sagen, wo das erwähnt wird?"). */
 export const OPENAI_LINES = [
@@ -25,7 +26,16 @@ export const GEMINI_LINES = [
   'Stehen "DESK-FAKTEN" in einem Werkzeugergebnis, antworte SOFORT daraus (Florians Wörter stehen dort oft nicht wörtlich) und schlage höchstens noch einmal nach, was darin fehlt.',
 ];
 
-export function buildInstructions(page, now, { provider, screen = false, screenAgent = false } = {}) {
+/**
+ * Rules C and D (a#41d6d2, 14 Nov 2026). C: the recogniser heard "Abstimmung" for "Abstammung" several times, "ReX 1.3", "Cloud Code Session"; the
+ * model answered "Du meinst wahrscheinlich die Abstammung, nicht Abstimmung." D: the first answer ran about two minutes, then "Erkläre es mir ganz simpel."
+ */
+export const SPEECH_LINES = [
+  'Die Spracherkennung verhört Namen und Fachwörter oft ("Abstimmung" für "Abstammung", "ReX" für REAX, "Cloud Code" für Claude Code). Löse einen offensichtlichen Verhörer still aus dem Zusammenhang auf (Wortliste, Seitentext, Gespräch) und beantworte, was gemeint war; sage nie "Du meinst wahrscheinlich …". Frage nur zurück, wenn zwei Lesarten zu verschiedenen Handlungen führen würden, und dann mit einer kurzen Frage, die beide nennt.',
+  'Antworte in der Sprache zuerst in der einfachen Fassung: etwa 20 bis 30 Sekunden gesprochen, 50 bis 80 Wörter, ein Gedanke nach dem anderen, ein Beispiel statt Fachbegriffe. Danach frage kurz "Soll ich tiefer gehen?". Länger wirst du nur, wenn Florian ausdrücklich mehr Tiefe oder Einzelheiten verlangt. Bittet er "erkläre es simpel", werde noch einfacher und kürzer, nicht länger.',
+];
+
+export function buildInstructions(page, now, { provider, screen = false, screenAgent = false, vocabulary = [] } = {}) {
   const lines = [
     'Du bist der Desk-Agent von Florian: ein sprachgesteuerter Assistent für seine Agenten-Werkstatt und die gerade geöffnete Erklärseite.',
     'Antworte standardmäßig auf Deutsch, in kurzen gesprochenen Sätzen (meist 1–3), ohne Markdown, ohne Aufzählungszeichen.',
@@ -38,6 +48,8 @@ export function buildInstructions(page, now, { provider, screen = false, screenA
     ...groundingLines(now),
     'Lies niemals Geheimnisse, Schlüssel oder lange Dateipfade vor; nenne nur den Dateinamen oder den Jobnamen.',
     ...readToolLines(),
+    ...limitLines({ spoken: true }),
+    ...SPEECH_LINES,
     ...actionLines(screen || screenAgent),
     ...(screenAgent ? screenAgentLines() : []),
     ...screenLines(screen || screenAgent),
@@ -46,6 +58,7 @@ export function buildInstructions(page, now, { provider, screen = false, screenA
   if (provider === 'openai') lines.push(...OPENAI_LINES);
   if (provider === 'gemini') lines.push(...GEMINI_LINES);
   lines.push(...knowledgeLines());
+  lines.push(...wortlisteLines(vocabulary));
   if (page?.title) lines.push('', ...pagePackLines(page, { provider: provider ?? 'xai' }));
   return lines.join('\n');
 }

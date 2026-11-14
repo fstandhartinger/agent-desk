@@ -106,14 +106,49 @@ function commitHandoffSlot() {
   fs.writeFileSync(file, JSON.stringify({ day: state.day, n: state.n + 1 }), { mode: 0o600 });
 }
 
+// a#41d6d2, 14 Nov: the board refused ("Thread #31 is archived; post to an active thread instead.") and the click only said "hat nicht geklappt".
+// agent-board answers its own refusals as "agent-board: <reason>" on stderr with exit 2 (verified for "No thread matches"); they all happen BEFORE
+// anything is written. Everything else (timeout, signal, a crash with another exit code) is unclear: the post may have gone through.
+// The marker `not-posted:` at the start of the error message is the contract with the gateway (gateway/src/handoff.js): safe to offer the click again.
+export const NOT_POSTED = 'not-posted:';
+const ARCHIVED = /is archived|archived thread/i;
+const NO_THREAD = /no thread matches|no such thread|unknown thread|not found/i;
+
+/** True when agent-board failed in a way that proves nothing was written. Pure; exported for tests. */
+export function refusedBeforeWrite(err, stderr = '') {
+  const msg = String(stderr || err?.message || '');
+  if (err?.killed || err?.signal) return false; // our timeout / a kill: the process may have written already
+  if (err?.code === 'ENOENT' || err?.code === 'EACCES') return true; // the binary never started
+  if (typeof err?.code !== 'number' || /Traceback \(most recent call last\)/.test(msg)) return false; // a crash says nothing about the write
+  return (err.code === 2 && /(?:^|\n)agent-board: /.test(msg)) || /is archived|no thread matches/i.test(msg);
+}
+
+function boardError(err, stderr) {
+  const refused = refusedBeforeWrite(err, stderr);
+  const e = new Error(redact(`${refused ? `${NOT_POSTED} ` : ''}board failed: ${(stderr || err.message).slice(0, 300)}`));
+  e.notPosted = refused;
+  return e;
+}
+
 function runBoardStrict(args) {
   const env = { ...process.env, AGENT_BOARD_NAME: HANDOFF_IDENTITY };
   return new Promise((resolve, reject) => {
     execFile(bin(), args, { env, timeout: 20000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(redact(`board failed: ${(stderr || err.message).slice(0, 300)}`)));
+      if (err) return reject(boardError(err, String(stderr ?? '').trim()));
       resolve(String(stdout));
     });
   });
+}
+
+// The bridge's own journal line format (bridge.js log()). The daily selfcheck (ops/handoff-selfcheck.mjs) greps "board failed" in the last 24 h: only
+// a handoff that ended in failure may carry that text, a healed reopen or a fallback post must not.
+const hlog = (msg) => console.log(`${new Date().toISOString()} bridge ${redact(String(msg))}`);
+
+/** A refusal the bridge itself raises before it touches the board (validation, daily limit): same contract. */
+function notPosted(message) {
+  const e = new Error(`${NOT_POSTED} ${message}`);
+  e.notPosted = true;
+  return e;
 }
 
 /** Pure formatting, exported for tests. */
@@ -123,27 +158,78 @@ export function handoffText({ title, task, why }) {
   return redact(parts.join('\n\n'));
 }
 
-export async function handoff({ title, task, why } = {}) {
+/** Where a handoff goes when the handoff thread cannot take it (archived and not reopenable, gone): "Ops & security" (#15), by id, not by a fuzzy title. */
+export const handoffFallbackThread = () => process.env.BRIDGE_HANDOFF_FALLBACK_THREAD || '15';
+
+const postedOf = (out) => ({
+  id: /entry #(\d+)/.exec(out)?.[1],
+  threadId: /thread #(\d+)/.exec(out)?.[1],
+  thread: /thread #\d+ (.+?)\.?\s*$/m.exec(out)?.[1]?.trim(),
+});
+
+async function handoffOnce({ title, task, why } = {}) {
   const t = String(title ?? '').replace(/\s+/g, ' ').trim();
   const body = String(task ?? '').trim();
   const reason = String(why ?? '').trim();
-  if (!t || t.length > 120) throw new Error('title required, max 120 characters');
-  if (!body || body.length > 4000) throw new Error('task required, max 4000 characters');
-  if (reason.length > 1000) throw new Error('why too long (max 1000 characters)');
-  if (readHandoffState().state.n >= HANDOFF_PER_DAY) throw new Error('handoff limit reached (10 per day)');
+  if (!t || t.length > 120) throw notPosted('title required, max 120 characters');
+  if (!body || body.length > 4000) throw notPosted('task required, max 4000 characters');
+  if (reason.length > 1000) throw notPosted('why too long (max 1000 characters)');
+  if (readHandoffState().state.n >= HANDOFF_PER_DAY) throw notPosted('handoff limit reached (10 per day)');
   const text = handoffText({ title: t, task: body, why: reason });
   const common = ['--as', HANDOFF_IDENTITY];
+  const post = (thread, content) => runBoardStrict([...common, 'post', '--kind', 'handoff', '--to', HANDOFF_ADDRESSEE, thread, content]);
+  const reopen = (ref) => runBoardStrict([...common, 'unarchive', ref]).then(() => true, () => false);
   let out;
+  let reopened = false;
+  let intendedId; // the numeric id of the handoff thread, when the board named it in a refusal
   try {
-    out = await runBoardStrict([...common, 'post', '--kind', 'handoff', '--to', HANDOFF_ADDRESSEE, HANDOFF_THREAD, text]);
+    try {
+      out = await post(HANDOFF_THREAD, text);
+    } catch (err) {
+      if (!err.notPosted) throw err;
+      if (ARCHIVED.test(err.message)) {
+        // a#41d6d2: the board archives threads quiet for 7 days. Reopen it (the heal) and retry ONCE; the daily selfcheck also pins it as a topic.
+        intendedId = /thread #(\d+)/i.exec(err.message)?.[1];
+        if (!(await reopen(intendedId ?? HANDOFF_THREAD))) throw err;
+        reopened = true;
+        out = await post(HANDOFF_THREAD, text);
+        hlog(`handoff: thread #${intendedId ?? '?'} was archived, reopened it and posted`);
+      } else if (NO_THREAD.test(err.message)) {
+        out = await runBoardStrict([...common, 'new', HANDOFF_THREAD, '--kind', 'handoff', '--to', HANDOFF_ADDRESSEE, '--body', text]); // the thread does not exist yet
+      } else throw err;
+    }
   } catch (err) {
-    if (!/no thread matches|not found|no such thread|unknown thread/i.test(err.message)) throw err;
-    out = await runBoardStrict([...common, 'new', HANDOFF_THREAD, '--kind', 'handoff', '--to', HANDOFF_ADDRESSEE, '--body', text]);
+    if (!err.notPosted) throw err; // unclear (timeout, crash): nothing is retried or redirected, a second post could duplicate
+    intendedId ??= /thread #(\d+)/i.exec(err.message)?.[1];
+    // Nothing reached the board and the handoff thread is no option: post into the active "Ops & security" thread, first line says why.
+    const lead = `Fallback: das Thema „${HANDOFF_THREAD}“${intendedId ? ` (#${intendedId})` : ''} war ${ARCHIVED.test(err.message) ? 'archiviert' : 'nicht verfügbar'} und ließ sich nicht nutzen; die Übergabe steht deshalb hier.`;
+    try {
+      out = await post(handoffFallbackThread(), redact(`${lead}\n\n${text}`));
+    } catch (second) {
+      if (!second.notPosted) throw second; // the fallback may have been written: unclear
+      const bare = (e) => e.message.replace(/^not-posted:\s*/, '');
+      throw notPosted(`${bare(err)}; Ausweichthema ${handoffFallbackThread()} ebenfalls abgelehnt: ${bare(second)}`);
+    }
+    const p = postedOf(out);
+    commitHandoffSlot();
+    hlog(`handoff: FALLBACK post into thread ${handoffFallbackThread()} (entry #${p.id ?? '?'}); the handoff thread ${intendedId ? `#${intendedId} ` : ''}was ${ARCHIVED.test(err.message) ? 'archived' : 'unavailable'}`);
+    if (!p.id) throw new Error('handoff posted but no entry id returned');
+    return { id: Number(p.id), thread: p.thread ?? handoffFallbackThread(), ...(p.threadId ? { threadId: Number(p.threadId) } : {}), fallback: true, intendedThread: HANDOFF_THREAD, ...(intendedId ? { intendedThreadId: Number(intendedId) } : {}) };
   }
   const m = /entry #(\d+)/.exec(out);
   commitHandoffSlot(); // the entry exists now, even if its id could not be parsed
   if (!m) throw new Error('handoff posted but no entry id returned');
-  return { id: Number(m[1]), thread: HANDOFF_THREAD };
+  return { id: Number(m[1]), thread: HANDOFF_THREAD, ...(reopened ? { reopened: true } : {}) };
+}
+
+/** board.handoff: posts one entry (see handoffOnce); a terminal failure leaves ONE journal line carrying the error (the selfcheck counts "board failed"). */
+export async function handoff(args = {}) {
+  try {
+    return await handoffOnce(args);
+  } catch (err) {
+    if (!err.notPosted || /board failed/.test(err.message)) hlog(`handoff failed (${err.notPosted ? 'nothing posted' : 'unclear'}): ${String(err.message).replace(/\s+/g, ' ').slice(0, 300)}`);
+    throw err;
+  }
 }
 
 // Read one entry by its number (Sandy: the board database itself, opened read-only; no read pointer moves).

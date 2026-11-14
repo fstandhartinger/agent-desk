@@ -16,6 +16,7 @@ export function delegateConfig(model = cfg.openaiDelegateModel(), effort = cfg.o
   return { model, reasoning: { effort: safe } };
 }
 
+// No input-transcription hint here: gpt-live-1's session.start has none (developers.openai.com live docs, read 14 Nov 2026); the vocabulary reaches it as the "Wortliste" in the instructions only.
 export function sessionStart({ instructions, tools, voice = 'marin', delegate = delegateConfig() }) {
   return {
     type: 'session.start',

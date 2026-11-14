@@ -25,7 +25,7 @@ export const cfg = {
   canvasResearchMs: () => Number(env('DESK_CANVAS_RESEARCH_MS', '6000')),
   activityViz: () => env('DESK_ACTIVITY_VIZ') === '1',
   // GPT-Live delegation backend (round 10, measured live: see the r10 RESULT); Astra is never run at high/xhigh
-  openaiDelegateModel: () => env('DESK_OPENAI_DELEGATE_MODEL', 'gpt-6.1-sol'),
+  openaiDelegateModel: () => env('DESK_OPENAI_DELEGATE_MODEL', 'gpt-6-astra'), // Florian 14 Nov: Astra "weil es besonders intelligent ist"; astra/low measured as fast as sol/low (agent-desk-fixes-20261114)
   openaiDelegateEffort: () => env('DESK_OPENAI_DELEGATE_EFFORT', 'low'),
   voiceWatchdogMs: () => Number(env('DESK_VOICE_WATCHDOG_MS', '6000')), // no assistant audio this long after a tool result -> ask again
   voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '10000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)

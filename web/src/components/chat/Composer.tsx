@@ -144,7 +144,7 @@ export default function Composer() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-papaya opacity-60" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-papaya" />
               </span>
-              <span className="text-sm font-medium text-fg-2">Diktat läuft</span>
+              <span className="text-sm font-medium text-fg-2">Aufnahme läuft …</span>
               <div className="flex h-6 flex-1 items-center gap-[3px]" aria-hidden>
                 {Array.from({ length: 28 }, (_, i) => (
                   <span key={i} ref={(el) => void (bars.current[i] = el)} className="h-full w-[3px] origin-center rounded-full bg-papaya/80 transition-transform duration-75" style={{ transform: 'scaleY(0.12)' }} />
@@ -160,10 +160,16 @@ export default function Composer() {
               onKeyDown={onKey}
               rows={1}
               disabled={dict.phase === 'transcribing'}
-              placeholder={dict.phase === 'transcribing' ? 'Wird transkribiert …' : voiceOn ? 'Live – Text geht an die Stimme …' : 'Frag den Desk …'}
+              placeholder={dict.phase === 'transcribing' ? '' : voiceOn ? 'Live – Text geht an die Stimme …' : 'Frag den Desk …'}
               aria-label="Nachricht"
               className="block max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pb-1 pt-[15px] text-base leading-6 text-fg outline-none placeholder:text-mute disabled:opacity-60"
             />
+          )}
+          {dict.phase === 'transcribing' && (
+            // a#41d6d2 (14 Nov): the pending transcript must be visible, not only a greyed-out field
+            <p role="status" className="flex items-center gap-2 px-4 pb-1 text-[13px] text-fg-2">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-papaya" aria-hidden /> Aufnahme wird transkribiert …
+            </p>
           )}
 
           <div className="flex items-center gap-1 px-2 pb-2">
