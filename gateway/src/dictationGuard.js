@@ -181,6 +181,67 @@ export function guardText(source, cleaned, ctx = {}) {
   return { text: out.join(' '), changes, undone };
 }
 
+// ---- stutters and restarts, deterministic (14 Nov 2026) ----
+// The same rules as the app's live subtitle (screen-agent Core/LiveCaption.cs, Disfluency): a word or a run of two or three words said twice in a row
+// ("ich ich", "wir haben wir haben"), a cut-off start a dash completes ("Dik- Diktat"), a restart ("Der Cap- der Caption-Text", "die dick die Diktat...").
+// Doubled on purpose stays: "die Leute, die die Regeln kennen", "sehr, sehr", "nein, nein", figures ("11 11"). The model is asked for the same (RULES 3)
+// but left "Ich, ich möchte" standing in one of 16 test dictations; the guard always lets such a removal stand, so this step only does it reliably.
+const LEGIT_DOUBLE = new Set(['die', 'der', 'das', 'den', 'dem', 'des', 'sehr', 'ganz', 'viel', 'viele', 'nein', 'ja', 'bitte', 'klar', 'okay', 'immer', 'schnell', 'lange', 'weit', 'haha']);
+const ARTICLES = new Set(['die', 'der', 'das', 'den', 'dem', 'des']);
+// One word twice across a comma is a stutter only for these small words ("Ich, ich möchte"); "Wenn das so ist, ist es gut" is German (his 9 Nov recordings).
+const COMMA_STUTTER = new Set(['ich', 'wir', 'du', 'er', 'es', 'man', 'und', 'aber', 'also', 'dann', 'dass', 'wenn', 'weil', 'oder', 'mit', 'in', 'im', 'auf', 'für', 'zu', 'von', 'bei', 'an', 'ein', 'eine', 'einen', 'einem', 'einer', 'so', 'noch']);
+function cutStart(frag, whole, dash) {
+  if (frag.length < 2 || whole.length <= frag.length + 1) return false;
+  if (dash) return whole.startsWith(frag);
+  if (frag.length > 4) return false; // "die Frauen die Frauenärzte": a whole word is not a cut-off start
+  if (whole.startsWith(frag)) return true;
+  if (frag.length < 3) return false;
+  for (let len = frag.length - 1; len <= frag.length + 1; len++) if (distance(frag, whole.slice(0, len)) <= 1) return true;
+  return false;
+}
+/** A sentence ends with this word: the next one is never a stutter of it ("Ich mache das. Das dauert", "Zeit. Zeit ist knapp"). */
+const ends = raw => /[.!?;:…]$/.test(raw);
+/** A doubled article is a stutter unless a comma or a noun before it makes the second one a relative pronoun. raws = the words as written. */
+function articleStutter(raws, i) {
+  if (raws[i].endsWith(',')) return false;
+  if (i === 0) return true;
+  const prev = raws[i - 1];
+  if (prev.endsWith(',')) return false;
+  const sentenceStart = i === 1 || /[.!?:]$/.test(raws[i - 2]);
+  return !(/^\p{Lu}/u.test(prev) && !sentenceStart);
+}
+/** The text without stutters and restarts; white space (line breaks) between and around the words that stay is kept. Returns {text, removed}.
+ * One pass; after a removal it goes back three words only (linear: a 40,000-character text with many repeats must not hold the event loop). */
+export function dropStutters(text) {
+  const parts = String(text ?? '').split(/(\s+)/); // words at even positions
+  const w = []; for (let i = 0; i < parts.length; i += 2) if (parts[i]) w.push({ raw: parts[i], sep: i > 0 ? parts[i - 1] : '' });
+  const lead = parts[0] === '' && parts.length > 1 ? parts[1] : '', trail = parts.length > 1 && parts[parts.length - 1] === '' ? parts[parts.length - 2] : '';
+  let removed = 0;
+  const k = x => wordKey(x.raw);
+  const drop = (i, n, capTo) => {
+    const sep = w[i].sep, cap = /^\p{Lu}/u.test(w[i].raw) && capTo !== undefined && /^\p{Ll}/u.test(w[capTo].raw);
+    w.splice(i, n); removed += n;
+    if (w[i]) { w[i].sep = sep || w[i].sep; if (cap) w[i].raw = w[i].raw[0].toUpperCase() + w[i].raw.slice(1); }
+  };
+  const step = i => {
+    const key = k(w[i]); if (!key) return false;
+    if (i + 1 < w.length && w[i].raw.endsWith('-') && !w[i].raw.endsWith('--') && key.length >= 2 && k(w[i + 1]).startsWith(key) && k(w[i + 1]).length > key.length) { drop(i, 1); return true; }
+    if (i + 3 < w.length && !ends(w[i].raw) && !ends(w[i + 1].raw) && k(w[i + 2]) === key && cutStart(k(w[i + 1]), k(w[i + 3]), w[i + 1].raw.endsWith('-'))) { drop(i, 2, i + 2); return true; }
+    for (let n = 3; n >= 1; n--) {
+      if (i + 2 * n > w.length) continue;
+      let same = !ends(w[i + n - 1].raw);
+      for (let j = 0; j < n && same; j++) { const x = k(w[i + j]); same = x.length > 0 && x === k(w[i + n + j]) && !/^\d+$/.test(x); }
+      if (!same) continue;
+      if (n === 1 && LEGIT_DOUBLE.has(key) && !(ARTICLES.has(key) && articleStutter(w.map(x => x.raw), i))) continue;
+      if (n === 1 && /[,;:]$/.test(w[i].raw) && !COMMA_STUTTER.has(key)) continue;
+      drop(i, n, i + n); return true;
+    }
+    return false;
+  };
+  for (let i = 0; i < w.length;) { if (step(i)) i = Math.max(0, i - 3); else i++; }
+  return { text: lead + w.map((x, i) => (i ? x.sep : '') + x.raw).join('') + trail, removed };
+}
+
 // ---- known names in their proper spelling ----
 
 /**

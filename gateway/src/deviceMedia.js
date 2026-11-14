@@ -1,6 +1,6 @@
 import { limits } from './limits.js';
 import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
-import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark, properNames } from './dictationGuard.js';
+import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark, properNames, dropStutters } from './dictationGuard.js';
 export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT };
 // Screen Agent media is processed in memory. Never include payloads or upstream errors in logs.
 export const deviceError = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -211,11 +211,12 @@ export function polishWindows(text, size = 90) {
   if (cur.length) { if (out.length && cur.length < size / 4) out[out.length - 1] += ` ${cur.join(' ')}`; else out.push(cur.join(' ')); }
   return out;
 }
-/** Is a cleaned window still his text? Content words within 75-130 % and at least half of the wording shared. */
-export function keptWords(before, after) {
+/** Is a cleaned window still his text? Content words within 75-130 % and at least half of the wording shared. slack: words a short piece may lose on top
+ * (the live subtitle cleans pieces of 3 to 10 words: "ich ich habe" -> "ich habe" keeps 67 %; every change still passes the word guard). */
+export function keptWords(before, after, slack = 0) {
   const a = contentWords(before).length, b = contentWords(after).length;
   if (!String(after ?? '').trim()) return false;
-  return b >= 0.75 * a && b <= 1.3 * a + 4 && (a < 5 || overlap(before, after) >= 0.5);
+  return b >= 0.75 * a - slack && b <= 1.3 * a + 4 && (a < 5 || overlap(before, after) >= 0.5);
 }
 export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budgetMs = null, promptWaitMs = 300, graceMs = 300, geminiFallbackMs = 2500 } = {}) {
   const googleKey = () => env.GOOGLE_API_KEY || env.GEMINI_API_KEY;
@@ -475,7 +476,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       const usable = Object.values(sources).filter(Boolean).length;
       const list = report();
       const degraded = (names.length > 1 && usable < 2) || (providers.merge !== undefined && !providers.merge.ok);
-      return { text: properNames(applyCorrections(text, resolvedDictionary), knownNames(resolvedDictionary, env)), sources: { ...sources }, ms: Date.now() - started, providers: { ...list, ...(providers.merge ? { merge: providers.merge } : {}) }, degraded, merged, seconds: duration };
+      return { text: properNames(applyCorrections(dropStutters(text).text, resolvedDictionary), knownNames(resolvedDictionary, env)), sources: { ...sources }, ms: Date.now() - started, providers: { ...list, ...(providers.merge ? { merge: providers.merge } : {}) }, degraded, merged, seconds: duration };
     } finally { expired = true; clearTimeout(timer); clearTimeout(softTimer); controller.abort(); }
   }
   const clean = t => String(t ?? '').replace(/[\u2010\u2011]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -504,19 +505,24 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     if (mode === 'live') {
       const gate = limits.captionCheck(deviceId);
       if (!gate.ok) throw Object.assign(deviceError('Untertitel-Budget erreicht.', 429), { code: 'caption-budget', retryAfter: gate.retryAfter });
-      const data = JSON.stringify({ glossar, woerterbuch: terms, text: input }).replaceAll('<', '\\u003c');
+      // Since 14 Nov 2026 the subtitle clean-up follows the final pass's rules: "davor" = the caption text right before these words (orientation only),
+      // the names on his screen, and the same word guard afterwards (a reworded word is undone, a removed stutter stays).
+      const before = clean(context.before).slice(-600), screenNames = (Array.isArray(context.screenNames) ? context.screenNames : []).filter(n => typeof n === 'string' && n.trim() && n.length <= 100).slice(0, 40);
+      const data = JSON.stringify({ glossar, woerterbuch: terms, davor: before, text: input, ...(screenNames.length ? { context: { bildschirmNamen: screenNames } } : {}) }).replaceAll('<', '\\u003c');
       // a#41d6d2 / 14 Nov 2026: one 2.5 s call to a single OpenRouter model (DESK_DICTATE_MERGE_MODEL, default openai/gpt-oss-120b:nitro; free:true = off the
       // spend cap), no fallback, and a late answer was a 503 polish-down (reason timeout, 2504 ms). The subtitle is only a nicety: the raw text goes back with 200,
       // failed:1 and a note, like a failed window of "final" mode. (A 429 caption budget and a missing key stay errors: those are not "slow".)
       let out;
-      try { out = await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(timeoutMs ?? 2500), { system: LIVE_PROMPT, maxTokens: 900, free: true }); }
+      try { out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(timeoutMs ?? 2500), { system: LIVE_PROMPT, maxTokens: 900, free: true })); }
       catch (err) {
         const reason = reasonOf(err);
-        return { text: input, ms: Date.now() - started, windows: 1, changed: 0, failed: 1, reason, note: reason === 'timeout' ? 'Nachbearbeitung zu langsam – Rohtext' : 'Nachbearbeitung nicht erreichbar – Rohtext' };
+        return { text: input, ms: Date.now() - started, windows: 1, changed: 0, failed: 1, undone: 0, reason, note: reason === 'timeout' ? 'Nachbearbeitung zu langsam – Rohtext' : 'Nachbearbeitung nicht erreichbar – Rohtext' };
       }
       limits.captionAdd(deviceId, 0.0005);
-      const ok = keptWords(input, out);
-      return { text: ok ? applyCorrections(clean(out), dictionary) : input, ms: Date.now() - started, windows: 1, changed: ok && clean(out) !== input ? 1 : 0, failed: ok ? 0 : 1 };
+      if (!keptWords(input, out, 1.5)) return { text: input, ms: Date.now() - started, windows: 1, changed: 0, failed: 1, undone: 0 };
+      const g = guardText(input, out, { terms: guardTerms(dictionary, env, screenNames) });
+      const live = properNames(applyCorrections(dropStutters(g.text).text, dictionary), knownNames(dictionary, env));
+      return { text: live, ms: Date.now() - started, windows: 1, changed: live !== input ? 1 : 0, failed: 0, undone: g.undone };
     }
     if (!limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
     const countBreaks = t => (t.match(/\n+/g) ?? []).length;
@@ -548,7 +554,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     let cleaned = stitchWindows(sources, outs, LAP);
     // the whole text once more through the guard: whatever the stitching did, his words are all there, once, in order
     if (windows.length > 1 && splitWords(input).length <= 3000) cleaned = guardText(input, cleaned, guardWith).text;
-    const out = properNames(applyCorrections(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned, dictionary), knownNames(dictionary, env));
+    const out = properNames(applyCorrections(dropStutters(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned).text, dictionary), knownNames(dictionary, env));
     return { text: out, ms: Date.now() - started, windows: windows.length, changed, failed, undone, breaks: countBreaks(out) };
   }
   return { highlight, dictate, vision, caption, polish };

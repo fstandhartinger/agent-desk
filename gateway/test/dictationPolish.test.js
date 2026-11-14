@@ -31,6 +31,10 @@ it('a clean-up that drops or invents too much is not his text', () => {
   assert(keptWords(before, 'Wir wollen die Sichtbarkeit gegenüber potenziellen Kunden verbessern und es allen schmackhaft machen.'));
   assert(!keptWords(before, 'Mehr Sichtbarkeit.'));
   assert(!keptWords(before, ''));
+  // the live subtitle's short pieces may lose a stutter (every change still passes the word guard)
+  assert(!keptWords('ich ich habe', 'ich habe'));
+  assert(keptWords('ich ich habe', 'ich habe', 1.5));
+  assert(!keptWords('wir haben das gestern so gemacht', 'gemacht', 1.5));
   assert(!keptWords(before, 'Ganz andere Wörter stehen hier jetzt drin, gar nichts davon passt mehr zusammen.'));
 });
 const dataOf = body => JSON.parse(body.messages[1].content.replace(/^<artifact_data>\n|\n<\/artifact_data>$/g, ''));

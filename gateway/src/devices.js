@@ -9,7 +9,7 @@ import { createScreenVision } from './screenVision.js';
 import { createScreenText } from './screenText.js';
 import { createBriefing } from './briefing.js';
 import { createComputer, validateResult, maxResultBytes } from './computer/run.js';
-import { lateTs } from './trace.js';
+import { lateTs, boundData } from './trace.js';
 import { audit } from './audit.js';
 import { short } from './redact.js';
 import { GLOSSARY_TERMS } from './dictationContext.js';
@@ -36,8 +36,56 @@ function chunkInfo(raw) {
   if (!c || typeof c !== 'object' || typeof c.dictationId !== 'string' || !CHUNK_ID.test(c.dictationId) || !Number.isInteger(c.index) || c.index < 0 || c.index > 1000 || typeof c.final !== 'boolean') throw fail('Ungültige Chunk-Angabe.');
   return { dictationId: c.dictationId, index: c.index, final: c.final };
 }
+/** Optional `dictation` of a caption window or a live clean-up: the id of the dictation they belong to (the same shape as a chunk's dictationId). `count` = how often the form field came. */
+function dictationId(value, count = 1) {
+  if (count > 1 || typeof value !== 'string' || !CHUNK_ID.test(value)) throw fail('Ungültige Diktat-Angabe.');
+  return value;
+}
+/** Optional `seq` of a caption window: its number in the dictation, an integer 0..1,000,000 sent as text. */
+function seqNumber(value, count = 1) {
+  if (count > 1 || typeof value !== 'string' || !/^\d{1,7}$/.test(value) || Number(value) > 1_000_000) throw fail('Ungültige Fensternummer.');
+  return Number(value);
+}
 const SCOPES = ['dictate', 'dictionary', 'screen', 'exists'];
 const TTL = 90 * 24 * 3600_000;
+const CAPTION_LOG_ITEMS = 20, CAPTION_LOG_CHARS = 5000, CAPTION_LOG_MS = 15_000;
+/**
+ * The caption text log (14 Nov 2026): what MAI heard (k "w") and what the live clean-up made of it (k "p"), per device and dictation, in a few events instead of one per window.
+ * An event {d, items} goes out with 20 items, at 5,000 characters of JSON, when the dictation id changes, or 15 s after its first item. A trace event over 8,192 bytes would be
+ * replaced by a truncated preview (text lost), so an event is split until it passes boundData and a single huge item has its texts halved. dlog may be absent (no trace service).
+ */
+export function createCaptionLog({ dlog, textOn = () => true, afterMs = CAPTION_LOG_MS }) {
+  const pending = new Map(); // deviceId -> {d, items, chars, timer}
+  function emit(deviceId, d, items) {
+    const data = { d, items };
+    if (!boundData(data).truncated) return dlog(deviceId, 'caption.log', data);
+    if (items.length > 1) { emit(deviceId, d, items.slice(0, items.length >> 1)); emit(deviceId, d, items.slice(items.length >> 1)); return; }
+    const item = { ...items[0] }, longest = ['text', 'out', 'before'].filter(k => typeof item[k] === 'string' && item[k]).sort((a, b) => item[b].length - item[a].length)[0];
+    if (!longest) return; // nothing left to shorten (cannot happen: the numbers alone are far below the limit)
+    item[longest] = item[longest].slice(0, item[longest].length >> 1);
+    emit(deviceId, d, [item]);
+  }
+  function flush(deviceId) {
+    if (deviceId === undefined) { for (const id of [...pending.keys()]) flush(id); return; }
+    const buf = pending.get(deviceId);
+    if (!buf) return;
+    pending.delete(deviceId); clearTimeout(buf.timer);
+    try { emit(deviceId, buf.d, buf.items); } catch { /* the log never costs the caption */ }
+  }
+  /** item: {at, k, d, ...}; text/out/before are dropped when DESK_CAPTION_TEXT_LOG=off. */
+  function push(deviceId, item) {
+    try {
+      if (!textOn()) for (const k of ['text', 'out', 'before']) delete item[k];
+      const d = item.d ?? null;
+      let buf = pending.get(deviceId);
+      if (buf && buf.d !== d) { flush(deviceId); buf = undefined; }
+      if (!buf) { buf = { d, items: [], chars: 0, timer: setTimeout(() => flush(deviceId), afterMs) }; buf.timer.unref?.(); pending.set(deviceId, buf); }
+      buf.items.push(item); buf.chars += JSON.stringify(item).length;
+      if (buf.items.length >= CAPTION_LOG_ITEMS || buf.chars >= CAPTION_LOG_CHARS) flush(deviceId);
+    } catch { /* the log never costs the caption */ }
+  }
+  return { push, flush, pendingCount: deviceId => pending.get(deviceId)?.items.length ?? 0 };
+}
 export function createDeviceService({ artifacts, traces, hub, env = process.env, now = Date.now, fetchImpl = fetch, media = createDeviceMedia({ env, fetchImpl }), screenText = createScreenText({ now }), vision = createScreenVision({ media, artifacts, now, screenText }), briefing = createBriefing({ hub, artifacts, now, requestDevice: (sid, id) => vision.requestBriefing?.(sid, id) ?? false }), computer = createComputer({ vision, hub, now, audit }) } = {}) {
   const hash = token => crypto.createHmac('sha256', cfg.sessionSecret()).update(token).digest('hex');
   const hits = new Map();
@@ -147,8 +195,13 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       throw err;
     }
   }
-  // ---- captions: MAI only, own limits; the text is never traced, only an aggregate per minute ----
+  // ---- captions: MAI only, own limits; an aggregate per minute (caption.stats) and, since 14 Nov, the words in a text log (caption.log, see createCaptionLog) ----
   const stats = new Map(), capCache = new Map(), capBusy = new Map(); let capInFlight = 0;
+  // DESK_CAPTION_TEXT_LOG=off keeps counts and timings and drops the words (the switch is read per call)
+  const textLog = () => !['off', '0', 'false', 'no'].includes(String(env.DESK_CAPTION_TEXT_LOG ?? '').trim().toLowerCase());
+  // the app says log=0 when its own CaptionLog or TraceUpload is off (0.1.16): then no words of that request are kept either
+  const appAllows = v => !['0', 'false', false].includes(v ?? '1');
+  const captionLog = createCaptionLog({ dlog, textOn: textLog });
   function flushStats(deviceId) {
     const st = stats.get(deviceId);
     if (!st) return;
@@ -169,12 +222,14 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     const missing = ctx.visibleIds.filter(id => !c.titles.has(id)), wait = (p, fallback) => Promise.race([p.catch(() => fallback), new Promise(resolve => setTimeout(() => resolve(fallback), 600).unref?.())]);
     const [items, dict_] = await Promise.all([missing.length ? wait(artifacts.visibleTitles(missing), []) : [], wait(dictionary(), {})]);
     for (const { id, title } of items) c.titles.set(id, title);
-    return phraseList(dict_, ctx.visibleIds.map(id => c.titles.get(id)), [...ctx.recentTerms, ...GLOSSARY_TERMS]);
+    return phraseList(dict_, ctx.visibleIds.map(id => c.titles.get(id)), [...ctx.recentTerms, ...screenText.terms(deviceId, 40), ...GLOSSARY_TERMS]); // names on his screen right now (screenText.js) before the glossary
   }
   async function caption(record, form) {
     const audio = form.get('audio');
     if (!audio || typeof audio.arrayBuffer !== 'function' || form.getAll('audio').length !== 1 || form.getAll('context').length > 1) throw fail('Audio fehlt oder ist zu groß.');
     if (audio.size > 12 * 32000 + 4096) throw fail('Höchstens 12 Sekunden Audio.', 413);
+    // optional since the app's caption log (14 Nov 2026): the dictation these windows belong to and the window's number in it
+    const dictation = form.has('dictation') ? dictationId(form.get('dictation'), form.getAll('dictation').length) : null, seq = form.has('seq') ? seqNumber(form.get('seq'), form.getAll('seq').length) : null;
     let ctx = {}; if (form.has('context')) { try { ctx = JSON.parse(form.get('context')); } catch { throw fail('Ungültiger Kontext.'); } }
     if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx) || (ctx.recentTerms !== undefined && (!Array.isArray(ctx.recentTerms) || ctx.recentTerms.length > 50 || ctx.recentTerms.some(v => typeof v !== 'string' || v.length > 100)))) throw fail('Ungültiger Kontext.');
     ctx = { visibleIds: deviceIds(ctx.visibleIds ?? []), recentTerms: ctx.recentTerms ?? [] };
@@ -186,7 +241,13 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     capBusy.set(record.deviceId, (capBusy.get(record.deviceId) ?? 0) + 1); capInFlight++;
     try {
       const phrases = await captionPhrases(record.deviceId, ctx);
-      try { const r = await media.caption(buffer, phrases, record.deviceId); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost }); return { text: r.text, ms: r.ms, seconds: r.seconds, costUsd: Number(r.cost.toFixed(6)) }; }
+      try {
+        const r = await media.caption(buffer, phrases, record.deviceId); noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost });
+        // words only for a dictation (the app sends its id) whose app allows it; a voice session's subtitle (no id) keeps counts and timings only
+        const words = dictation && appAllows(form.get('log'));
+        captionLog.push(record.deviceId, { at: now(), k: 'w', d: dictation, n: seq, ms: r.ms, sec: r.seconds, ...(words ? { text: String(r.text ?? '').slice(0, 600) } : {}) });
+        return { text: r.text, ms: r.ms, seconds: r.seconds, costUsd: Number(r.cost.toFixed(6)) };
+      }
       catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'caption-failed' } }); }
     } finally { capBusy.set(record.deviceId, capBusy.get(record.deviceId) - 1); if (!capBusy.get(record.deviceId)) capBusy.delete(record.deviceId); capInFlight--; }
   }
@@ -381,14 +442,22 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const body = await readJson(req, 64 * 1024);
       if (!body || typeof body !== 'object' || Array.isArray(body) || !['final', 'live', 'format'].includes(body.mode) || (body.format !== undefined && typeof body.format !== 'boolean') || typeof body.text !== 'string' || body.text.length > (body.mode === 'live' ? 3000 : 40000)) throw fail('Ungültige Nachbearbeitung.');
       const pctx = body.context && typeof body.context === 'object' && !Array.isArray(body.context) ? body.context : {};
-      if ((pctx.process !== undefined && (typeof pctx.process !== 'string' || pctx.process.length > 100)) || (pctx.fieldBefore !== undefined && (typeof pctx.fieldBefore !== 'string' || pctx.fieldBefore.length > 500))) throw fail('Ungültiger Kontext.');
+      if ((pctx.process !== undefined && (typeof pctx.process !== 'string' || pctx.process.length > 100)) || (pctx.fieldBefore !== undefined && (typeof pctx.fieldBefore !== 'string' || pctx.fieldBefore.length > 500)) || (pctx.before !== undefined && (typeof pctx.before !== 'string' || pctx.before.length > 600))) throw fail('Ungültiger Kontext.');
+      const dictation = body.dictation === undefined ? null : dictationId(body.dictation); // optional: which dictation this belongs to (log only)
       rate(`polish-${body.mode}:${record.deviceId}`, body.mode === 'live' ? 90 : 20);
       const dict_ = await Promise.race([dictionary().catch(() => ({})), new Promise(resolve => setTimeout(() => resolve({}), 600).unref?.())]);
+      if (body.log !== undefined && typeof body.log !== 'boolean') throw fail('Ungültige Nachbearbeitung.');
+      const words = appAllows(body.log) && (body.mode !== 'live' || dictation !== null); // live: only for a dictation (an id); final/format: the dictation's own text
+      const live = body.mode === 'live', entry = at => ({ at, k: 'p', d: dictation, ...(words ? { text: body.text.slice(0, 1500), before: (pctx.before ?? '').slice(-300) } : {}) });
       try {
-        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '' }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId, format: body.format === true });
-        if (body.mode !== 'live') dlog(record.deviceId, 'dictation.polish', { mode: body.mode, ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed, undone: r.undone ?? 0, breaks: r.breaks ?? 0 });
+        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '', before: pctx.before ?? '', screenNames: live ? screenText.terms(record.deviceId, 40) : [] }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId, format: body.format === true });
+        if (!live) dlog(record.deviceId, 'dictation.polish', { mode: body.mode, ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed, undone: r.undone ?? 0, breaks: r.breaks ?? 0, ...(dictation ? { d: dictation } : {}), ...(textLog() && words ? { text: r.text } : {}) });
+        else captionLog.push(record.deviceId, { ...entry(now()), ms: r.ms, ok: !r.failed, changed: r.changed, undone: r.undone ?? 0, ...(words ? { out: r.text.slice(0, 990) } : {}) });
         sendJson(res, 200, r);
-      } catch (err) { throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'polish-failed' } }); }
+      } catch (err) {
+        if (live) captionLog.push(record.deviceId, { ...entry(now()), ms: Date.now() - ctx.started, ok: false, changed: 0, undone: 0, out: '', err: String(err?.code ?? err?.status ?? 'error').slice(0, 40) });
+        throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'polish-failed' } });
+      }
     } else if (screenTextPost) {
       // The visible text of his screen (UI Automation + OCR, redacted in the app) when a dictation starts or the picture changes in a voice session.
       // Memory only, three minutes, per device; the log line carries counts, never the text.
@@ -430,10 +499,10 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
         // a chunk that is not the last: he is still talking, nobody waits for it, every recogniser gets its time
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })), { patient: chunk ? !chunk.final : false });
       }).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
-      dlog(record.deviceId, 'dictation.result', { screenNames: names.length, ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}) });
+      dlog(record.deviceId, 'dictation.result', { screenNames: names.length, ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}), ...(textLog() && appAllows(form.get('log')) ? { text: result.text } : {}) });
       sendJson(res, 200, result);
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
     return true;
   }
-  return { route, dictionary, authorizeSession, vision, screenText, briefing, computer, computerEnabled: id => computerOn.has(id), flushCaptionStats: (deviceId) => flushStats(deviceId) };
+  return { route, dictionary, authorizeSession, vision, screenText, briefing, computer, computerEnabled: id => computerOn.has(id), flushCaptionStats: (deviceId) => { for (const id of deviceId === undefined ? [...stats.keys()] : [deviceId]) flushStats(id); captionLog.flush(deviceId); }, flushCaptionLog: (deviceId) => captionLog.flush(deviceId) };
 }
