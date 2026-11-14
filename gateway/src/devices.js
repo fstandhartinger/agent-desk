@@ -116,10 +116,23 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     return { token, deviceId: created.id, expiresAt };
   }
   const pairing = createPairing({ now, rate, mint, origin: () => cfg.deskOrigin() });
+  // A registry restart (deploy 14 Nov 13:51Z) answered /api/auth/me with 503 and the page fell back to the login gate. A device whose
+  // verification succeeded within VERIFY_GRACE_MS stays signed in while the registry is unreachable; 404 (revoked/unknown) still ends it.
+  const VERIFY_GRACE_MS = 6 * 3600_000;
+  const verifiedAt = new Map(); // deviceHash -> {at, expires}
   async function authorizeSession(session) {
     if (!session?.deviceHash) return !!session;
-    try { const row = await registry('/v1/devices/verify', { hash: session.deviceHash }); return !row.revoked_at && Date.parse(row.expires_at) > now(); }
-    catch (err) { if (err.status === 404) return false; throw fail('Registry ist vorübergehend nicht erreichbar.', 503); }
+    try {
+      const row = await registry('/v1/devices/verify', { hash: session.deviceHash });
+      const ok = !row.revoked_at && Date.parse(row.expires_at) > now();
+      if (ok) { if (verifiedAt.size > 200) verifiedAt.delete(verifiedAt.keys().next().value); verifiedAt.set(session.deviceHash, { at: now(), expires: Date.parse(row.expires_at) }); } else verifiedAt.delete(session.deviceHash);
+      return ok;
+    } catch (err) {
+      if (err.status === 404) { verifiedAt.delete(session.deviceHash); return false; }
+      const last = verifiedAt.get(session.deviceHash);
+      if (last && now() - last.at < VERIFY_GRACE_MS && last.expires > now()) return true; // registry down: the last good answer holds for a while
+      throw fail('Registry ist vorübergehend nicht erreichbar.', 503);
+    }
   }
   // Central failure log: every error of a /api/device/ route leaves device.error {path,status,code,message,ms,bytes} (stdout audit + the device log of the day).
   const errSeen = new Map();
