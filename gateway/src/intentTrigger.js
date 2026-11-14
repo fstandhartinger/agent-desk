@@ -49,7 +49,15 @@ const flat = (t, max) => String(t ?? '').replace(/\s+/g, ' ').replace(/"{2,}/g, 
 
 /** The last sentence of the assistant's reply when it is a question ("... Soll ich das an den Main Agent tippen?"), else ''. */
 export function lastQuestion(text) {
-  const t = String(text ?? '').trim();
+  let t = String(text ?? '').trim();
+  // "Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt." (a#36e5fa t4): one short closing sentence after the question
+  // does not hide it. Only the question is ever shown; the trailing sentence never reaches the judge.
+  const qEnd = t.lastIndexOf('?');
+  if (qEnd >= 0 && qEnd < t.length - 1) {
+    const tail = t.slice(qEnd + 1).trim();
+    if (tail.length > 80 || /[.!?…]./.test(tail)) return '';
+    t = t.slice(0, qEnd + 1);
+  }
   if (!t.endsWith('?')) return '';
   let start = t.length - 1;
   while (start > 0 && !'.!?\n'.includes(t[start - 1])) start -= 1; // plain scan, no regex: the reply can be long

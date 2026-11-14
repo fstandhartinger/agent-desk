@@ -235,3 +235,21 @@ test('voiceOnly never reaches a provider schema; the text chat gets no voice too
     assert.match(r.content, /nur in einem Sprachgespräch/);
   }
 });
+
+// a#36e5fa t4 (14 Nov ~13:47Z): the Desk asked "Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt." and his "Ja." was
+// dropped as an echo of the Desk's "Ja" and the offer was hidden by the trailing sentence; Florian: "ein Ja wie dieses soll einfach ausreichen".
+test('a#36e5fa: a bare "Ja." after "… starten? Ein klares Ja genügt." reaches the judge with the offer and starts the job', async (t) => {
+  const seen = [];
+  const h = harness(t, { askIntent: async (text) => { seen.push(text); return { main_agent: false, agent_job: /Assistent: Soll ich das als Job im Hintergrund starten\?\nFlorian: Ja\.$/.test(text) }; } });
+  await sleep(1);
+  h.say('Die Podiumsplätze zwei und drei sollen auch etwas bekommen.', 'i1');
+  await sleep(10);
+  h.emit({ t: 'transcript', role: 'assistant', final: true, text: 'Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt.' });
+  h.tick(4000);
+  h.say('Ja.', 'i2');
+  await sleep(10);
+  h.call('c1', 'start_agent_job', { title: 'Podiumsanteile', prompt: 'Ergänze die Podiumsanteile im Regelwerk.' });
+  const out = await h.result('c1');
+  assert.ok(seen.some((s) => /Florian: Ja\.$/.test(s)), `the judge saw: ${seen.join(' || ')}`);
+  assert.ok(h.jobs.some((j) => j.method === 'job.start'), out);
+});

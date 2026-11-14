@@ -122,7 +122,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let heardBack = { text: '', at: -Infinity }; // what the agent said last: its own voice through his speakers must not count as his words
   const echoOf = (text, at_) => { // most of the sentence's words were just spoken by the agent
     if (at_ - heardBack.at > ECHO_MS) return false;
-    const said = new Set(normText(heardBack.text).split(' ')), own = normText(text).split(' ').filter(Boolean);
+    const saidWords = normText(heardBack.text).split(' ').filter(Boolean), said = new Set(saidWords), own = normText(text).split(' ').filter(Boolean);
+    // a lone "Ja." is no echo of "Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt." (a#36e5fa t4, 14 Nov): the speakers'
+    // sound of a long reply comes back as (most of) that reply, so a final of one or two words is an echo only of an equally short reply
+    if (own.length <= 2 && saidWords.length > 4) return false;
     return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
   };
   let speechStartSeen = false; // did this vendor ever send a speech start? If not, "early" cannot be judged and the confirm code is the only gate
