@@ -35,6 +35,10 @@ export const SANS = FONT;
 export const PALETTE = { ...C, panel: '#15151c', panelHi: '#1b1b24', grid: '#24242f', text2: '#cfcde0' };
 export const TONES: CanvasTone[] = ['violet', 'moss', 'papaya', 'amber'];
 
+/** Categorical palette for parts of a whole (pie, stacked bar) and multi-series charts, in FIXED slot order. Validated with the
+ *  dataviz validator against the canvas surface #15151c (dark: all checks pass; adjacent CVD ΔE 8.4 -> the legend and the 2 px gaps
+ *  are the secondary encoding). Never rotated by value; a series count of 1 uses slot 1 only. */
+export const CATEGORICAL_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#9085e9'] as const;
 export const tone = (t: CanvasTone | undefined, fallback = '#a5a4bb'): string =>
   !t || t === 'neutral' ? fallback : (C as Record<string, string>)[t] ?? fallback;
 

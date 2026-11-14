@@ -580,3 +580,77 @@ The three reference questions, asked by voice in EACH of xai / openai / gemini A
 2. "Erklär mir die Architektur vom Agent-Desk-Gateway." → architecture diagram from real code (code_outline), groups Browser / Gateway (Sandy) / Bridge (LeChonk) / Vendors.
 3. "Wofür geben wir das Geld aus?" → donut chart from ledger_spend with real sums, source footnote board #22 / export.
 Each produces a correct, sourced visual within 8 s of the request (voice: of the end of speech), without the agent ever saying it cannot draw.
+
+## Web forms (14 Nov 2026): points, stat, stacked bar, speech-synced reveal
+Web side of the "few words, big type" forms (the gateway validates and clamps; the web only renders). Renderers live in
+`web/src/canvas/render/forms.ts` (a lazy chunk, loaded when such a canvas is drawn), all pure `spec + size → Scene`.
+- **`points`** (`style` numbered|bullets, `points[{label, note?, tone?, cue?}]`, `sync:"speech"`): vertical list, centred in the
+  stage. Labels ≥ 22 px on phones / ≥ 28 px on desktop (≥ 720 px wide), notes ≥ 15 px, weights 650 / 450, label in `fg`, note in `dim`
+  (text is never in an accent colour). Numbered rows = accent disc (papaya = `highlight`, else violet or the point's tone) with the
+  numeral; bullets = an 8 px dot. Row prims are keyed `pt-<i>-…`; `renderPoints(spec, size, {revealed})` gives rows ≥ `revealed`
+  `opacity: 0` with their layout reserved. Without a voice session the rows enter 120 ms apart.
+- **`stat`** (`stats[{value, unit?, label, tone?}]`, 1-3): the figure is ≥ 48 px (up to 160), same sans face, German thousands
+  separator, counts up on enter; unit next to it (under it when both do not fit); 2-3 stats = KPI cards, side by side on desktop and
+  stacked below 480 px.
+- **`bar` + `layout:"stacked"`**: one 56-72 px bar, segments in the fixed categorical order, 2 px gaps, 4 px rounded outer ends, the
+  share printed on a segment when it fits (`#fff` / `#0e0e12` by contrast), the highlight with a 2 px `fg` outline, a legend row
+  per item below (zero items keep their row). More than six parts: the smallest fold into a neutral "Sonstige".
+- **Palette** (`scene.ts`): `CATEGORICAL_DARK` `#3987e5 #d95926 #199e70 #c98500 #d55181 #9085e9` (validated against `#15151c`) and
+  `CATEGORICAL_LIGHT` `#2a78d6 #eb6834 #1baf7a #eda100 #e87ba4 #6250d6` (for a future light surface; green, amber and pink are below
+  3:1 on white, so labels must stay visible). Pie slices and the stacked bar use the dark set in order; a plain bar chart is ONE
+  series = ONE colour (slot 1, highlight papaya, explicit tones kept), never a value ramp.
+- **Speech-synced reveal.** `VoiceSession` feeds `lib/speechCursor.ts` (`{turn, text, spokenChars, speaking}`, ≤ 10 store updates/s):
+  `spokenChars = text.length × (received − buffered) / received` from the 24 kHz audio chunks, the assistant transcript and the player
+  worklet's `buffered`; a new `turn` starts with the user's final transcript, a barge-in flush or an interrupt. `canvas/reveal.ts`
+  `revealCount(spec, cursor, sinceMs, specTurn)`: point i is due when its `cue` (normalised: case, punctuation, spacing) starts at
+  most 12 characters ahead of `spokenChars`; a point without a usable cue follows its predecessor 60 characters later; at least one
+  row; everything once the turn changed, the canvas came from the history, or there was no speech for 1.5 s. The canvas records its
+  turn when its bus event arrives (`noteSpecTurn`). The stage fades a row in over 250 ms (opacity tween in `tween.ts`/`Stage.tsx`,
+  none with reduced motion). Only the simple version follows the speech; "Details" and the PNG export show every point.
+
+## Forms (14 Nov 2026): the picture's job picks the form (gateway, `gateway/src/canvasForm.js`)
+Florian (session a#36e5fa): too many flow charts (14 of 14 drawings that day), too few distribution charts; three spoken reasons
+were drawn as a flow chart. The canvas is a slide next to the spoken answer: little reading, one idea.
+
+**Why it landed on flows** (before): (1) the early illustrator drew from the QUESTION alone, before the answer existed, so it never
+knew the answer would be "three reasons" or "75 / 17 / 8"; (2) the prompt listed flow first and its only worked example was a
+flow, the "simple view" rules spoke of boxes and arrows, there was no list or number form; (3) the voice transcript says numbers as
+words ("fünfundsiebzig Prozent"), so the number grounding saw no numbers and the model avoided charts; (4) the gate checked
+structure only, never reading load or whether a flow explains a process. Replaying the 7 turns of 14 Nov through the old code with
+the same information gave 7 of 7 flows (`docs/screens/forms-1114/before-after/`).
+
+**Form choice** `formOf({question, answer})` -> `{form, strong, why}`: points (reasons, rules, "erstens/zweitens"), distribution
+(a split, percent), comparison, trend, number (how much / how high), process, architecture, timeline. The answer decides first
+(an enumeration or a split in percent is `strong`); a long spoken turn is judged by its asking sentences and its end
+(`questionPart`). `FORM_KINDS` maps a form to the kinds that do its job. The request to the drawing model carries a `Form:` line.
+
+**New kinds**: `points` {style numbered|bullets, points [{label 1-4 words, note <= 8 words, cue}], sync "speech"}; `stat`
+{stats [{value, unit, label}] x 1-3}; `bar` with `layout:"stacked"` (one whole, <= 6 parts). Validated in `canvas.js`.
+
+**Numbers**: `numberFacts(text)` = the sentences with numbers, number words as digits (`germanNumber`, `digitize`), plus
+"[Desk gerechnet: Summe 85 %, Rest bis 100 %: 15 %]" for a split in percent. The block is in the request ("Zahlen, die Florian
+hört") and in the grounding corpus; a remainder nobody claimed is drawn as "Rest offen". `stat` values are grounded like items.
+
+**Checked, not hoped for** (`shapeCheck` in the illustrator, after the existing gates):
+- `formError`: a strong form must be kept (a flow for an enumerating answer goes back; the fallback is `pointsFromAnswer`, the
+  numbered list built from "Erstens … Zweitens …"); a pie with > 4 parts goes to a bar.
+- A flow without a branch that explains no process (`isLinearNonProcess`) becomes a numbered points list in code (`flowToPoints`),
+  no extra model round. Flows stay for processes and anything with a real decision.
+- `readingLoad`: title <= 8 words, caption <= 14, labels <= 4, notes <= 8, stat labels <= 5, edge labels <= 2, picture <= 45 words.
+  Over budget -> one repair round; fallback `trimLoad`.
+- Type sizes on a phone and the palette are the web's job (section "Web forms": points >= 22 px at 360 px, hero figure >= 48 px,
+  categorical palette validated with the dataviz validator, dark and light).
+
+**When it is drawn** (`createCanvasSession`): a question for reasons (`answerFirst`) starts no early drawing; the spoken answer starts
+it (a lead-in like "Die Logik ist dreifach." waits for the next final). Data questions still start at once; when the answer then
+shows a strong form the drawing does not have, it is redrawn once under the same id (`maybeReform`, audit `canvas.reform`). An
+early run that found nothing in the question (skip) gives the answer its own chance. Kill switch `DESK_CANVAS_ANSWER_FIRST=0`.
+
+**Speech and picture**: the drawing model copies a `cue` per point from the answer; `attachCues` keeps only cues the answer
+really contains and sets `sync:"speech"`; the browser reveals each point when its cue is spoken (section "Web forms").
+Not built (costly): choosing the form inside the voice model's own turn (one more tool schema in every provider's context, which
+GPT Live already caps at 500 tokens), word-level audio timestamps (no provider sends them for live speech), and drawing before
+the answer exists for reasons (the answer is the source).
+
+**Eval**: `gateway/test/canvas-forms.test.js` — the real turns of a#41d6d2 and a#36e5fa (`test/fixtures/canvas-turns-1114.json`)
+plus a synthetic set with expected forms, number words, budgets, gates, cues, and the session timing.

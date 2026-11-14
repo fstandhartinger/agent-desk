@@ -25,7 +25,9 @@ describe('canvas tool definitions', () => {
     assert.equal(p.properties.items.items.properties.value.type, 'number');
     assert.equal(p.properties.series.items.properties.points.items.properties.y.type, 'number');
     assert.equal(p.properties.rows.items.items.type, 'string');
-    assert.deepEqual(p.properties.kind.enum.length, 10);
+    assert.deepEqual(p.properties.kind.enum.length, 12);
+    assert.equal(p.properties.points.items.properties.cue.type, 'string');
+    assert.equal(p.properties.stats.items.type, 'object');
     assert.equal(def('canvas_draw').async, true);
     assert.deepEqual(def('canvas_draw').parameters.required, ['request']);
   });

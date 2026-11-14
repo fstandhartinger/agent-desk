@@ -5,6 +5,7 @@ import { MuteGate } from './muteGate';
 import { SpeechOnset } from './speechOnset';
 import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
+import { SpeechTracker } from './speechCursor';
 import { drainClientErrors } from './clientError';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
 import type { ActivityEvent, ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
@@ -66,6 +67,8 @@ export class VoiceSession {
   private onset = new SpeechOnset();
   private readyTimer = 0;
   private unwatchFocus: (() => void) | null = null;
+  /** Where the spoken answer is (canvas reveal, see speechCursor.ts). */
+  private cursor = new SpeechTracker();
   private pending: { ts: number; type: string; data: unknown }[] = [];
   private offDevice: (() => void) | null = null;
   private gate = new MuteGate(() => this.stream?.getAudioTracks() ?? [], (muted, source) => {
@@ -125,6 +128,7 @@ export class VoiceSession {
     this.player = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [1], processorOptions: { sourceRate: 24000 } });
     this.player.port.onmessage = (e: MessageEvent<{ rms: number; buffered: number }>) => {
       levels.speaker = Math.min(1, e.data.rms * 3.5);
+      this.cursor.player(e.data.buffered);
       const st = voiceStore.get().state;
       if (e.data.buffered > 0.02) {
         this.decay = 0;
@@ -154,6 +158,7 @@ export class VoiceSession {
     };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
+        this.cursor.audio(e.data.byteLength); // before the transfer detaches the buffer
         this.player?.port.postMessage(e.data, [e.data]);
         return;
       }
@@ -176,6 +181,7 @@ export class VoiceSession {
     switch (m.type) {
       case 'ready':
         this.ready = true;
+        this.cursor.start();
         voiceStore.set((s) => ({ ...s, readyAt: Date.now() })); // the session timer in the dock runs from here, like the billing clock
         this.set('listening', m.model);
         if (this.gate.muted) this.sendJson({ type: 'mute', muted: true, source: 'dock' });
@@ -192,13 +198,15 @@ export class VoiceSession {
       case 'transcript': {
         const text = m.delta ?? m.text ?? '';
         this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace);
-        if (m.role === 'user' && m.final) this.set('thinking');
+        if (m.role === 'assistant') this.cursor.transcript(text, m.final, m.delta !== undefined);
+        if (m.role === 'user' && m.final) { this.cursor.reset(); this.set('thinking'); } // a new user turn: the earlier answer is over
         break;
       }
       case 'speech_started':
         this.h.onSpeechStart?.(); // the placeholder shows even when barge-in is blocked (muted: the controller ignores it)
         if (!this.gate.allowBargeIn()) break;
         this.player?.port.postMessage('flush');
+        this.cursor.reset();
         levels.speaker = 0;
         this.set('listening');
         break;
@@ -318,6 +326,7 @@ export class VoiceSession {
 
   interrupt() {
     this.player?.port.postMessage('flush');
+    this.cursor.reset();
     levels.speaker = 0;
     this.ws?.send(JSON.stringify({ type: 'interrupt' }));
     this.set('listening');
@@ -340,6 +349,7 @@ export class VoiceSession {
 
   private cleanup() {
     this.ready = false;
+    this.cursor.stop();
     this.gate.reset();
     voiceStore.set((s) => ({ ...s, muted: false }));
     this.offDevice?.();

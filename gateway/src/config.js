@@ -22,6 +22,7 @@ export const cfg = {
   xaiSilenceMs: () => Number(env('DESK_XAI_SILENCE_MS', '1000')), // xAI server VAD: a pause shorter than this does not end the turn (live 2 Nov: xAI accepts it; 1000 ms still splits a 1.4 s pause and 1500 ms does not, but that adds a second to every answer, and the merge in session.js handles what still splits); 0 = vendor default
   userMergeMs: () => Number(env('DESK_VOICE_MERGE_MS', '1500')), // user transcript fragments within this window are one question
   canvasEarly: () => env('DESK_CANVAS_EARLY', '1') !== '0', // kill switch of the early illustrator
+  canvasAnswerFirst: () => env('DESK_CANVAS_ANSWER_FIRST', '1') !== '0', // 14 Nov 2026: reasons / explanations are drawn from the spoken answer (kill switch)
   canvasResearchMs: () => Number(env('DESK_CANVAS_RESEARCH_MS', '6000')),
   activityViz: () => env('DESK_ACTIVITY_VIZ') === '1',
   // GPT-Live delegation backend (round 10, measured live: see the r10 RESULT); Astra is never run at high/xhigh

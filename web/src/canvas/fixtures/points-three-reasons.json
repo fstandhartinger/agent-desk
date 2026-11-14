@@ -1,0 +1,12 @@
+{
+  "v": 2, "id": "warum-gleich-teilen", "kind": "points", "style": "numbered", "sync": "speech",
+  "title": "Warum gleich teilen?",
+  "caption": "Drei Gründe für 1.000 Alpha je Bucket (Beispiel für die Demo).",
+  "highlight": "Feste Belohnung",
+  "points": [
+    { "label": "Prüfbarkeit", "note": "ein Eintrag, ein Start", "cue": "Erstens die Prüfbarkeit" },
+    { "label": "Feste Belohnung", "note": "kein Rechnen im Nachhinein", "cue": "Zweitens: Die Belohnung" },
+    { "label": "Vorfahren nicht bezahlt", "note": "nur wer mitarbeitet", "cue": "drittens die Vorfahren" }
+  ],
+  "sources": [{ "label": "Gespräch", "ref": "Gespräch" }]
+}

@@ -48,9 +48,9 @@ describe('normalizeCanvas: envelope', () => {
     assert.equal(ok(JSON.stringify(flow)).id, 'video-versand');
   });
   it('unknown or missing kind lists the valid kinds', () => {
-    assert.match(err({ ...flow, kind: 'radar' }), /unknown kind "radar".*flow, architecture, sequence, pie, bar, line, table, timeline, sankey, custom_svg/);
+    assert.match(err({ ...flow, kind: 'radar' }), /unknown kind "radar".*points, stat, flow, architecture, sequence, pie, bar, line, table, timeline, sankey, custom_svg/);
     assert.match(err({ ...flow, kind: undefined }), /kind is required/);
-    assert.equal(CANVAS_KINDS.length, 10);
+    assert.equal(CANVAS_KINDS.length, 12);
   });
   it('requires a title and clamps it to 70 characters', () => {
     assert.match(err({ ...flow, title: '  ' }), /title is required/);
