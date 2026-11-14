@@ -2,9 +2,9 @@
 // (auto-illustration trigger, refusal-to-draw guard). No I/O here.
 import { redact } from './redact.js';
 
-export const CANVAS_KINDS = ['flow', 'architecture', 'sequence', 'pie', 'bar', 'line', 'table', 'timeline', 'sankey', 'custom_svg'];
+export const CANVAS_KINDS = ['points', 'stat', 'flow', 'architecture', 'sequence', 'pie', 'bar', 'line', 'table', 'timeline', 'sankey', 'custom_svg'];
 export const TONES = ['moss', 'papaya', 'violet', 'amber', 'red', 'neutral'];
-export const LIMITS = { nodes: 24, edges: 40, groups: 8, actors: 8, messages: 24, items: 12, series: 4, points: 60, columns: 8, rows: 24, events: 16, links: 40, label: 40, detail: 90, title: 70, caption: 160, svg: 20_000, sources: 6 };
+export const LIMITS = { nodes: 24, edges: 40, groups: 8, actors: 8, messages: 24, items: 12, series: 4, points: 60, columns: 8, rows: 24, events: 16, links: 40, listPoints: 8, stats: 3, note: 60, cue: 60, label: 40, detail: 90, title: 70, caption: 160, svg: 20_000, sources: 6 };
 const SHAPES = ['box', 'pill', 'diamond', 'cylinder', 'person'];
 const EDGE_STYLES = ['solid', 'dashed', 'pulse'];
 const MESSAGE_STYLES = ['sync', 'reply', 'async'];
@@ -282,12 +282,40 @@ function svgOf(spec) {
   return { svg };
 }
 
+// 14 Nov 2026 (Florian): a short list of core points, read like a good slide; and one to three headline numbers.
+function pointsOf(spec) {
+  const points = asArray(spec.points, 'points').slice(0, LIMITS.listPoints).map((p, i) => {
+    p = typeof p === 'string' ? { label: p } : asObject(p, `points[${i}]`);
+    const label = clean(p.label, LIMITS.label);
+    if (!label) bad(`points[${i}] needs a label (1-4 words)`);
+    return compact({ label, note: clean(p.note, LIMITS.note), tone: tone(p.tone), cue: clean(p.cue, LIMITS.cue) });
+  });
+  if (!points.length) bad('points needs "points" (2-5 entries: {label, note?, cue?})');
+  return { style: spec.style === 'bullets' ? 'bullets' : 'numbered', points, ...(spec.sync === 'speech' && points.some((p) => p.cue) ? { sync: 'speech' } : {}) };
+}
+
+function statsOf(spec) {
+  const stats = asArray(spec.stats, 'stats').slice(0, LIMITS.stats).map((s, i) => {
+    s = asObject(s, `stats[${i}]`);
+    const label = clean(s.label, LIMITS.label);
+    let value = typeof s.value === 'string' && !Number.isFinite(parseNumber(s.value)) ? clean(s.value, 12) : parseNumber(s.value);
+    if (typeof s.value === 'string' && /[%a-zäöü]/i.test(s.value) && Number.isFinite(parseNumber(s.value))) value = clean(s.value, 12); // "70 %", "≥ 10 %" stay as written
+    if (value === '' || (typeof value === 'number' && !Number.isFinite(value))) bad(`stats[${i}]: value must be a number or a short text like "70 %"`);
+    if (typeof value === 'number') value = round(value);
+    return compact({ value, unit: clean(s.unit, 12), label, tone: tone(s.tone) });
+  });
+  if (!stats.length) bad('stat needs "stats" (1-3 entries: {value, unit?, label})');
+  return { stats };
+}
+
 const BODY = {
+  points: pointsOf,
+  stat: statsOf,
   flow: (s) => flowLike(s, 'flow'),
   architecture: (s) => flowLike(s, 'architecture'),
   sequence,
   pie: (s) => itemsOf(s, 'pie'),
-  bar: (s) => itemsOf(s, 'bar'),
+  bar: (s) => ({ ...itemsOf(s, 'bar'), ...(s.layout === 'stacked' ? { layout: 'stacked' } : {}) }),
   line: lineOf,
   table: tableOf,
   timeline: timelineOf,
@@ -403,7 +431,7 @@ export function detailAdds(kind, simple, detail) {
 const BODY_KEYS = {
   flow: { nodes: 1, edges: 1, groups: 1 }, architecture: { nodes: 1, edges: 1, groups: 1 }, sequence: { actors: 1, messages: 1 },
   pie: { items: 1 }, bar: { items: 1 }, line: { series: 1 }, table: { columns: 1, rows: 1 }, timeline: { events: 1 },
-  sankey: { nodes: 1, links: 1 }, custom_svg: { svg: 1 },
+  sankey: { nodes: 1, links: 1 }, custom_svg: { svg: 1 }, points: { points: 1 }, stat: { stats: 1 },
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -411,7 +439,7 @@ const BODY_KEYS = {
 // STRUCTURAL overflow (the illustrator repairs it once by moving the extra into `detail`); `simplifySpec` derives a simple
 // view deterministically (keeps ids, <= 5 connected boxes, short labels) and keeps the original as `detail`.
 
-export const SIMPLE = { nodes: 5, edges: 6, label: 28, edgeWords: 2, actors: 5, messages: 6, events: 5, items: 6, rows: 5 };
+export const SIMPLE = { nodes: 5, edges: 6, label: 28, edgeWords: 2, actors: 5, messages: 6, events: 5, items: 6, rows: 5, points: 5, stats: 3 };
 
 const outs = (edges, id) => edges.filter((e) => e.from === id).length;
 const ins = (edges, id) => edges.filter((e) => e.to === id).length;
@@ -449,6 +477,8 @@ export function simpleError(spec) {
       return (spec.items ?? []).length > SIMPLE.items ? `the simple view has ${spec.items.length} items (max ${SIMPLE.items}): ${move}` : undefined;
     case 'table':
       return (spec.rows ?? []).length > SIMPLE.rows ? `the simple view has ${spec.rows.length} rows (max ${SIMPLE.rows}): ${move}` : undefined;
+    case 'points':
+      return (spec.points ?? []).length > SIMPLE.points ? `the simple view has ${spec.points.length} points (max ${SIMPLE.points}): keep the ${SIMPLE.points} that matter most and put the full list into "detail"` : undefined;
     default:
       return undefined;
   }
@@ -597,6 +627,9 @@ export function simplifySpec(spec) {
     case 'table':
       simple = { ...full, rows: (full.rows ?? []).slice(0, SIMPLE.rows) };
       break;
+    case 'points':
+      simple = { ...full, points: (full.points ?? []).slice(0, SIMPLE.points) };
+      break;
     default:
       return spec;
   }
@@ -731,7 +764,7 @@ export function connectCanvas(spec) {
 
 const PLACEHOLDER_TEXT = /platzhalter|placeholder|lorem ipsum|\bTODO\b|\bTBD\b|^\s*(?:todo|tbd|xxx|n\/a|…|\.{2,})\s*$/i;
 
-const PLACEHOLDER_FIELDS = { flow: 'nodes', architecture: 'nodes', pie: 'items', bar: 'items', sankey: 'nodes' };
+const PLACEHOLDER_FIELDS = { flow: 'nodes', architecture: 'nodes', pie: 'items', bar: 'items', sankey: 'nodes', points: 'points', stat: 'stats' };
 
 /** A cell that carries no information: empty, one character, or a placeholder ("x", "y", "vexp: gemini", "-"). */
 const JUNK_CELL = /^(?:[-–—.…?]+|x+|y+|z+|n\/a|tbd|todo|\.\.\.)$|^v?exp\s*:/i;
@@ -779,6 +812,7 @@ export function qualityError(spec) {
     if (spec.kind === 'architecture' && spec.nodes.length >= 6 && !(spec.groups?.length)) return 'architecture with 6+ nodes needs "groups" (e.g. Browser / Gateway / Bridge / Vendors) and "group" on every node';
   }
   if ((spec.kind === 'pie' || spec.kind === 'bar') && spec.items.length < 2) return `${spec.kind} needs at least 2 items`;
+  if (spec.kind === 'points' && spec.points.length < 2) return 'points needs at least 2 points (one point is a stat or a sentence, not a list)';
   if (spec.kind === 'table') return tableError(spec);
   if (spec.kind === 'sankey') return sankeyError(spec);
   return undefined;

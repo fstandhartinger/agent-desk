@@ -1,0 +1,98 @@
+[
+ {
+  "id": "a#41d6d2-13:24:43",
+  "question": "Erkläre mir, wie das mit der neuen Regel für die Abstimmung gedacht ist. Abstimmung. Ja, genau, Abstimmung. Ja.",
+  "answer": "Früher standen die Abstammungsangaben an vier Stellen: Einreichungs-JSON, HF-Modellkarte, NOTICE und README, und die widersprachen sich oft. Der alte Detektor mit der Kosinus-Skizze hat Merges nicht erkannt — ein 50-zu-50-Merge aus uid 114 und 60 kam nur auf 0,56 Ähnlichkeit zu 114. In der Nacht zum 30. Oktober wurde uid 82 ohne Eltern-Eintrag gekrönt und wieder entfernt, uid 13 kam rein und musste auch raus, uid 83 blieb unter einer engeren Lesart. Allein die Frage um uid 83 dauerte rund 20 Stunden, und alles wurde von Hand unter Zeitdruck entschieden. Jetzt ist es eine einzige Abstammungsdatei im Repo, die einzige Angabe. Bei der Einreichung liest die Prüfung per Range-Request eine Stichprobe der Gewichte, zerlegt die Gewichtsänderung gegen den Start, frühere Einträge und bekannte öffentliche Modelle, und prüft dazu Tokenizer, Config und Lizenz. Das Ergebnis steht innerhalb von 6 Stunden auf der uid-Seite, bevor überhaupt etwas gewertet wird. Im Probelauf auf 66 Runde-1-Einreichungen waren 54 von 54 auswertbaren Fälle innerhalb von 6 Stunden fertig, der längste brauchte 587 Sekunden. Der ehrliche Teil: Im GPU-Test „Geschwister sahen sich zwei Miner, die denselben Start mit denselben öffentlichen Daten trainiert haben, in 96 von 96 Paaren so ähnlich wie ein Merge. Mit anderen Daten waren es 0 von 736. Solche Überschneidungen kommen deshalb auf die Bar-Liste — der Eintrag muss diese Modelle schlagen, höchstens die drei größten — aber es gibt nie eine Strafe. Bestraft wird nur eine echte Kopie, eine getarnte Herkunft oder ein fehlender Beleg. Gibt es einen Streitfall, hat man 48 Stunden Frist, die Entscheidung fällt im Donnerstags-Termin, und die Abstammungs-Ergebnisse werden automatisch neu geprüft. Kein KI-Modell auf unserer Seite liest Einsprüche. Der Kern: Die Abstammung steht vor der Wertung fest. Kein Urteil mehr nachts unter Druck.",
+  "form": null,
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#41d6d2-13:27:12",
+  "question": "Ich versteh immer noch nicht ganz, wieso dieses neue System besser ist. Was ist genau der Vorteil? Erkläre es mir ganz simpel.",
+  "answer": "Stell dir vor, eine Krone ist gerade gefallen. Früher hattest du in dem Moment drei widersprüchliche Angaben vor dir und musstest in der Nacht entscheiden, wer der echte Vater ist. Das ist wie ein Richter, der erst mal raten muss. Jetzt sagt die Maschine dir vor der Krone: diese Einreichung ist sauber, die ist eine Kopie. Du musst nichts mehr raten.",
+  "form": "points",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#41d6d2-13:28:42",
+  "question": "Äh, es wäre für mich aber wichtig zu verstehen, ob, ähm, dieses neue Vorgehen wirklich etwas verbessert oder ob es wieder zu den gleichen Situationen kommen kann, dass ein Miner selbstständig herausfindet, dass irgendwo ein nicht bekanntgegebener, ähm, Abstammungs... Vorfall vorliegt. Und, und dann habe ich wieder das Problem, dass ich, äh, vielleicht bereits getroffene Entscheidungen ändern muss. Das will ich eben verhindern. Ich verstehe noch nicht ganz, wieso das neue uns jetzt hilft.",
+  "answer": "Ich schaue in die Fallsammlung. Die Datei ist lang, ich lese weiter. Das ist der Punkt, den die Quellen direkt ansprechen. Der alte Mechanismus hatte dokumentierte Lücken: FP8-, GPTQ- und AWQ-Modelle waren von der direkten Gewichtsvergleich komplett ausgenommen, die Prüfung lief nur über eine Skizze mit einer Kosinus-Schwelle von 0,98, und sie war an das angewiesen, was der Miner deklariert hat. Genau deshalb ist uid 82 durchgerutscht: kein Eltern-Eintrag, und die Skizze hat nichts gefunden. Das Neue ändert die Reihenfolge und die Quelle. Die Prüfung schaut nicht auf die Deklaration, sondern direkt in die Gewichte per Range-Request, und vergleicht gegen den Start, gegen frühere Einträge und gegen bekannte öffentliche Modelle. Versteckt der Miner die Angabe, ändert das an den Gewichten nichts. Im Hintergrunddokument steht: zwanzig von achtundzwanzig Abstammungsfällen aus Runde eins wären mit dem neuen System schon bei der Eingangsprüfung abgelehnt worden, also bevor überhaupt eine Wertung lief. Heißt für dein Szenario: Ein Miner, der nachträglich einen Vorfall aufdeckt, findet nichts, was die Maschine nicht schon sechs Stunden nach Einreichung gesehen hat. Die Entscheidung steht schon, es gibt nichts rückwirkend zu kippen.",
+  "form": "any",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#41d6d2-13:31:35",
+  "question": "Ja. Soweit ich verstehe, sagst du mir hier, dass, ähm, diese 28 oder 20 von 28 Fälle identifiziert worden wären über unseren neuen automatischen Check. Das finde ich gut, aber was ich nicht verstehe, ist, wieso du davon sprichst, dass sie abgelehnt worden wären. Denn es ist doch eigentlich erlaubt, dass man ein Modell mit einer Abstimmung einreicht, äh, mit einer Abstammung einreicht.",
+  "answer": "Da hast du recht, das war ungenau. Die zwanzig Fälle scheiterten nicht an der Abstammung selbst, sondern an dem, was das neue Regelwerk v2 verbietet: Merges in der Einreichung, fehlende oder getarnte Herkunft, Belege, die nicht stimmen. Eine ehrliche Deklaration in der einen Abstammungsdatei ist weiterhin erlaubt. Die Prüfung findet also nicht die Abstammung, sondern den Regelverstoß.",
+  "form": "points",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#41d6d2-13:32:48",
+  "question": "Ich möchte eigentlich nicht verbieten, dass die Miner Merges einreichen, denn solange die Merges besser sind als die grundlegenden, äh, Modelle, ist das doch ein valider Fall, der in unserem Sinne ist. Was ich nur nicht will, ist, dass solche Kombinationsmodelle gebaut werden, wie bei ReX 1.3, wo eigentlich zwei Modelle gleichzeitig laufen und dann, ähm, die Konfidenz der beiden Antworten irgendwie kombiniert wird. Die Einreichenden müssen jeweils einfach nur ein Modell mit seinen Gewichten sein, aber wenn diese Gewichte aus einem Merge stammen, soll es für mich in Ordnung sein.",
+  "answer": "Das ist eine echte Abweichung vom Entwurf. Im Entwurf d7 sind Merges in Einreichungen tabu, und Kombinieren ist nur unsere Postproduktion. Du willst das aufteilen: ein Eintrag ist immer genau ein Modell mit seinen Gewichten, auch wenn die aus einem Merge kommen. Was du ausschließt, ist der Laufzeit-Trick, also zwei Modelle parallel und eine Konfidenz-Kombination wie bei REAX 1.3. Das ist regelbar, aber es muss vor dem neunzehnten in v2 stehen, sonst verkündest du was anderes als du meinst.",
+  "form": "any",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#41d6d2-13:42:44",
+  "question": "Ja, und nochmal kurz zu der Thematik mit der Abstimmung und der besseren Regelung in unserer Generalist-Runde 2. Es ist ja richtig, dass die Abstimmungsdiskussion in Runde 1 eines der Probleme war, das wir jetzt besser lösen müssen und ich stimme mit einigen Ideen dieses neuen Vorschlags überein, aber ich würde sagen, um es am Schluss wirklich unproblematisch zu bekommen, sollten wir überlegen, ob, ähm, wir vielleicht eine Möglichkeit für die, äh, Miner bieten sollten, bis zu einem bestimmten Punkt einen, äh, Einspruch über ein Konkurrenzmodell einzureichen und danach zählen derartige Einsprüche nicht mehr, sodass wir irgendwie davor geschützt sind, dass ganz am Schluss, wenn wir bereits fertig sind mit, äh, dem Ranking, äh, noch nachträglich Einsprüche kommen, denn das sind die besonders unangenehmen Situationen, wenn man eine bereits verkündete oder bereits weit fortgeschrittene, äh, Rangfolge nachträglich nochmal ändern muss. Ich bin aber nicht sicher, ob das Sinn macht, denn ich glaube, eine weitere wichtige Sache, die für uns hilfreich wäre, wäre, wenn wir so eine Art Reveal Commit oder Commit Reveal, äh, Technik verwenden würden, wo die Leute eben in der Lage sind, private Repos einzureichen und, äh, ihre Auswertung dann auf den privaten Repo stattfindet, noch, äh, bevor alle anderen das sehen könnten, denn das würde helfen, einen gewissen Zeitdruck aus der Situation herauszunehmen, der dadurch entsteht, dass die Miner Angst haben, dass ihr öffentlich eingereichtes Modell von anderen be- gesehen und als Grundlage verwendet wird, ähm, denn das kann für den Miner ja unangenehm sein, wenn er das beste Modell hat, aber jemand anderes wird vor der finalen Wertung noch dieses Modell als Grundlage für einen leichten Fine-Tune oder für einen Model Merge verwenden und ihm dadurch den, äh, ersehnten ersten Platz streitig machen. Das heißt, ich denke, Commit Reveal ist eine wichtige Technik, die wir mit einsetzen sollten, aber dann auch an irgendeinem Punkt sollten wir die Modelle sozusagen sichtbar machen und dann vielleicht sollte es noch eine kurze Frist geben, in der die Miner Einspruch erheben können, wenn sie noch irgendeinen, äh, stichhaltigen Nachweis, eine Argumentation haben, wieso dieses Modell offensichtlich, äh, abgekupfert ist von jemanden anderen oder eine Abstimmung nicht angegeben oder nicht automatisch erkannt und berücksichtigt wurde, aber diese Frist sollte eben begrenzt sein, damit wir an irgendeinem Punkt, äh, sicher sein können, dass hier keine Einsprüche mehr auftauchen werden. Können wir das so umsetzen oder spricht etwas an unserem Konzept gegen diese Gedanken?",
+  "answer": "Ich hole den aktuellen Regelwerks-Stand zu Einsprüchen und Reveal. Zu deinem Commit-Reveal-Gedanken: Im Konzept steht jetzt nur der 48-Stunden-Streitfall-Weg mit Donnerstags-Termin. Commit-Reveal steht nirgends in den Quellen, das ist dein neuer Gedanke. Dein Einspruchsfenster nach dem Reveal passt gut zum bestehenden 48-Stunden-Weg: der wird dann zum Schlussfenster statt zum Einzelfall-Mechanismus, und danach ist das Ranking dicht. Das schützt dich genau vor dem, was du nicht willst — nachträgliche Änderungen an einer verkündeten Rangfolge. Beim Commit-Reveal gibt es einen echten Spannungs punkt: die sechsstündige automatische Prüfung braucht Zugriff auf die Gewichte. Bei einem privaten Repo müsste also entweder die Prüfung im verborgenen laufen oder das Reveal kommt vor der Prüfung — beides ist machbar, aber es muss entschieden werden. Sonst spricht nichts im Konzept dagegen.",
+  "form": "any",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:46:21",
+  "question": "Wie hoch ist denn die Belohnung für einen, ähm, Champion?",
+  "answer": "Die Belohnung steht vorab fest: tausend Alpha insgesamt, gleich geteilt unter den ausgewählten Einträgen — also nicht an einen einzelnen Champion, sondern aufgeteilt. Mindestens zehn Prozent Gewichtsanteil am finalen Modell sind nötig, um dabei zu sein. Vorfahren bekommen nichts. Auszahlung innerhalb von sieben Tagen nach Veröffentlichung an den Coldkey, der den Eintrag committet hat, und nur wenn bis zum einunddreißigsten Januar zweitausendsiebenundzwanzig ein Eintrag dieser Runde im finalen Modell ist.",
+  "form": "number",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:47:43",
+  "question": "Nein, nein, nein, das ist nicht, was ich, äh, vorhabe. Die 1000 Alpha sind einfach nur die zusätzliche Belohnung für ein Modell, das es am Schluss in das veröffentlichte ReX-Modell schafft. Aber es soll zusätzlich eine Belohnung geben, die ähnlich aufgebaut ist wie in der vorigen Runde, nämlich irgend sowas wie fünf Tage die vollen Emissionen des Generalist Model Training Tracks unter den Miner-Emissionen. Also ich weiß nicht mehr genau, was der Gesamtprozentsatz der Gesamtemissionen waren, aber irgend sowas wie 30 Prozent und dann langsam abfallen, äh, linear auf null im Lauf der nächsten Tage bis zum siebten Tag, irgend sowas. Und dann glaube ich, hatten wir auch noch eine Regelung für zweiten und dritten Platz oder vielleicht für ehemaliger Champion oder so.",
+  "answer": "Das klingt nach der alten Runde-eins-Regelung. Ich schaue in die Runde-eins-Regeln nach. Die Zahlen stimmen im Kern. Generalist-Track sind dreißig Prozent der Miner-Emissionen. Im aktiven Track: fünfundsiebzig Prozent an den Champion, siebzehn an den zuletzt Entthronten, acht an den davor. Bei Pause drei Tage voller Anteil ab Freigabe, linearer Abfall bis Tag sieben, danach Keep-alive. Das steht in der FAQ Version drei Punkt acht vom vierten November und in deiner sn92-reax-Notiz. Im neuen Konzept ist das noch nicht drin — das wäre also eine Ergänzung für den neunzehnten.",
+  "form": "distribution",
+  "strong": true,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:49:25",
+  "question": "Ja, das ist eine Ergänzung, die ich so haben will. Die kannst du dann über einen Agent Stop gleich los, äh, treten, aber außerdem möchte ich auch gerne noch, dass der Zweit- und Drittplatzierte Platz, ähm, ebenfalls etwas erhält, nicht nur der Champion und die ehemaligen Champions. Ähm, allerdings soll der Abfall stark sein. Also es ist sowas wie Winner takes most, nicht ganz Winner takes all, ähm, sondern irgend sowas wie, ähm, vielleicht machen wir sowas wie 70 Prozent und dann 10 Prozent an den Ehemaligen und, ähm, 5 Prozent an, äh, an nochmal wen anderen, aber der zweite und dritte Platz bekommt auch ein bisschen was.",
+  "answer": "Ich starte den Job sofort. Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt.",
+  "form": "distribution",
+  "strong": true,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:52:13",
+  "question": "Eine Anmerkung noch. Diese Canvas, wo immer Diagramme oder Zeichnungen, schematische, systematische Darstellungen gezeichnet werden, sie enthält für meinen Geschmack ein bisschen zu oft Ablaufdiagramme und ein bisschen zu wenig oft Diagramme, die zum Beispiel die Verteilung von Mengen visualisieren. Da gibt es zum Beispiel Balkendiagramme oder Tortendiagramme oder auch Senpi-Diagramme, die ich oft gut finde, wenn es um eine Visualisierung von Mengen oder Aufteilung von einer Grundgesamtheit in mehrere, vielleicht sogar mehrstufig verschachtelte Unterteilungen geht. Ich denke, das ist etwas, das wir in der Veränderung von unserem Agent Desk einbauen sollten, denn es würde mir des Öfteren helfen, wenn ich hier eine bessere Visualisierung bekäme. Die Ablaufdiagramme sind wirklich hauptsächlich für die Fälle relevant, wo es um einen Ablauf mit möglicherweise verschiedenen Abzweigungen geht, aber weniger für Fälle, wo es zum Beispiel um eine Verteilung von einem bestimmten Betrag auf mehrere Zieltöpfe geht.",
+  "answer": "Dein Punkt ist berechtigt: Verteilungen gehören in Balken-, Torten- oder Sankey-Diagramme, Abläufe nur dorthin, wo es wirklich Verzweigungen gibt. Das als Designregel für die Zeichnerin notieren wir am besten in der MODEL_POLICY.",
+  "form": "any",
+  "strong": false,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:53:12",
+  "question": "Aktuell zeichnet die Canvas ein Bild darüber, dass 1000 Alpha in einem Beispiel gleich geteilt sind und vorfahren leer ausgehen. Äh, kannst du mir erklären, was die Überlegung dahinter ist? Wieso wollen wir das so tun?",
+  "answer": "Die Logik ist dreifach. Erstens die Prüfbarkeit: Ein Eintrag hat genau einen Start, also bleibt die Abstammung sauber und automatisch prüfbar. Zweitens: Die Belohnung steht vorab fest, das ersetzt jede Verhandlung im Nachhinein — kein Streit mehr darüber, wer wie viel verdient hat. Und drittens die Vorfahren: Sie werden genannt, aber nicht bezahlt, weil die tausend Alpha die ausgewählten Einträge belohnen, die tatsächlich ins finale Modell kommen, nicht die ganze Ahnenreihe. Lehrer und Vorfahren sind Referenz, kein Zahlungsempfänger.",
+  "form": "points",
+  "strong": true,
+  "notFlow": true
+ },
+ {
+  "id": "a#36e5fa-14:57:30",
+  "question": "Ich muss ehrlich sagen, ich bin mir da noch nicht ganz so sicher, ob ich das so sehen will. Du weißt ja eh schon, dass das mit den 1000 Alpha ein Missverständnis war. Das ist nicht die einzige Belohnung, die ich in dieser neuen Runde Generalist Model Training ausgeloben will. Ähm, und, ähm, ich finde es eventuell schon gerechtfertigt, dass auch Basismodelle, ähm, die von einem anderen Miner stehen, mit berücksichtigt werden könnten bei der Bezahlung, aber hier bin ich mir noch nicht sicher. Wichtig ist mir, dass ich ein simples und wenig Streit verursachendes Konzept habe und, ähm, möglichst wenig Stress habe bei der Klärung der Situationen später, wenn wir das machen. Mir ist nun aber auch aufgefallen, als du hier gerade erklärt hast, dass es drei Gründe gibt, ähm, wieso, ähm, das so gemacht, ähm, werden sollte, wie die Aufteilung aktuell geplant ist, dass als Canvas-Zeichnung wiederum ein Ablaufdiagramm gezeichnet wurde, das für mich nicht besonders einleuchtend diese drei Argumente darstellt. Ich denke, wir sollten in das Repertoire der verschiedenen Zeichnungen bei der Canvas auch mit aufnehmen, eine Art simple Bullet Point oder nummerierte Liste. Und dabei sollte natürlich klargestellt sein, dass wir hier ein, ähm, Canvas-Zeichnen-Konzept vor uns haben, dessen Sinn ist, mit sehr niedriger kognitiver Last die Kernpunkte zu transportieren, also ähnlich wie in einer wirklich gut gemachten PowerPoint-Präsentation wollen wir hier keine langen Texte sehen, sondern möglichst kurze, zum Beispiel nur drei Wörter, die mit erstens, zweitens und drittens genannt sind, oder sehr, sehr, sehr kurze Sätze, die möglichst prägnant die Dinge auf den Punkt bringen. Es ist für mich konzeptionell gedacht wie etwas, was in einer wirklich guten Präsentation oder Motion-Grafik zur Erläuterung und besseren Verständlichkeit des gesprochenen Inhalts dargestellt wird. Vielleicht schaffen wir es sogar auch, eine gewisse Synchronisation zwischen dem gesprochenen Wort und der Visualisierung zu schaffen. Ich weiß, das ist schwierig, weil das Zeichnen eine Weile dauert und das Sprechen eigentlich in Real-Time geschieht, daher ist dies kein Muss, aber ich glaube, du verstehst, worauf ich hinaus will. Eine möglichst effiziente Informationsübertragung besteht für mich aus nicht nur gesprochenem Text oder gelesenem Text, sondern idealerweise gleichzeitig auch aus einer Visualisierung, die das Gesprochene sehr leicht zu verstehen, sehr leicht zu konsumieren macht. Und das ist der eigentliche Sinn, den ich für die Canvas vorgesehen habe. Das heißt, ich möchte, dass wir unser Canvas-Konzept nochmal unter die Lupe nehmen und neu durchdenken, ob wir es verbessern können. Es ist prinzipiell bereits sehr wertvoll, wie es aktuell ist, könnte aber meiner Meinung nach noch einiges an Verbesserungen vertragen.",
+  "answer": "Verstanden: Canvas als Low-Cognitive-Load-Präsentation, also kurze nummerierte Stichpunkte statt Fließtext, Verteilungsdiagramme für Mengen, Abläufe nur bei echten Verzweigungen, und Sprach-Bild-Synchronisation als Bonus. Soll ich das als Design-Auftrag an einen Agenten übergeben?",
+  "form": "any",
+  "strong": false,
+  "notFlow": true
+ }
+]
