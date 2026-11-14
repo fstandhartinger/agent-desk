@@ -40,7 +40,18 @@ export function fitText(text, maxTokens) {
   // a closing marker line (</artifact_data>) survives a trim, or the data block would stay open
   const closer = lines.length > 1 && /^<\/artifact_data>$/.test(lines.at(-1)) ? lines.pop() : null;
   const join = () => (closer ? [...lines, closer] : lines).join('\n');
-  while (lines.length > 1 && estimateTokens(join()) > maxTokens) lines.pop();
+  while (lines.length > 1 && estimateTokens(join()) > maxTokens) {
+    // critic S5: a screen update is a lead plus ONE long data line; dropping that line left GPT-Live an empty block. When the rest fits,
+    // cut the last line to what fits (at least 40 characters, else drop it) instead of dropping it.
+    const last = lines.pop();
+    const rest = join();
+    if (estimateTokens(rest) < maxTokens) {
+      let keep = last.length;
+      const withCut = (n) => (closer ? [...lines, `${last.slice(0, n).trimEnd()}…`, closer] : [...lines, `${last.slice(0, n).trimEnd()}…`]).join('\n');
+      while (keep > 40 && estimateTokens(withCut(keep)) > maxTokens) keep = Math.floor(keep * 0.85);
+      if (keep > 40 && estimateTokens(withCut(keep)) <= maxTokens) { lines.push(`${last.slice(0, keep).trimEnd()}…`); break; }
+    }
+  }
   let out = join();
   if (estimateTokens(out) > maxTokens) {
     let cut = Math.max(0, Math.floor(maxTokens * 3) - 1);

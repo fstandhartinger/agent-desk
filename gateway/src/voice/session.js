@@ -125,13 +125,15 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const saidWords = normText(heardBack.text).split(' ').filter(Boolean), said = new Set(saidWords), own = normText(text).split(' ').filter(Boolean);
     // a lone "Ja." is no echo of "Soll ich das als Job im Hintergrund starten? Ein klares Ja genügt." (a#36e5fa t4, 14 Nov): the speakers'
     // sound of a long reply comes back as (most of) that reply, so a final of one or two words is an echo only of an equally short reply
-    if (own.length <= 2 && saidWords.length > 4) return false;
     return own.length > 0 && own.filter((w) => said.has(w)).length / own.length >= 0.8;
   };
+  // critic: the exemption above ("Ja." after a long reply is his) holds for the two voice actions only (voiceActions.js usable); computer control (gate.js, run.js) keeps the strict echo rule
+  const shortAfterLong = (text, at_) => at_ - heardBack.at <= ECHO_MS && normText(text).split(' ').filter(Boolean).length <= 2 && normText(heardBack.text).split(' ').filter(Boolean).length > 4;
+  const echoFlags = (text, at_) => { const echo = echoOf(text, at_); return echo && shortAfterLong(text, at_) ? { echo, echoShort: true } : { echo, echoShort: undefined }; };
   let speechStartSeen = false; // did this vendor ever send a speech start? If not, "early" cannot be judged and the confirm code is the only gate
   let lastSpeechStart = -Infinity; // when the sound of his latest utterance began (speech_started); a computer confirm needs it after the question
   let partialTail = ''; // the last characters of his live transcript: stop words are looked for here (computer runs)
-  const noteSpoken = (text, at_, turn_, extra = {}) => { spoken.push({ text, at: at_, turn: turn_, echo: echoOf(text, at_), ...extra }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
+  const noteSpoken = (text, at_, turn_, extra = {}) => { spoken.push({ text, at: at_, turn: turn_, ...echoFlags(text, at_), ...extra }); if (spoken.length > SPOKEN_KEEP) spoken.shift(); };
   let lastFinal = null; // the newest user final of the current turn: a longer final that extends it replaces it (growing fragments)
   let previousQuestion = ''; // the question before the current one: only a call that demonstrably fits THAT one is stale
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
@@ -380,7 +382,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.event('transcript.user.final', quiet ? { turn: prev.turn, chars: text.length, grown: true, computer: true } : { turn: prev.turn, text, grown: true });
     lastFinal = { text, norm: normText(text), itemId: e.itemId ?? prev.itemId, turn: prev.turn, at: now() };
     speechOpen = false;
-    if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, echo: echoOf(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
+    if (spoken.length && spoken.at(-1).turn === prev.turn) spoken[spoken.length - 1] = { ...spoken.at(-1), text, at: lastFinal.at, ...echoFlags(text, lastFinal.at) }; // the grown sentence REPLACES the fragment; a word already used stays used
     else noteSpoken(text, lastFinal.at, prev.turn, { started: speechStartSeen ? lastSpeechStart : undefined });
     deps.computer?.userFinal(sid, spoken.at(-1));
     lastUserText = text;

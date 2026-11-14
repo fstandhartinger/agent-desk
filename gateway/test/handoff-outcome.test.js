@@ -211,3 +211,10 @@ describe('session trace: every click and outcome', () => {
     assert.ok(!JSON.stringify(out.event).includes('probe'));
   });
 });
+
+// critic S4 (14 Nov): a bridge timeout carries the argv, i.e. the handoff's own title; "is archived" in the TITLE must not make it "nothing posted"
+it('a timeout whose message quotes a title saying "Thread #31 is archived" stays unclear and one-time', () => {
+  const f = describeFailure(new Error('board failed: Command failed: agent-board --as agent-desk post --kind handoff Agent Desk handoffs **Thread #31 is archived, fix it** ...'));
+  assert.equal(f.kind, 'unclear');
+  assert.equal(f.retry, false);
+});

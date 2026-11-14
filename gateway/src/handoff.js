@@ -124,7 +124,8 @@ export function describeFailure(err, host = 'sandy') {
   const detail = short(redact(message), 160);
   const body = message.replace(/^not-posted:\s*/, '');
   if (message === MSG.bridgeOffline(host)) return { kind: 'offline', posted: false, retry: true, error: TEXT.offline(host), detail };
-  const refused = /^not-posted:/.test(message) || /is archived|No thread matches/.test(message) || /^unknown method board\.handoff/.test(message);
+  // critic S4: only the bridge's own marker or the board's own refusal line at the start counts (the title of the handoff can contain any words)
+  const refused = /^not-posted:/.test(message) || /^board failed: agent-board: [^\n]*(?:is archived|No thread matches)/.test(message) || /^unknown method board\.handoff/.test(message);
   if (!refused) return { kind: 'unclear', posted: null, retry: false, error: TEXT.unclear, detail };
   if (/handoff limit reached/i.test(body)) return { kind: 'limit', posted: false, retry: true, error: TEXT.limit, detail };
   if (/is archived|archived thread/i.test(body)) return { kind: 'archived', posted: false, retry: true, error: TEXT.archived, detail };

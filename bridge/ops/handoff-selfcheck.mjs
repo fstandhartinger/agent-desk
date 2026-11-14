@@ -129,7 +129,11 @@ export async function selfcheck({ dryRun = false } = {}) {
   if (!journal.ok && !journal.stdout) {
     problems.push(`bridge journal unreadable (${oneLine(journal.stderr || journal.error, 100)})`);
   } else {
-    const conn = connectionState(journal.stdout, now.getTime());
+    let conn = connectionState(journal.stdout, now.getTime());
+    if (!conn) { // critic S6: a connection stable for more than 7 days has no line in the window; the newest connect/disconnect line counts then
+      const newest = await run(CFG.journalctl, ['--user', '-u', `${CFG.unit}.service`, '-o', 'cat', '--no-pager', '-r', '-n', '1', '-g', 'bridge (connected to|disconnected, retry in)'], { timeout: 30_000 });
+      if (newest.stdout) conn = connectionState(newest.stdout, now.getTime());
+    }
     if (!conn) { facts.push('desk=never-seen'); problems.push('the bridge journal of the last 7 days shows no connection to the desk'); }
     else { facts.push(`desk=${conn.connected ? 'connected' : 'reconnecting'} since ${new Date(conn.at).toISOString().slice(0, 16)}Z`); if (!conn.ok) problems.push(`the bridge lost its connection to the desk at ${new Date(conn.at).toISOString().slice(0, 16)}Z and has not come back`); }
     const recent = boardFailures(journal.stdout).filter((l) => Number.isFinite(l.at) && now.getTime() - l.at <= DAY_MS);

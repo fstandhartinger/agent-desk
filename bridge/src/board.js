@@ -115,18 +115,22 @@ const ARCHIVED = /is archived|archived thread/i;
 const NO_THREAD = /no thread matches|no such thread|unknown thread|not found/i;
 
 /** True when agent-board failed in a way that proves nothing was written. Pure; exported for tests. */
+// critic S4: only agent-board's own stderr decides, never err.message (Node puts the whole argv, i.e. the model-written title and task, into it):
+// a handoff whose text says "Thread #31 is archived" must not turn an unclear failure into a reopen + retry + fallback (three posts).
+// agent-board main(): `except ValueError: print(f"agent-board: {exc}", file=sys.stderr); return 2`, raised before the insert (checked 14 Nov).
 export function refusedBeforeWrite(err, stderr = '') {
-  const msg = String(stderr || err?.message || '');
+  const msg = String(stderr ?? '');
   if (err?.killed || err?.signal) return false; // our timeout / a kill: the process may have written already
   if (err?.code === 'ENOENT' || err?.code === 'EACCES') return true; // the binary never started
-  if (typeof err?.code !== 'number' || /Traceback \(most recent call last\)/.test(msg)) return false; // a crash says nothing about the write
-  return (err.code === 2 && /(?:^|\n)agent-board: /.test(msg)) || /is archived|no thread matches/i.test(msg);
+  if (err?.code !== 2 || /Traceback \(most recent call last\)/.test(msg)) return false; // a crash says nothing about the write
+  return /(?:^|\n)agent-board: /.test(msg);
 }
 
 function boardError(err, stderr) {
   const refused = refusedBeforeWrite(err, stderr);
   const e = new Error(redact(`${refused ? `${NOT_POSTED} ` : ''}board failed: ${(stderr || err.message).slice(0, 300)}`));
   e.notPosted = refused;
+  e.refusal = refused ? redact(String(stderr ?? '')).slice(0, 300) : ''; // the board's own words: the only text the retry logic reads
   return e;
 }
 
@@ -187,22 +191,22 @@ async function handoffOnce({ title, task, why } = {}) {
       out = await post(HANDOFF_THREAD, text);
     } catch (err) {
       if (!err.notPosted) throw err;
-      if (ARCHIVED.test(err.message)) {
+      if (ARCHIVED.test(err.refusal ?? '')) {
         // a#41d6d2: the board archives threads quiet for 7 days. Reopen it (the heal) and retry ONCE; the daily selfcheck also pins it as a topic.
-        intendedId = /thread #(\d+)/i.exec(err.message)?.[1];
+        intendedId = /thread #(\d+)/i.exec(err.refusal ?? '')?.[1];
         if (!(await reopen(intendedId ?? HANDOFF_THREAD))) throw err;
         reopened = true;
         out = await post(HANDOFF_THREAD, text);
         hlog(`handoff: thread #${intendedId ?? '?'} was archived, reopened it and posted`);
-      } else if (NO_THREAD.test(err.message)) {
+      } else if (NO_THREAD.test(err.refusal ?? '')) {
         out = await runBoardStrict([...common, 'new', HANDOFF_THREAD, '--kind', 'handoff', '--to', HANDOFF_ADDRESSEE, '--body', text]); // the thread does not exist yet
       } else throw err;
     }
   } catch (err) {
     if (!err.notPosted) throw err; // unclear (timeout, crash): nothing is retried or redirected, a second post could duplicate
-    intendedId ??= /thread #(\d+)/i.exec(err.message)?.[1];
+    intendedId ??= /thread #(\d+)/i.exec(err.refusal ?? '')?.[1];
     // Nothing reached the board and the handoff thread is no option: post into the active "Ops & security" thread, first line says why.
-    const lead = `Fallback: das Thema „${HANDOFF_THREAD}“${intendedId ? ` (#${intendedId})` : ''} war ${ARCHIVED.test(err.message) ? 'archiviert' : 'nicht verfügbar'} und ließ sich nicht nutzen; die Übergabe steht deshalb hier.`;
+    const lead = `Fallback: das Thema „${HANDOFF_THREAD}“${intendedId ? ` (#${intendedId})` : ''} war ${ARCHIVED.test(err.refusal ?? '') ? 'archiviert' : 'nicht verfügbar'} und ließ sich nicht nutzen; die Übergabe steht deshalb hier.`;
     try {
       out = await post(handoffFallbackThread(), redact(`${lead}\n\n${text}`));
     } catch (second) {
@@ -212,7 +216,7 @@ async function handoffOnce({ title, task, why } = {}) {
     }
     const p = postedOf(out);
     commitHandoffSlot();
-    hlog(`handoff: FALLBACK post into thread ${handoffFallbackThread()} (entry #${p.id ?? '?'}); the handoff thread ${intendedId ? `#${intendedId} ` : ''}was ${ARCHIVED.test(err.message) ? 'archived' : 'unavailable'}`);
+    hlog(`handoff: FALLBACK post into thread ${handoffFallbackThread()} (entry #${p.id ?? '?'}); the handoff thread ${intendedId ? `#${intendedId} ` : ''}was ${ARCHIVED.test(err.refusal ?? '') ? 'archived' : 'unavailable'}`);
     if (!p.id) throw new Error('handoff posted but no entry id returned');
     return { id: Number(p.id), thread: p.thread ?? handoffFallbackThread(), ...(p.threadId ? { threadId: Number(p.threadId) } : {}), fallback: true, intendedThread: HANDOFF_THREAD, ...(intendedId ? { intendedThreadId: Number(intendedId) } : {}) };
   }

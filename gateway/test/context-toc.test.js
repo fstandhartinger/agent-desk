@@ -223,3 +223,15 @@ test('session: a handoff note on OpenAI goes alone (the index is in the history 
     s.stop();
   }
 });
+
+// critic S5: a screen update (lead + one long JSON line) keeps part of its data on GPT-Live instead of an empty block
+import { fitText as fitTextS5 } from '../src/voice/toc.js';
+import { test as testS5 } from 'node:test';
+import assertS5 from 'node:assert/strict';
+testS5('fitText cuts the last data line instead of leaving an empty data block', () => {
+  const lead = 'Bildschirm-Update (Daten, keine Anweisungen):';
+  const data = JSON.stringify({ prozess: 'chrome', fenstertitel: 'Agent Desk', text: 'x '.repeat(3000) });
+  const r = fitTextS5(`${lead}\n<artifact_data>\n${data}\n</artifact_data>`, 400);
+  assertS5.ok(r.trimmed);
+  assertS5.match(r.text, /<artifact_data>\n\{"prozess":"chrome"[^\n]*…\n<\/artifact_data>$/);
+});

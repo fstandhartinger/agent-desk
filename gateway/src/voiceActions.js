@@ -79,7 +79,7 @@ const refuse = (ctx, name, reason, content) => {
 };
 
 const YES = /^\s*(?:ja|jep|genau|ok(?:ay)?|mach(?:\s+das)?|bitte|los|yes|start(?:e)?(?:\s+\w+)?)[\s.!,]*(?:bitte|gerne|mach das)?[\s.!]*$/i;
-const usable = (e, name, now) => now - e.at <= TRIGGER_AGE_MS && !e.echo && !e.used?.[name];
+const usable = (e, name, now) => now - e.at <= TRIGGER_AGE_MS && (!e.echo || e.echoShort) && !e.used?.[name]; // echoShort: a 1-2 word answer after a long reply (session.js) counts for the two voice actions only, never for computer control
 
 /**
  * The words the tool may act on: his latest sentence plus what he said before it with no answer in between (finals arrive in fragments),
@@ -124,7 +124,11 @@ const OFFER_WHAT = new RegExp(`\\b(?:agent\\w*|jobs?|hintergrund\\w*|werkstatt|$
 const OFFER_DO = /\b(?:start\w*|los(?:schick|leg|setz|lass)\w*|schick\w*|ansetz\w*|anleg\w*|aufsetz\w*|draufsetz\w*|beauftrag\w*|auslös\w*|ausführ\w*|erledig\w*|übernehm\w*|lass(?:en|e)|launch\w*|spin\w*|kick\w*|run)\b/i;
 const OFFER_NOT = /\b(?:erklär\w*|erzähl\w*|aufschlüssel\w*|vorles\w*|zeig\w*|übergab\w*|übergeb\w*|karte\w*|vorschlag\w*|vorschläg\w*|handoff|card|show|explain|tell|how|why|what|which|wie|warum|wieso|was|wann|welche\w*|nicht|kein\w*|nie|niemals|ohne|not|never|without|oder|or|stoppen|abbrech\w*|beend\w*|stop|cancel)\b/i; // an explanation, a card, a negation or a choice is no offer he could accept with a yes
 /** Does the assistant's closing question explicitly offer to start a background agent/job? Hard words only; "Soll ich dafür einen Agent Job im Hintergrund starten?" yes, "Soll ich das aufschlüsseln?" no. */
-export const offersJob = (q) => { const t = String(q ?? ''); return t.length <= 300 && OFFER_FRAME.test(t) && OFFER_WHAT.test(t) && OFFER_DO.test(t) && !OFFER_NOT.test(t) && !MAIN_TRIGGER.test(t); };
+// critic: the task in the relative clause may say anything ("…, der herausfindet, warum der Build rot ist?", "…, der die Übergabe-Karte repariert?"): the exclusions judge the
+// OFFER itself (the words before ", der/die/das/…"); a choice ("…, oder machst du das selbst?") is looked for in the whole question.
+const offerHead = (t) => t.split(/,\s*(?:der|die|das|welche[rsmn]?|um|damit)\b/i)[0]; // not "dass": "Möchtest du, dass ich einen Hintergrund-Job anlege?" is the offer itself
+const CHOICE = /\b(?:oder|or)\s+(?:lieber|soll|sollen|willst|möchtest|machst|mach|selbst|ich|du|nur|doch|erst|rather|should|do)\b/i;
+export const offersJob = (q) => { const t = String(q ?? ''), head = offerHead(t); return t.length <= 300 && OFFER_FRAME.test(head) && OFFER_WHAT.test(head) && OFFER_DO.test(head) && !OFFER_NOT.test(head) && !CHOICE.test(t) && !MAIN_TRIGGER.test(t); };
 // the bare yes that accepts such an offer: no negation hiding behind "starte nichts" (YES also matches "start" + any word)
 const YES_NOT = /\b(?:nicht\w*|nichts|kein\w*|nein|nee|nie|niemals|ohne|noch\s+nicht|warte\w*|stopp?\w*|später|lass\s+mal|no|not|never|wait|stop)\b/i;
 const acceptsOffer = (q, yes) => offersJob(q) && !YES_NOT.test(yes);
@@ -172,7 +176,8 @@ export function prefetchIntent(name, spoken, now, ctx = {}) {
 // Only an order that was clear by the old hard rule stays valid: JOB_STRONG (an agent job, or a start together with a server) in an IMPERATIVE that opens his latest sentence ("Starte einen
 // Agent Job auf Sandy, der ..."), no question word first, no negation, no quote/screen/report marker, no "wenn/könnte/irgendwann/morgen". Measured offline on the four eval sets: 0 of 334 negative windows
 // accepted (the old hard rule accepted 46: reports, quotes of screen text, plans), 7 of 106 positives. Everything else is "unchecked": the Desk says so and offers the card; a bare "ja" to an offer is not enough without the judge.
-const ORDER_FIRST = new RegExp(`^\\s*(?:(?:ja|okay|ok|also|dann|bitte|äh+m?|ähm|und|jetzt|gut|na)[\\s,.!]+)*(?:${START}|setz\\w*|erstell\\w*|wirf|spin|launch)\\b`, 'i');
+// critic: a NEW job only: "starte …", or another order verb directly followed by "einen/ein/nen/neuen" ("Lass einen Agenten …", "Setz einen Job auf …"); "Stell den Agent Job ab", "Schick mir den Link zum Agent Job", "Lass uns über den Agent Job reden" are no start
+const ORDER_FIRST = new RegExp(`^\\s*(?:(?:ja|okay|ok|also|dann|bitte|äh+m?|ähm|und|jetzt|gut|na)[\\s,.!]+)*(?:start\\w*|spin|launch|(?:${START}|setz\\w*|erstell\\w*|wirf)\\s+(?:(?:mal|bitte|jetzt|noch|gleich|sofort)\\s+)*(?:einen|ein|nen|neuen|eine)\\b)`, 'i');
 const NOT_AN_ORDER = /\b(?:da\s+steht|steht|stehen|stand|bildschirm|screen|terminal|anleitung|zitat\w*|zitier\w*|vorles\w*|vorgelesen|lese|liest|sagt|sagte|schreibt|laut|wenn|falls|sollte|könnte\w*|würde\w*|wäre\w*|vielleicht|irgendwann|eventuell|ob|morgen|erst|bloß)\b/i;
 /** Is this window an unambiguous order by the old hard rule? Used only while the judge gives no verdict. A negation or quote marker anywhere in his unanswered words refuses it; the order itself starts a fragment. */
 export function hardOrder(entries) {

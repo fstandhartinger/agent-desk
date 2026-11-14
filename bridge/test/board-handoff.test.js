@@ -129,7 +129,10 @@ test('refusedBeforeWrite: refusals yes; timeouts, signals, crashes and unknown f
   const r = board.refusedBeforeWrite;
   assert.equal(r({ code: 2 }, ARCHIVED), true);
   assert.equal(r({ code: 2 }, "agent-board: No thread matches 'Agent Desk handoffs'."), true);
-  assert.equal(r({ code: 1 }, 'agent-board: Thread #31 is archived; post to an active thread instead.'), true, 'the archived text alone proves it');
+  assert.equal(r({ code: 1 }, 'agent-board: Thread #31 is archived; post to an active thread instead.'), false, 'agent-board refuses with exit 2 only (critic S4)');
+  // critic S4: Node puts the argv (the handoff's own title and task) into err.message; a silent failure whose TITLE says "is archived" stays unclear
+  assert.equal(r({ code: 1, message: 'Command failed: agent-board post Thread #31 is archived' }, ''), false);
+  assert.equal(r({ code: 2, message: 'Command failed: agent-board post Thread #31 is archived' }, ''), false, 'no agent-board: line on stderr');
   assert.equal(r({ code: 'ENOENT' }, ''), true, 'binary missing: it never ran');
   assert.equal(r({ code: 2 }, 'usage: agent-board post ...'), false, 'exit 2 without the agent-board: marker is not assumed');
   assert.equal(r({ code: 1 }, 'Traceback (most recent call last):\n  File x\nValueError: thread not found'), false);
