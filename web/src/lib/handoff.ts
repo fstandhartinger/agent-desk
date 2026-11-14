@@ -58,6 +58,31 @@ export function entryIdOf(body: unknown): string | number | undefined {
 /** "Übergeben (Board #123)" – or plain "Übergeben" when no id came back. */
 export const handedOverLabel = (entryId?: string | number) => (entryId != null ? `Übergeben (Board #${String(entryId).replace(/^#/, '')})` : 'Übergeben');
 
+/** Where a handoff landed when it did not go to its own board thread (a#41d6d2, 14 Nov: the handoff thread was archived). */
+export interface HandoffWhere { fallback: boolean; thread?: string; threadId?: number; intendedThreadId?: number }
+
+// The card keeps the gateway's verdict next to its state: `retry` (may Florian click again?) and `where` (fallback thread).
+declare module './conversation' {
+  interface HandoffCard { retry?: boolean; where?: HandoffWhere }
+}
+
+/** "im Thema #15 (Ops & security) statt #31 gepostet" for a fallback post, else undefined. */
+export function fallbackNote(where?: HandoffWhere): string | undefined {
+  if (!where?.fallback) return undefined;
+  const to = where.threadId != null ? `im Thema #${where.threadId}${where.thread ? ` (${where.thread})` : ''}` : where.thread ? `im Thema „${where.thread}“` : 'in einem anderen Thema';
+  return `${to}${where.intendedThreadId != null ? ` statt #${where.intendedThreadId}` : ' statt im Übergabe-Thema'} gepostet`;
+}
+
+const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+const int = (v: unknown) => (Number.isInteger(v) ? (v as number) : undefined);
+
+/** The fallback info out of the gateway answer ({fallback, thread, threadId, intendedThreadId}); undefined for a normal post. */
+export function whereOf(body: unknown): HandoffWhere | undefined {
+  const b = (body ?? {}) as Record<string, unknown>;
+  return b.fallback === true ? { fallback: true, thread: str(b.thread, 80), threadId: int(b.threadId), intendedThreadId: int(b.intendedThreadId) } : undefined;
+}
+
+const LEGACY_GONE = 'Dieser Vorschlag ist abgelaufen – bitte den Desk noch einmal darum bitten.';
 const inFlight = new Set<string>();
 
 /** Florian's click on "An Agenten übergeben": the only place that posts. A proposal is sent at most once. */
@@ -73,13 +98,19 @@ export async function submitHandoff(proposalId: string): Promise<void> {
       body: JSON.stringify({ id: proposalId }),
     });
     if (!res.ok) {
+      // a#41d6d2: show the gateway's own reason (it says what happened and what to do next) and honour its `retry` flag
+      const raw = await res.clone().json().catch(() => ({})) as Record<string, unknown>;
       const err = await errorFrom(res);
-      throw res.status === 404 || res.status === 410 ? new Error('Dieser Vorschlag ist abgelaufen – bitte den Desk noch einmal darum bitten.') : err;
+      const gone = res.status === 404 || res.status === 410;
+      const said = typeof raw?.error === 'string' && raw.error.trim() !== '';
+      patchHandoff(proposalId, { state: 'error', error: gone && !said ? LEGACY_GONE : errorMessage(err), retry: typeof raw?.retry === 'boolean' ? raw.retry : !gone });
+      return;
     }
     const body = await res.json().catch(() => ({}));
-    patchHandoff(proposalId, { state: 'done', entryId: entryIdOf(body) });
+    patchHandoff(proposalId, { state: 'done', entryId: entryIdOf(body), where: whereOf(body), error: undefined, retry: undefined });
   } catch (e) {
-    patchHandoff(proposalId, { state: 'error', error: errorMessage(e) });
+    // the request may or may not have arrived: another click is safe, the gateway answers "schon angekommen" / "unklar" truthfully
+    patchHandoff(proposalId, { state: 'error', error: errorMessage(e), retry: true });
   } finally {
     inFlight.delete(proposalId);
   }

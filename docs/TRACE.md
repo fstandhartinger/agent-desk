@@ -31,6 +31,11 @@ Every voice session (`/api/voice`) and every text conversation (`/api/chat`) wri
   `page.load_failed`, `session.refused`, `session.hard_cap`, `client.bad_message`, audit lines `artifact.registry.error`, `artifact.card.unreadable`, `artifact.ref.unreadable`.
 - **Browser errors.** What the web UI shows as an error (error toasts, red activity lines, the voice dock) is sent over the voice socket as `client.error {what,reason}`
   (`reason` is the text shown, at most 300 characters); errors with no open socket wait (20 at most) for the next voice session.
+- **Handoff card clicks.** Florian's click on "An Agenten übergeben" is an HTTP call outside the session socket; its outcome is written into the trace of the session that made the proposal
+  (the proposal stores the trace handle): `handoff.click {id,title}`, `handoff.posted {id,entry,thread,fallback,threadId?,intendedThreadId?,reopened?,ms}`, `handoff.failed {id,kind,reason,retry,detail,ms}`
+  (`retry:true` = nothing reached the board, the same card can be clicked again), `handoff.refused {id,code,reason,retry}` (unknown / already used / limit / running). In a voice session a failure or refusal is also
+  told to the live model as a passive note (`handoff.note {how,chars}`, briefing channel, no reply asked). `session_trace` prints them and the diagnosis counts failed clicks. A trace that has already closed
+  (voice session over, chat idle 15 min) takes no more events; the audit lines `handoff.posted|failed|refused` are written regardless.
 - **Test.** `gateway/test/errors-logged.test.js` and `web/test/errors-logged.test.ts` scan the source for user-visible error strings and fail when one has no path to a log event.
 - **Reading.** Tool `session_trace {which}`; route `GET /api/session-lookup?q=<a#id|hex|slug|last>[&full=1]`.
 

@@ -22,7 +22,20 @@ function ViaBadge({ via }: { via: Msg['via'] }) {
   );
 }
 
+/** Pulsing mic dot: he is talking and the words are still being transcribed. */
+function SpeakingDot() {
+  return (
+    <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-light opacity-60" />
+      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-violet-light" />
+    </span>
+  );
+}
+
 function UserMessage({ m }: { m: Msg }) {
+  const text = textOf(m);
+  // a#41d6d2 (14 Nov): while he talks the newest entry must not still be the agent's answer
+  const placeholder = Boolean(m.speaking) && !text.trim();
   return (
     <div className="flex animate-rise flex-col items-end gap-1.5">
       {(m.context || m.via !== 'text') && (
@@ -35,8 +48,16 @@ function UserMessage({ m }: { m: Msg }) {
           <ViaBadge via={m.via} />
         </div>
       )}
-      <div className={`max-w-[88%] whitespace-pre-wrap rounded-[20px] rounded-br-md border px-4 py-2.5 text-[15px] leading-relaxed text-fg ${m.via === 'voice' ? 'border-violet/20 bg-violet/[0.09]' : 'border-white/[0.08] bg-white/[0.06]'}`}>
-        {textOf(m) || <span className="text-mute">…</span>}
+      <div data-speaking={m.speaking ? (placeholder ? 'placeholder' : 'live') : undefined} role={placeholder ? 'status' : undefined}
+        className={`max-w-[88%] whitespace-pre-wrap rounded-[20px] rounded-br-md border px-4 py-2.5 text-[15px] leading-relaxed text-fg ${m.via === 'voice' ? 'border-violet/20 bg-violet/[0.09]' : 'border-white/[0.08] bg-white/[0.06]'}`}>
+        {placeholder ? (
+          <span className="flex items-center gap-2.5 text-fg-2"><SpeakingDot /> Du sprichst … <span className="text-mute">wird transkribiert</span></span>
+        ) : (
+          <>
+            {text || <span className="text-mute">…</span>}
+            {m.speaking && <span className="ml-2 inline-flex translate-y-[-1px] align-middle" title="Wird noch transkribiert"><SpeakingDot /></span>}
+          </>
+        )}
       </div>
     </div>
   );

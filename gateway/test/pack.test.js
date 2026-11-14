@@ -37,6 +37,7 @@ after(() => { gw.close(); upstream.close(); });
 
 const { deriveFromTimeline, loadPack, pagePackLines, searchPack, splitSections, PAGE_BUDGET, TRUNCATION, orderSections, pageUpdateText } = await import('../src/pack.js');
 const { loadPageContext } = await import('../src/page.js');
+const { estimateTokens } = await import('../src/voice/toc.js');
 const { buildInstructions: voice } = await import('../src/voice/instructions.js');
 const { buildInstructions: text } = await import('../src/prompt.js');
 const { runTool } = await import('../src/tools.js');
@@ -164,10 +165,13 @@ describe('packing per provider', () => {
     assert.match(out, /FAKTENTEXT/);
     assert.match(out, /explainer_point/);
   });
-  it('page update text names the new element and its scene narration', () => {
+  it('page update text is a table-of-contents entry: the new element, its scene and the tools for the detail, not the narration (a#41d6d2)', () => {
     const u = pageUpdateText(pageWith(pack, 'el5b'));
     assert.match(u, /el5b/);
-    assert.ok(u.includes(timeline.scenes[4].text.slice(0, 80)));
+    assert.match(u, /explainer_point\(el5b\)/);
+    assert.match(u, /explainer_context\(sceneId "scene5"\)/);
+    assert.ok(!u.includes(timeline.scenes[4].text.slice(0, 200)), 'the scene narration stays behind the tool');
+    assert.ok(estimateTokens(u) <= 400, String(estimateTokens(u)));
     assert.equal(pageUpdateText({ pack }), '');
   });
 });
@@ -227,7 +231,7 @@ describe('no leaking to the browser', () => {
   });
   it('only the model-facing modules mention the deep-dive or the context token', () => {
     const src = path.resolve(import.meta.dirname, '../src');
-    const allowed = new Set(['pack.js', 'page.js', 'explainer.js', 'config.js', 'tools.js', 'prompt.js', 'vizFacts.js']);
+    const allowed = new Set(['pack.js', 'page.js', 'explainer.js', 'config.js', 'tools.js', 'prompt.js', 'vizFacts.js', 'vocabulary.js']); // vocabulary.js: page words for the voice recogniser hints
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
     for (const file of walk(src).filter((f) => f.endsWith('.js'))) {
       const body = fs.readFileSync(file, 'utf8');

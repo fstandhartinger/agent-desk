@@ -5,7 +5,7 @@ import { setEnv } from './helpers/env.js';
 
 setEnv({});
 const { runTool } = await import('../src/tools.js');
-const { hasTrigger, MAIN_TRIGGER, JOB_TRIGGER, jaccard, resetActions } = await import('../src/voiceActions.js');
+const { hasTrigger, MAIN_TRIGGER, JOB_TRIGGER, jaccard, resetActions, offersJob, hardOrder } = await import('../src/voiceActions.js');
 const { Limits } = await import('../src/limits.js');
 const { TEXT } = await import('../src/messages.js');
 const { syn } = await import('./synthetic.js');
@@ -73,6 +73,24 @@ describe('refusals', () => {
     const j = await job(c);
     assert.ok(!/Claude Code|Main Agent|Hauptagent/.test(j.content), 'the refusal does not put the trigger words into the agent\'s mouth');
     assert.equal(c.log.hub.length, 0);
+  });
+  it('start_agent_job with no judge and no clear order: says why in ONE sentence, offers the card, no ready-made sentence to repeat (a#41d6d2)', async () => {
+    const j = await job(ctx([entry('Mach mal was mit dem Bildschirm')]));
+    assert.equal(j.ok, false);
+    assert.match(j.content, /^Nichts gestartet: die Prüfung von Florians Auftrag ist gerade nicht erreichbar/, 'why');
+    assert.match(j.content, /Übergabe-Karte .*\(handoff_propose\)/, 'the way that needs no judge');
+    assert.match(j.content, /Diktiere keinen Satz zum Nachsprechen/, 'a sentence the agent says counts as an echo, never as his word');
+    assert.match(j.content, /Ruf das Werkzeug erst wieder auf, wenn er danach etwas Neues gesagt hat/, 'no retry loop on the same words');
+    assert.ok(!/Claude Code|Main Agent|Hauptagent|Agent Job|auf Sandy|auf LeChonk/i.test(j.content), 'no trigger words in the agent\'s mouth');
+    assert.ok(j.content.length < 600);
+  });
+  it('start_agent_job with nothing of his to judge (no usable sentence): the Desk is told to ask the one offer question, nothing is started', async () => {
+    const j = await job(ctx([]));
+    assert.equal(j.ok, false);
+    const offer = j.content.match(/„(Soll ich einen Agenten im Hintergrund starten, der …\?)“/)?.[1];
+    assert.ok(offer, 'the canonical offer');
+    assert.equal(offersJob(offer.replace('…', 'die Logs prüft')), true, 'exactly the shape the gate lets through to the judge');
+    assert.match(j.content, /Ohne „Ja“ oder „Genau“ in derselben Antwort und ohne „oder“/, 'his bare Ja must not become an echo of the agent\'s own Ja');
   });
   it('fragment / old chain: refused with the call-again hint', async () => {
     for (const vt of [{ fromFragment: true }, { oldChain: true }]) {
@@ -152,7 +170,7 @@ describe('output_main_agent_prompt results', () => {
 });
 
 describe('start_agent_job', () => {
-  const say = [entry('Starte mit Claude Code einen Job')];
+  const say = [entry('Starte einen Agent Job auf Sandy, der die Platte prüft.')];
   it('sends the strict job.start request to the sandy bridge only; short result without paths', async () => {
     const c = ctx([entry('ältere Worte'), ...say]);
     const r = await job(c, { host: 'lechonk' });
@@ -163,12 +181,12 @@ describe('start_agent_job', () => {
     assert.deepEqual(call.opts, { host: 'sandy' });
     assert.deepEqual(Object.keys(call.params).sort(), ['aid', 'host', 'prompt', 'provider', 'requestId', 'spoken', 'title']);
     assert.deepEqual([call.params.host, call.params.aid, call.params.provider], ['lechonk', 'a#abcdef', 'openai']);
-    assert.deepEqual(call.params.spoken, ['ältere Worte', 'Starte mit Claude Code einen Job']);
+    assert.deepEqual(call.params.spoken, ['ältere Worte', 'Starte einen Agent Job auf Sandy, der die Platte prüft.']);
     const a = c.log.audit.find((x) => x.action === 'action.agent_job');
     assert.match(a.detail, /a#abcdef voice-x-20261102 title=Check disk/);
   });
   it('last 6 spoken texts at most; title trimmed to 60; host defaults to auto', async () => {
-    const many = Array.from({ length: 9 }, (_, i) => entry(i === 8 ? 'mit Claude Code' : `satz ${i}`, 9000 - i));
+    const many = Array.from({ length: 9 }, (_, i) => entry(i === 8 ? 'Starte einen Agent Job auf Sandy' : `satz ${i}`, 9000 - i));
     const c = ctx(many);
     await job(c, { title: `T ${'x'.repeat(100)}` });
     assert.equal(c.log.hub[0].params.spoken.length, 6);
@@ -201,7 +219,7 @@ describe('start_agent_job', () => {
     const c = ctx(say);
     await job(c, { title: 'Disk check', prompt: 'gleicher Auftrag' });
     c.clock = { now: () => NOW + 3 * 60_000 + 1, sleep: async () => {} };
-    c.voiceTurn.spoken = () => [{ text: 'Claude Code', at: NOW + 3 * 60_000, turn: 1 }];
+    c.voiceTurn.spoken = () => [{ text: 'Starte einen Agent Job auf Sandy', at: NOW + 3 * 60_000, turn: 1 }];
     await job(c, { title: 'Disk check', prompt: 'gleicher Auftrag' });
     assert.equal(c.log.hub.length, 2);
   });
@@ -212,13 +230,14 @@ describe('start_agent_job', () => {
     const r = await job(c);
     assert.equal(r.ok, false);
     assert.match(r.content, /Tageslimit für Agent-Jobs/);
+    assert.match(r.content, /Sag Florian in EINEM Satz warum und dass er den Auftrag später noch einmal geben kann\./, 'one reason, one next step');
     assert.equal(c.log.hub.length, 0);
   });
   it('bridge offline: German failure, no retry, and the same task may be tried again later', async () => {
     const c = ctx(say, { hubError: TEXT.bridgeOffline('sandy') });
     const r = await job(c);
     assert.equal(r.ok, false);
-    assert.match(r.content, /nicht gestartet \(die Werkstatt auf Sandy ist offline\)\. Sag das Florian in einem Satz\./);
+    assert.match(r.content, /nicht gestartet \(die Werkstatt auf Sandy ist offline\)\. Sag Florian in EINEM Satz warum und dass er es später noch einmal sagen kann\./, 'one reason, one next step');
     assert.equal(c.log.hub.length, 1);
     await job(c);
     assert.equal(c.log.hub.length, 2, 'a failure is not a duplicate');
@@ -243,7 +262,7 @@ describe('start_agent_job', () => {
 
 describe('critic: the gate binds to his current sentence', () => {
   it('one word opens one action: a second job with another task from the same sentence is refused', async () => {
-    const spoken = [entry('Starte das mit Claude Code')];
+    const spoken = [entry('Starte einen Agent Job auf Sandy')];
     const c = ctx(spoken, { vt: { spoken: () => spoken } });
     const a = await job(c, { title: 'Check disk', prompt: 'Prüfe die Platte' });
     assert.equal(a.ok, true);
@@ -253,11 +272,11 @@ describe('critic: the gate binds to his current sentence', () => {
     assert.equal(c.log.hub.length, 1);
   });
   it('a failed start gives the word back; an unclear one does not', async () => {
-    const spoken = [entry('Starte das mit Claude Code')];
+    const spoken = [entry('Starte einen Agent Job auf Sandy')];
     const c = ctx(spoken, { vt: { spoken: () => spoken }, hubError: 'Bridge offline' });
     assert.equal((await job(c)).ok, false);
     assert.ok(!spoken[0].used?.start_agent_job);
-    const spoken2 = [entry('Starte das mit Claude Code')];
+    const spoken2 = [entry('Starte einen Agent Job auf Sandy')];
     const c2 = ctx(spoken2, { vt: { spoken: () => spoken2 }, hubError: 'unclear' });
     assert.match((await job(c2)).content, /Unklar.*Starte nicht nochmal/);
     assert.ok(spoken2[0].used.start_agent_job);

@@ -25,8 +25,10 @@ export function repairGlued(text, known = new Set()) {
 // Markup of that shape (name:call_x{...}, call_x{...}, default_api.x(...), <ctrlNN>) never reaches the browser.
 const MARKUP_RE = /(?<![\w.-])[\w.-]*:call_\w*(?:\{[^{}]*\})?|\bcall_\w+\{[^{}]*\}|\b(?:print\()?default_api\.\w+\([^)]*\)\)?|<ctrl\d+>|<\/?(?:tool_call|function_call)[^<>]*>/g; // [^<>]: [^>]* rescanned to the next > from every <tool_call (critic r7)
 
+// GPT-Live with the gpt-6-astra delegate writes its breathing into the transcript ("[inhale] Ich schau kurz …", 14 Nov 2026)
+const VOCAL_TAG_RE = /\[(?:inhale|exhale|inhales|exhales|breath|breathes|sigh|sighs|laugh|laughs|laughing|chuckle|chuckles|pause|clears throat)\]\s*/gi;
 export function stripToolMarkup(text) {
-  return String(text ?? '').replace(MARKUP_RE, '').replace(/[ \t]{2,}/g, ' ');
+  return String(text ?? '').replace(MARKUP_RE, '').replace(VOCAL_TAG_RE, '').replace(/[ \t]{2,}/g, ' ');
 }
 
 /** Streaming version: the last, unfinished word and an unclosed "call_…{" wait for the next delta. */

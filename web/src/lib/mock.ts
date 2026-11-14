@@ -352,6 +352,13 @@ class MockVoiceSocket extends EventTarget {
   }
   private userSays(text: string, after: () => void) {
     const words = text.split(' ');
+    // like xAI/Gemini: the vendor VAD announces his speech first. ?speak=hold stops there (placeholder screenshots); xAI has no partials, Gemini streams them.
+    this.out({ type: 'speech_started' });
+    if (params.get('speak') === 'hold') return;
+    if (this.provider === 'xai') {
+      this.later(words.length * 260 + 200, () => { this.out({ type: 'transcript', role: 'user', text, final: true }); after(); });
+      return;
+    }
     words.forEach((w, i) => this.later(i * 260, () => this.out({ type: 'transcript', role: 'user', delta: (i ? ' ' : '') + w, final: false })));
     this.later(words.length * 260 + 200, () => {
       this.out({ type: 'transcript', role: 'user', text, final: true });
@@ -376,6 +383,9 @@ class MockVoiceSocket extends EventTarget {
       }
       const model = { xai: 'grok-voice-3.0', openai: 'gpt-live-1', gemini: m.variant === 'fast' ? 'gemini-3.8-live' : 'gemini-3.8-live-extended-thinking' }[this.provider];
       this.later(500, () => this.out({ type: 'ready', provider: this.provider, model }));
+      // usage ticks like the gateway's (every 10 s there; every 2 s here), with the day total of the Desk
+      let sec = 0;
+      this.timers.push(window.setInterval(() => { sec += 2; this.out({ type: 'usage', seconds: sec, costUsd: Math.round(sec * 0.0083 * 10_000) / 10_000, dayUsd: Math.round((1.41 + sec * 0.0083) * 100) / 100 }); }, 2000));
       this.later(1600, () =>
         this.userSays('Wie ist der Stand vom Job reax2-next-steps?', () =>
           this.reply('Ich habe kurz nachgesehen. Der Job steht in Phase drei von vier und wartet nur noch auf das Batch-Ergebnis. Soll ich dir Bescheid geben, sobald es da ist?', {
@@ -391,7 +401,7 @@ class MockVoiceSocket extends EventTarget {
     } else if (m.type === 'stop') this.close();
   }
   close() {
-    this.timers.forEach(clearTimeout);
+    this.timers.forEach((t) => { clearTimeout(t); clearInterval(t); });
     if (this.audio) clearInterval(this.audio);
     this.readyState = 3;
   }

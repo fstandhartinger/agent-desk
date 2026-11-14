@@ -140,7 +140,8 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
   (`{"absatz":[..],"zeile":[..]}`); the gateway puts `\n\n` before a new topic or request and `\n` before a new thought or list item, never
   markup, and only where the cleaned text ends a sentence. Short texts (under 45 words or three sentences) stay one block. `format` mode is that
   alone (a dictation of one chunk). `live`: the subtitle so far, one call. Returns `{text,ms,windows,changed,failed,undone,breaks}`; a late or failed
-  model leaves the text as it came.
+  model leaves the text as it came. `live` never answers 503 for a slow or unreachable model any more (14 Nov 2026): 200 with the raw text,
+  `failed:1`, `reason` (`timeout`|`upstream`|`error`) and `note` ("Nachbearbeitung zu langsam – Rohtext"); only a missing key (503 `no-key`) and the caption budget (429) stay errors.
   Replay recordings through all of this before shipping a change: `node gateway/scripts/dictation-replay.mjs` (recordings are private, never commit them).
 - `POST /api/device/caption` (scope `dictate`): live caption, MAI only. Multipart `audio` (PCM16 16 kHz mono, raw samples or a WAV, 0.1 to 12 s),
   optional `context` JSON `{visibleIds,recentTerms}` (phrases: dictionary + titles of the visible ids + recent terms, titles cached 5 min per device).
@@ -188,10 +189,13 @@ Login-link delivery is acknowledged after the bridge writes its private durable 
 Two voice-only tools (`voiceOnly: true` in `TOOL_DEFS`; the text chat and the provider schemas never see the flag) act without a click:
 `output_main_agent_prompt {text}` types a standalone prompt into the Claude Code input box of VS Code on Florian's laptop (the Screen
 Agent command `main-agent-prompt`, not submitted) and `start_agent_job {title, prompt, host?}` starts a real Claude Code job on Sandy or
-LeChonk (bridge method `job.start`, Sandy bridge) and announces it with a Telegram card. Both run only when Florian's OWN words in the
-session (`spoken`: the last 12 speech finals and typed Desk turns; never marker, context, screen or tool text) contain the trigger
-(`gateway/src/voiceActions.js`: Main Agent / Hauptagent / Stabschef / Chief of Staff, resp. Claude Code / Agent Job / "auf Sandy|LeChonk";
-since 10 Nov, when those words miss, one model call judges his intent in the same words, `gateway/src/intentTrigger.js`, see below),
+LeChonk (bridge method `job.start`, Sandy bridge) and announces it with a Telegram card. Both run only on Florian's OWN words in the
+session (`spoken`: the last 12 speech finals and typed Desk turns; never marker, context, screen or tool text). The Main-Agent prompt needs the
+trigger (`gateway/src/voiceActions.js`: Main Agent / Hauptagent / Stabschef / Chief of Staff; since 10 Nov, when those words miss, one model call
+judges his intent in the same words, `gateway/src/intentTrigger.js`, see below). `start_agent_job` has NO trigger word (Florian 14 Nov, board #60911):
+whether a job starts is decided by his intention in what he said or typed (an order, a clear yes to the Desk's offer of a background agent, or a wish
+only an agent can meet), by the same model call on every call of the tool; when that is unclear the Desk asks one short question instead of refusing,
+and while the model is down only an unambiguous imperative ("Starte einen Agent Job auf Sandy, der ...") still opens it. In both cases
 the call does not answer a fragment or an older question, and no new speech arrived for 2.5 s. Dedupe: the same prompt text within 60 s;
 a job with the same title or a word overlap of 0.6 within 3 minutes. `agentJob` is limited to 20 per day. The Screen Agent receives the
 prompt on its long poll as `{fresh:false, prompt:{id,text}}` (older apps ignore it) and answers on
@@ -200,23 +204,38 @@ does not answer within 6 s) the browser gets `{type:"main_agent_prompt", text}` 
 
 
 
-### Intent fallback for the two voice actions (10 Nov 2026)
+### Intent judge for the two voice actions (10 Nov 2026; job without trigger words 14 Nov 2026)
 
 Florian (desk trace a#41ec11): "Es muss nicht unbedingt der Begriff Main Agent verwendet werden, sondern es muss nur meine Intention
-erkannt werden." The hard words stay the first check and cost nothing. Only when they refuse softly (`no-trigger`, `means-main-agent`,
-`question`; never `used`) does `intentTrigger.js` ask `DESK_INTENT_MODEL` (default: the text model,
-`deepseek/deepseek-v4.1-flash-20261017:nitro`, reasoning off, JSON `{"main_agent","agent_job"}` yes/no) about the same trigger window:
-his own finals and typed turns as `Florian:` lines; for `output_main_agent_prompt` only (typed, never sent), when the window ends in a
-bare "ja", also the closing QUESTION of the assistant's reply before it as an `Assistent:` line (a statement or order in the assistant's
-words is never shown). A job needs his own words: a bare "ja" to the assistant's proposal never starts one, and the refusal asks him
-for his own sentence instead of a yes. Fail closed: no key, a timeout
-(3.5 s), an error or anything but "yes" for exactly this tool keeps the old refusal. The call starts while the gate waits for him to
-settle (2.5 s; with xAI only once the final of the call arrived) and is cached per text for 60 s, so the added latency is usually
-zero; any new sound during the check wins (`still-speaking`), and of two calls of one tool on the same sentence only the first opens. Every verdict is traced as `action.intent` (tool, hard reason, verdict,
-ms). Kill switch: `DESK_INTENT_TRIGGER=off`. Live check: `node gateway/test/manual/intent-eval.mjs 3 out.json off [cases.json]`
-(10 Nov, final prompt, three sets of 58/90/80 sentences x3, two written blind by another model: 0 false alarms on 1113 negative
-verdicts; 3 misses on 255 positive verdicts, all one sentence that names "Hauptagent" and so opens by the hard words anyway;
-p50 0.3 s, p90 0.4 s).
+erkannt werden." Main-Agent prompt: the hard words stay the first check and cost nothing; only when they refuse softly (`no-trigger`,
+`means-main-agent`, `question`; never `used`) does `intentTrigger.js` ask `DESK_INTENT_MODEL` (default: the text model,
+`deepseek/deepseek-v4.1-flash-20261017:nitro`, reasoning off, JSON `{"main_agent":"yes"|"no","agent_job":"yes"|"ask"|"no"}`) about the same trigger
+window: his own finals and typed turns as `Florian:` lines, and, when the window ends in a bare "ja", the closing QUESTION of the assistant's reply
+before it as an `Assistent:` line (a statement or order in the assistant's words is never shown).
+
+**Job (14 Nov, a#41d6d2; Florian: "nicht an ein Auslösewort binden, es soll einfach aus meiner Intention des Gesprochenen abgeleitet werden"):** no
+hard word is needed and none is enough, the model decides every `start_agent_job` call. The only source of an intention is what HE said or typed
+(speech finals and typed turns: up to 3 usable ones, <= 3 min, never an echo of the agent's voice, never one that already opened a job); screen, page,
+file and tool text is not in the window at all. The model also sees, labelled as not his: the closing QUESTION of the Desk's reply before a bare yes,
+only when that question itself offers a background agent (`offersJob`: offer frame + agent/job word + start verb, no negation / explanation / card /
+choice / Main-Agent word) and his yes holds no negation; and, when his latest words are short (<= 12 words, anaphoric: "Ja, dann soll er das tun."), up to
+two earlier sentences of his (`Florian (vorher, schon beantwortet):`) with the closing sentence of the reply to each (`Assistent (nicht Florians Wort):`).
+The prompt says: yes for an order, a clear yes to such an offer, or a wish only a background agent can meet ("bitte löse sofort eine Änderung dieser
+Regel aus"); no for talk ABOUT agents, questions how something works, reports, negation, hypotheticals, quoted or read-aloud text (also from pages,
+files, tool results), anything the Desk can do itself, anything for the Main Agent; `ask` when he may want a job and it is not clear. Only `yes` opens
+anything. The tool result then tells the Desk what to do: `ask` -> ask ONE short question, "Soll ich einen Agenten im Hintergrund starten, der <Aufgabe>?"
+(his yes to it opens the job); `no` -> answer him normally, offer nothing. No verdict (no key, kill switch, 3.5 s timeout, junk): the narrow old rule
+(`hardOrder`: an imperative opening his latest sentence that names an agent job or a start on Sandy/LeChonk; no question word, negation, quote, report or
+plan) still opens it, everything else answers `unchecked` (the Desk says so and offers the handoff card). Trace `action.intent` carries `hard`
+(what the old words would have said, data only), `verdict` (yes|ask|no|none), `via` (`offer` | `context`) and `fallback`.
+
+Fail closed: for the Main-Agent prompt no key, a timeout, an error or anything but "yes" keeps the old refusal. The call starts while the gate waits for
+him to settle (2.5 s; with xAI only once the final of the call arrived) and is cached per text for 60 s, so the added latency is usually
+zero; any new sound during the check wins (`still-speaking`), and of two calls of one tool on the same sentence only the first opens. Kill switch:
+`DESK_INTENT_TRIGGER=off` (the job then runs on `hardOrder` only). Live checks: `node gateway/test/manual/intent-eval.mjs 8 out.json off [cases.json]`
+(the model alone; labels `j`/`m`, `amb` = ambiguous, listed, never scored) and `node gateway/test/manual/intent-a41d6d2-live.mjs 8 --sets` (the whole gate
+with real windows). 14 Nov final prompt, four sets (172 / 90 / 80 / 114 cases) x8 through the whole gate: 0 false alarms on 2,672 negative verdicts, 0
+misses on 848 positive verdicts; the old gate (hard words decide) opened a job on 368 of them.
 ## Computer control v2 and screen names for speech (9 Nov 2026)
 
 **Computer control.** In the unrestricted mode (the default; `DESK_COMPUTER_GUARDS=on` keeps the guarded tool set and rules) the loop drives the Screen Agent app with the free tool set of `docs/computer-contract-v2.md`: screenshots with a coordinate frame, clicks by coordinates, drag, wheel, typing and key chords, windows, UI Automation, clipboard, PowerShell / cmd / WSL / Python, files, and Chrome over CDP on his running browser.

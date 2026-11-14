@@ -395,6 +395,8 @@ function detail(e) {
   if (/^transcript\./.test(e.type)) return `"${brief(d.text, 100)}"`;
   if (e.type.startsWith('tool.')) return [d.name, d.ok === false ? 'FEHLER' : '', d.ms !== undefined ? `${d.ms}ms` : '', d.chars !== undefined ? `${d.chars} Zeichen` : '', d.error ? brief(d.error, 80) : '', d.reason ? brief(d.reason, 60) : ''].filter(Boolean).join(' ');
   if (e.type === 'provider.error') return brief(d.message, 100);
+  // a#41d6d2: Florian's click on a handoff card is an HTTP call outside the voice socket; its outcome has to read like a tool result here
+  if (e.type.startsWith('handoff.')) return [d.title ? `"${brief(d.title, 50)}"` : '', d.entry != null ? `Eintrag #${d.entry}` : '', d.fallback ? `FALLBACK in Thema ${d.threadId != null ? `#${d.threadId} ` : ''}${brief(d.thread, 30)}`.trim() : '', d.reopened ? 'Thema wieder geöffnet' : '', d.how ? `an das Live-Modell: ${d.how}` : '', d.retry !== undefined ? `retry=${d.retry}` : '', d.reason ? brief(d.reason, 140) : ''].filter(Boolean).join(' ');
   if (e.type.startsWith('watchdog.') || e.type === 'turn.unanswered') return brief(d.reason ?? d.question ?? '', 100);
   if (e.type.startsWith('session.')) return brief([d.reason, d.model, d.provider].filter(Boolean).join(' '), 60);
   const keys = Object.keys(d).slice(0, 4).map((k) => `${k}=${brief(typeof d[k] === 'object' ? JSON.stringify(d[k]) : d[k], 30)}`);
@@ -423,6 +425,8 @@ export function localDiagnosis(events) {
   if (stale) notes.push(`${stale} veraltete(s) Werkzeugergebnis(se)`);
   if (count(/^tool\.error$/)) notes.push(`${count(/^tool\.error$/)} Werkzeugfehler`);
   if (count(/^provider\.error$/)) notes.push(`${count(/^provider\.error$/)} Anbieterfehler`);
+  const handoffFailed = events.filter((e) => e.type === 'handoff.failed');
+  if (handoffFailed.length) notes.push(`${handoffFailed.length} fehlgeschlagene(r) Klick(s) auf die Übergabe-Karte (zuletzt: ${brief(handoffFailed.at(-1).data?.reason, 100)})`);
   if (count(/^mic\.mute$/)) notes.push(`Mikrofon ${count(/^mic\.mute$/)}x stummgeschaltet`);
   if (count(/^trace\.dropped$/)) notes.push('Ereignisse gingen verloren (Puffer voll)');
   return notes.length ? notes.join('. ') : 'Keine Auffälligkeiten im Verlauf.';

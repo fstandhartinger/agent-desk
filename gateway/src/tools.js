@@ -692,7 +692,8 @@ function noteTurnProposal(ctx, kind, title, proposal) {
 async function handoffPropose({ title, task, why }, ctx) {
   const dup = turnDuplicate(ctx, 'handoff', title);
   if (dup) return { result: { id: dup.id, duplicate: true, [HANDOFF_EVENT]: null }, host: 'gateway' };
-  const proposal = proposeHandoff({ sid: ctx.sid ?? null, title, task, why });
+  // a#41d6d2: the proposal remembers its session's trace (and, in voice, the passive note channel) so the click's outcome lands there
+  const proposal = proposeHandoff({ sid: ctx.sid ?? null, title, task, why, trace: ctx.trace?.() ?? null, contextNote: ctx.contextNote });
   noteTurnProposal(ctx, 'handoff', title, proposal);
   return { result: { id: proposal.id, [HANDOFF_EVENT]: { type: 'handoff', id: proposal.id, title: proposal.title, task: proposal.task, why: proposal.why } }, host: 'gateway' };
 }

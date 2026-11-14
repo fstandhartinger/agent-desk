@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Agent Desk handoff self-check, 06:30 UTC and on boot
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 UTC
+OnBootSec=3min
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

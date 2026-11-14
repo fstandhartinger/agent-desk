@@ -118,9 +118,9 @@ export class ToolBatch {
 /**
  * Round 10 (critic r9 F4): a voice model that got its tool results but stays silent. `arm()` after the results went out;
  * any sign of an answer (audio, assistant transcript, a new tool call) calls `clear()`. When `ms()` pass without one, `fire()`
- * runs (the adapter asks for the answer again), at most `max` times per arm.
+ * runs (the adapter asks for the answer again), at most `max` times per arm, but not while `hold()` is true (Florian is speaking).
  */
-export function createWatchdog(ms, fire, { max = 2 } = {}) {
+export function createWatchdog(ms, fire, { max = 2, hold = () => false } = {}) {
   let timer = null;
   let left = max;
   const start = () => {
@@ -128,6 +128,9 @@ export function createWatchdog(ms, fire, { max = 2 } = {}) {
     timer = setTimeout(() => {
       timer = null;
       if (left <= 0) return;
+      // a#41d6d2 (14 Nov 2026, 13:28:22): the watchdog nudged the model 6 s after a 21 s tool result while Florian was still speaking his next question;
+      // while `hold()` says he speaks, nothing is asked of the model and the check comes round again (his transcript or speech_started clears it for good)
+      if (hold()) { start(); return; }
       left -= 1;
       fire(max - left);
       start();
