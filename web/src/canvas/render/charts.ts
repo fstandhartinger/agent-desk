@@ -3,24 +3,25 @@
 import type { CanvasItem, CanvasSpec, CanvasTone } from '../types';
 import { fmtDate, fmtNumber, fmtPercent, fmtValue, niceTicks } from '../format';
 import { sanitizeSvg } from '../sanitize';
-import { arcPath, arrowHead, ellipsize, measure, PALETTE as P, r1, rgba, tone, TONES, wrap, type Box, type Prim, type Scene, type Size } from './scene';
+import { arcPath, arrowHead, CATEGORICAL_DARK, ellipsize, measure, PALETTE as P, r1, rgba, tone, TONES, wrap, type Box, type Prim, type Scene, type Size } from './scene';
 
-const isHi = (spec: CanvasSpec, label: string) => !!spec.highlight && spec.highlight.trim().toLowerCase() === label.trim().toLowerCase();
+export const isHi = (spec: CanvasSpec, label: string) => !!spec.highlight && spec.highlight.trim().toLowerCase() === label.trim().toLowerCase();
 // Red means "problem" (docs/CANVAS.md). Models like to paint the biggest bar red; in data charts the tone only survives
 // when the item itself names a problem, otherwise the item falls back to the calm palette.
 const PROBLEM = /fehl|problem|kaputt|defekt|risiko|verlust|überfällig|ueberfaellig|blockiert|gesperrt|ausfall|abgelehnt|verweigert|mahnung|strafe|bu(ß|ss)geld|warnung|kritisch|störung|error|fail|denied|refused|overdue|broken|outage/i;
 export function dataTone(t: CanvasTone | undefined, label: string, detail?: string): CanvasTone | undefined {
   return t === 'red' && !PROBLEM.test(`${label} ${detail ?? ''}`) ? undefined : t;
 }
-/** Item colour: its own tone, else a calm rotation; the highlight is always papaya. */
+/** Item colour: its own tone, else the categorical slot (parts of a whole) or — for ONE series (`rotate` false: a plain bar chart) —
+ *  slot 1 for every item, so colour never encodes the value order; the highlight is always papaya. */
 const itemColor = (spec: CanvasSpec, it: { label: string; tone?: CanvasTone; detail?: string }, i: number, rotate = true) => {
   const t = dataTone(it.tone, it.label, it.detail);
-  return isHi(spec, it.label) ? P.papaya : t && t !== 'neutral' ? tone(t) : rotate ? DONUT[i % DONUT.length] : P.violet;
+  return isHi(spec, it.label) ? P.papaya : t && t !== 'neutral' ? tone(t) : rotate ? DONUT[i % DONUT.length] : CATEGORICAL_DARK[0];
 };
-// Restrained rotation for categorical slices when the spec gives no tones: violet, moss, amber, sky and neutral, then
-// lighter variants of the same hues. No red or pink (red is reserved for problems), no papaya (the highlight).
-export const DONUT = [P.violet, P.moss, P.amber, '#38bdf8', '#a3a3b8', '#c4b5fd', '#86efac', '#fcd34d', '#7dd3fc', '#d4d4e0', '#a78bfa', '#6ee7b7'];
-const empty = (size: Size, text = 'Keine Daten'): Scene => ({
+// Categorical slices when the spec gives no tones: the validated six-colour palette in fixed order (scene.ts), then lighter
+// variants for slices 7-12. Red stays reserved for problems (a slice only gets it through an explicit, justified tone).
+export const DONUT = [...CATEGORICAL_DARK, '#86efac', '#fcd34d', '#7dd3fc', '#d4d4e0', '#c4b5fd', '#6ee7b7'];
+export const empty = (size: Size, text = 'Keine Daten'): Scene => ({
   w: size.width, h: size.height,
   prims: [{ t: 'text', key: 'empty', x: size.width / 2, y: size.height / 2, text, size: 15, fill: P.dim, anchor: 'middle' }],
 });

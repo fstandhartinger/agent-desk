@@ -4,7 +4,7 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { arcPath, type Prim, type Scene } from './render/scene';
 import { GLOW_FILTER, GLOW_FILTER_ID, glowOf } from './render/markup';
-import { diffKeys, easeInOut, easeOut, enterFrom, lerpPrim, pathLerp } from './tween';
+import { diffKeys, easeInOut, easeOut, enterFrom, lerpPrim, pathLerp, samePose } from './tween';
 import { FONT, MONO, prefersReducedMotion } from '../viz/theme';
 import { fitSketchText, padSketch } from './render/sketchFit';
 import type { VB } from './view';
@@ -12,6 +12,7 @@ import type { VB } from './view';
 const TWEEN_MS = 700;
 const GROW_MS = 900;
 const EXIT_MS = 380;
+const FADE_MS = 250; // a row that only appears/disappears (opacity change in place)
 const MAX_STAGGER = 900;
 
 function writePrim(el: Element, p: Prim) {
@@ -24,12 +25,14 @@ function writePrim(el: Element, p: Prim) {
     case 'text': set('x', p.x); set('y', p.y); if (p.num) el.textContent = p.text; break;
     case 'svg': set('x', p.x); set('y', p.y); set('width', p.w); set('height', p.h); break;
   }
+  if (p.opacity !== undefined) set('opacity', p.opacity);
 }
 
 function PrimEl({ p, enter, exit, reg }: { p: Prim; enter: boolean; exit?: boolean; reg: (k: string, el: Element | null) => void }) {
   const d = Math.min(MAX_STAGGER, p.delay ?? 0);
   const draw = p.t === 'path' && p.draw;
-  const cls = [exit ? 'cv-exit' : enter ? (draw ? 'cv-draw' : p.t === 'arc' || ('grow' in p && p.grow) ? 'cv-fade' : 'cv-enter') : '', p.t === 'path' && p.flow ? 'cv-flow' : '', p.key.endsWith(':glow') ? 'cv-glow' : '']
+  // a hidden row (opacity 0, e.g. a point not yet spoken) must not run the entrance animation: it ends at full opacity
+  const cls = [exit ? 'cv-exit' : enter && p.opacity !== 0 ? (draw ? 'cv-draw' : p.t === 'arc' || ('grow' in p && p.grow) ? 'cv-fade' : 'cv-enter') : '', p.t === 'path' && p.flow ? 'cv-flow' : '', p.key.endsWith(':glow') ? 'cv-glow' : '']
     .filter(Boolean).join(' ') || undefined;
   const style = enter || exit ? ({ '--d': `${d}ms` } as React.CSSProperties) : undefined;
   const ref = (el: Element | null) => reg(p.key, el);
@@ -114,7 +117,7 @@ function Stage({ scene, canvasId, vb, box, instant = false }: { scene: Scene; ca
         const old = isUpdate ? live.current.get(p.key) : undefined;
         if (old) {
           const path = p.t === 'path' && old.t === 'path' ? pathLerp(old.d, p.d) : null;
-          jobs.push({ el, from: old, to: p, delay: 0, dur: TWEEN_MS, path, ease: easeInOut });
+          jobs.push({ el, from: old, to: p, delay: 0, dur: old.opacity !== p.opacity && samePose(old, p) ? FADE_MS : TWEEN_MS, path, ease: easeInOut });
         } else {
           const from = enterFrom(p);
           if (from) jobs.push({ el, from, to: p, delay: Math.min(MAX_STAGGER, p.delay ?? 0), dur: GROW_MS, ease: easeOut });

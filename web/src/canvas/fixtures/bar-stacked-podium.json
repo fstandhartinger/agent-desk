@@ -1,0 +1,12 @@
+{
+  "v": 2, "id": "emissions-aufteilung", "kind": "bar", "layout": "stacked", "unit": "%",
+  "title": "Emissions-Aufteilung",
+  "caption": "Wer wie viel vom Podium bekommt (Beispiel für die Demo).",
+  "items": [
+    { "label": "Champion", "value": 70 },
+    { "label": "Ehemaliger", "value": 10 },
+    { "label": "Weiterer", "value": 5 },
+    { "label": "Rest", "value": 15 }
+  ],
+  "sources": [{ "label": "Gespräch", "ref": "Gespräch" }]
+}

@@ -10,9 +10,12 @@ import table from '../fixtures/table-jobs.json';
 import timeline from '../fixtures/timeline-round5.json';
 import sankey from '../fixtures/sankey-money-flow.json';
 import custom from '../fixtures/custom-svg-orb.json';
+import points from '../fixtures/points-three-reasons.json';
+import stat from '../fixtures/stat-1000-alpha.json';
+import stacked from '../fixtures/bar-stacked-podium.json';
 
 export const FIXTURES: Record<string, CanvasSpec> = {
-  flow, architecture, pie, sequence, bar, line, table, timeline, sankey, custom_svg: custom,
+  flow, architecture, pie, sequence, bar, line, table, timeline, sankey, custom_svg: custom, points, stat, stacked,
 } as unknown as Record<string, CanvasSpec>;
 
 /** The same canvas id drawn in three steps (agent explains step by step): 3 → 4 → 6 nodes. */

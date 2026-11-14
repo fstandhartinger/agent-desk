@@ -117,7 +117,7 @@ test('"Groß" lays the q2-shaped architecture out again for its stage: whole, la
   assert.ok(px(L, BIG) >= 11, `${px(L, BIG).toFixed(1)} px`);
   assert.ok(L.nodes.some((n) => n.detail.length), 'the big view keeps the node details (no overview cut)');
   // The view re-renders the scene for its own stage size (the big overlay is its own CanvasView with its own size).
-  assert.match(src('CanvasView.tsx'), /useScene\(spec, Math\.floor\(width\), Math\.floor\(height\)\)/);
+  assert.match(src('CanvasView.tsx'), /useScene\(spec, Math\.floor\(width\), Math\.floor\(height\)(, revealed)?\)/);
 });
 
 test('phone: the q2-shaped architecture is readable (≥ 10 px) and scrolls vertically only', async () => {

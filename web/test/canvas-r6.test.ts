@@ -166,16 +166,17 @@ test('ticks never overlap: the count follows the pixel width (phone side column 
   assert.ok(t.length <= 3, `80 px only has room for ${t.length} ticks`);
 });
 
-test('red only for problems: a normal item painted red falls back to the palette; auto palette has no red/pink', () => {
+test('red only for problems: a normal item painted red falls back to the palette; auto palette never uses the problem red', () => {
   const sc = renderBar(bar, { width: 900, height: 500 });
   const first = sc.prims.find((p) => p.key === 'b:Rechenzentrum Alpha GmbH') as Extract<Prim, { t: 'rect' }>;
   assert.notEqual(first.fill.toLowerCase(), PALETTE.red.toLowerCase());
   assert.equal(dataTone('red', 'Zahlung fehlgeschlagen'), 'red');
   assert.equal(dataTone('red', 'GPU Server'), undefined);
-  for (const c of DONUT) {
-    const n = parseInt(c.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
-    assert.ok(!(r > 200 && g < 140), `${c} is red/pink`);
-  }
+  // 14 Nov: the auto palette is the validated categorical set (orange / pink slots 2 and 5 are legal slices); only the problem red is off limits
+  for (const c of DONUT) assert.notEqual(c.toLowerCase(), PALETTE.red.toLowerCase(), `${c} is the problem red`);
+  // ... and one series is one colour (slot 1), never a value ramp
+  const fills = sc.prims.filter((p) => p.t === 'rect' && p.key.startsWith('b:')) as Extract<Prim, { t: 'rect' }>[];
+  assert.equal(new Set(fills.filter((f) => !['Rechenzentrum Alpha GmbH', 'Person Eins', 'Anbieter Beta'].some((l) => f.key === `b:${l}`)).map((f) => f.fill)).size, 1);
 });
 
 test('PNG export lays charts out at the export width (the chart fills the frame)', async () => {

@@ -3,6 +3,7 @@
 // twice (replay after reconnect, history overlap) changes nothing.
 import { createStore, type Store } from '../lib/store';
 import { readSSE, parseJSON } from '../lib/sse';
+import { noteSpecTurn } from '../lib/speechCursor';
 import type { CanvasBusEvent, CanvasBy, CanvasKind, CanvasSpec } from './types';
 
 export interface CanvasEntry {
@@ -244,7 +245,8 @@ export function canvasBus(onEvent?: (ev: CanvasBusEvent) => void): CanvasBus {
     fetch: (...a) => window.fetch(...a),
     setTimeout: (fn, ms) => window.setTimeout(fn, ms),
     clearTimeout: (t) => window.clearTimeout(t as number),
-    onEvent: (ev) => sharedOnEvent?.(ev),
+    // the speech turn a canvas arrived in (a speech-synced reveal ends with the next user turn) is noted before anything renders
+    onEvent: (ev) => { if (ev.phase === 'ready') noteSpecTurn(ev.id); sharedOnEvent?.(ev); },
   });
   return shared;
 }
