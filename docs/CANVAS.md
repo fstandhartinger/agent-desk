@@ -580,3 +580,30 @@ The three reference questions, asked by voice in EACH of xai / openai / gemini A
 2. "Erklär mir die Architektur vom Agent-Desk-Gateway." → architecture diagram from real code (code_outline), groups Browser / Gateway (Sandy) / Bridge (LeChonk) / Vendors.
 3. "Wofür geben wir das Geld aus?" → donut chart from ledger_spend with real sums, source footnote board #22 / export.
 Each produces a correct, sourced visual within 8 s of the request (voice: of the end of speech), without the agent ever saying it cannot draw.
+
+## Web forms (14 Nov 2026): points, stat, stacked bar, speech-synced reveal
+Web side of the "few words, big type" forms (the gateway validates and clamps; the web only renders). Renderers live in
+`web/src/canvas/render/forms.ts` (a lazy chunk, loaded when such a canvas is drawn), all pure `spec + size → Scene`.
+- **`points`** (`style` numbered|bullets, `points[{label, note?, tone?, cue?}]`, `sync:"speech"`): vertical list, centred in the
+  stage. Labels ≥ 22 px on phones / ≥ 28 px on desktop (≥ 720 px wide), notes ≥ 15 px, weights 650 / 450, label in `fg`, note in `dim`
+  (text is never in an accent colour). Numbered rows = accent disc (papaya = `highlight`, else violet or the point's tone) with the
+  numeral; bullets = an 8 px dot. Row prims are keyed `pt-<i>-…`; `renderPoints(spec, size, {revealed})` gives rows ≥ `revealed`
+  `opacity: 0` with their layout reserved. Without a voice session the rows enter 120 ms apart.
+- **`stat`** (`stats[{value, unit?, label, tone?}]`, 1-3): the figure is ≥ 48 px (up to 160), same sans face, German thousands
+  separator, counts up on enter; unit next to it (under it when both do not fit); 2-3 stats = KPI cards, side by side on desktop and
+  stacked below 480 px.
+- **`bar` + `layout:"stacked"`**: one 56-72 px bar, segments in the fixed categorical order, 2 px gaps, 4 px rounded outer ends, the
+  share printed on a segment when it fits (`#fff` / `#0e0e12` by contrast), the highlight with a 2 px `fg` outline, a legend row
+  per item below (zero items keep their row). More than six parts: the smallest fold into a neutral "Sonstige".
+- **Palette** (`scene.ts`): `CATEGORICAL_DARK` `#3987e5 #d95926 #199e70 #c98500 #d55181 #9085e9` (validated against `#15151c`) and
+  `CATEGORICAL_LIGHT` `#2a78d6 #eb6834 #1baf7a #eda100 #e87ba4 #6250d6` (for a future light surface; green, amber and pink are below
+  3:1 on white, so labels must stay visible). Pie slices and the stacked bar use the dark set in order; a plain bar chart is ONE
+  series = ONE colour (slot 1, highlight papaya, explicit tones kept), never a value ramp.
+- **Speech-synced reveal.** `VoiceSession` feeds `lib/speechCursor.ts` (`{turn, text, spokenChars, speaking}`, ≤ 10 store updates/s):
+  `spokenChars = text.length × (received − buffered) / received` from the 24 kHz audio chunks, the assistant transcript and the player
+  worklet's `buffered`; a new `turn` starts with the user's final transcript, a barge-in flush or an interrupt. `canvas/reveal.ts`
+  `revealCount(spec, cursor, sinceMs, specTurn)`: point i is due when its `cue` (normalised: case, punctuation, spacing) starts at
+  most 12 characters ahead of `spokenChars`; a point without a usable cue follows its predecessor 60 characters later; at least one
+  row; everything once the turn changed, the canvas came from the history, or there was no speech for 1.5 s. The canvas records its
+  turn when its bus event arrives (`noteSpecTurn`). The stage fades a row in over 250 ms (opacity tween in `tween.ts`/`Stage.tsx`,
+  none with reduced motion). Only the simple version follows the speech; "Details" and the PNG export show every point.

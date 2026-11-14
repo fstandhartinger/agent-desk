@@ -36,6 +36,8 @@ export function lerpPrim(from: Prim, to: Prim, t: number, paths?: (t: number) =>
     if (typeof fa === 'number' && typeof tb === 'number') out[k] = lerp(fa, tb, t);
   }
   if (to.t === 'path' && paths) out.d = paths(t);
+  // fade rows in/out (speech-synced points): a missing opacity counts as 1
+  if (from.opacity !== to.opacity) out.opacity = lerp(from.opacity ?? 1, to.opacity ?? 1, t);
   if (to.t === 'text' && to.num && from.t === 'text') {
     const fv = from.num?.value ?? to.num.value;
     const v = lerp(fv, to.num.value, t);
@@ -43,6 +45,13 @@ export function lerpPrim(from: Prim, to: Prim, t: number, paths?: (t: number) =>
     out.text = to.num.format(v);
   }
   return out as unknown as Prim;
+}
+
+/** Same place and size (only colour/opacity may differ): such a change is a fade, not a move. */
+export function samePose(a: Prim, b: Prim): boolean {
+  if (a.t !== b.t) return false;
+  for (const k of NUMERIC[b.t]) if ((a as unknown as Record<string, number>)[k] !== (b as unknown as Record<string, number>)[k]) return false;
+  return a.t === 'path' ? a.d === (b as typeof a).d : a.t !== 'text' || a.text === (b as typeof a).text;
 }
 
 /** Start state for shapes that grow in on enter: bars from their baseline, arcs from their start angle, numbers from 0. */

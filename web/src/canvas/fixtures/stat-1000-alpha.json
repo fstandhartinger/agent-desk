@@ -1,0 +1,10 @@
+{
+  "v": 2, "id": "emission-gleich-geteilt", "kind": "stat",
+  "title": "Was jeder Bucket bekommt",
+  "caption": "Gleich geteilt, ohne Zuschlag für Vorfahren (Beispiel für die Demo).",
+  "stats": [
+    { "value": 1000, "unit": "Alpha", "label": "gleich geteilt", "tone": "papaya" },
+    { "value": 0, "label": "für Vorfahren", "tone": "violet" }
+  ],
+  "sources": [{ "label": "Gespräch", "ref": "Gespräch" }]
+}

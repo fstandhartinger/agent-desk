@@ -2,7 +2,7 @@
 // footnotes and the history strip. Presentational: it renders a CanvasState (bus or demo) and reports selections.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import {
-  ArrowRightLeft, Boxes, CalendarRange, ChevronRight, ChartBar, ChartLine, ChartPie, Check, Copy, ImageDown, ListTree, Maximize2, Minimize2, Minus, PenTool, Plus, Scan, Table2, TriangleAlert, Waypoints, Workflow,
+  ArrowRightLeft, Boxes, CalendarRange, ChevronRight, ChartBar, ChartLine, ChartPie, Check, Copy, Hash, ImageDown, ListOrdered, ListTree, Maximize2, Minimize2, Minus, PenTool, Plus, Scan, Table2, TriangleAlert, Waypoints, Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import type { CanvasKind, CanvasSpec } from './types';
@@ -13,13 +13,14 @@ import { resetMeasure, type Scene } from './render/scene';
 import { byLabel, footnote } from './sources';
 import { detailLabel, hasDetail, variantSpec } from './detail';
 import Stage from './Stage';
+import { useRevealCount } from './useReveal';
 import { autoView, canPan, controlsAutoHide, panBy, scaleOf, scrollEdges, scrollMode, wantsBig, wholeView, zoomAt, CONTROLS_IDLE_MS, type VB } from './view';
 import { useSize } from '../viz/hooks';
 import './canvas.css';
 
 export const KIND_ICON: Record<CanvasKind, LucideIcon> = {
   flow: Workflow, architecture: Boxes, sequence: ArrowRightLeft, pie: ChartPie, bar: ChartBar, line: ChartLine,
-  table: Table2, timeline: CalendarRange, sankey: Waypoints, custom_svg: PenTool,
+  table: Table2, timeline: CalendarRange, sankey: Waypoints, custom_svg: PenTool, points: ListOrdered, stat: Hash,
 };
 
 /** Bumps when the web font has loaded, so text measured with fallback metrics is laid out again. */
@@ -34,23 +35,27 @@ function useFontsReady(): number {
   return v;
 }
 
-/** Scene for spec at the stage size; keeps the previous scene on screen until the new layout is ready (no flash). */
-function useScene(spec: CanvasSpec | undefined, width: number, height: number): { scene: Scene | null; forId: string | null } {
+/** Scene for spec at the stage size; keeps the previous scene on screen until the new layout is ready (no flash).
+ *  `revealed`: points only: how many leading rows are visible (speech-synced reveal); a change re-renders at once. */
+function useScene(spec: CanvasSpec | undefined, width: number, height: number, revealed?: number): { scene: Scene | null; forId: string | null } {
   const [out, setOut] = useState<{ scene: Scene | null; forId: string | null }>({ scene: null, forId: null });
   const fonts = useFontsReady();
   const seq = useRef(0);
+  const lastRevealed = useRef(revealed);
   useEffect(() => {
     if (!spec || width < 40 || height < 40) return;
     const n = ++seq.current;
-    const run = () => renderScene(spec, { width, height }).then(
+    const quick = lastRevealed.current !== revealed;
+    lastRevealed.current = revealed;
+    const run = () => renderScene(spec, { width, height }, { revealed }).then(
       (scene) => { if (n === seq.current) setOut({ scene, forId: spec.id }); },
       () => { if (n === seq.current) setOut({ scene: null, forId: spec.id }); },
     );
     // Resizes settle first; a new spec renders at once.
-    const t = window.setTimeout(run, out.forId === spec.id && out.scene ? 90 : 0);
+    const t = window.setTimeout(run, !quick && out.forId === spec.id && out.scene ? 90 : 0);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec, width, height, fonts]);
+  }, [spec, width, height, fonts, revealed]);
   return out;
 }
 
@@ -261,7 +266,9 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
   const spec = raw ? variantSpec(raw, detailed) : undefined;
   const stageRef = useRef<HTMLDivElement>(null);
   const { width, height } = useSize(stageRef);
-  const { scene, forId } = useScene(spec, Math.floor(width), Math.floor(height));
+  // Speech-synced points: only the simple version follows the spoken answer; the detailed one shows every point.
+  const revealed = useRevealCount(spec, !detailed);
+  const { scene, forId } = useScene(spec, Math.floor(width), Math.floor(height), revealed);
   const shown = scene && spec && forId === spec.id ? scene : null;
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);

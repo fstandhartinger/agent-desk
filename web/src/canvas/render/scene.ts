@@ -35,6 +35,29 @@ export const SANS = FONT;
 export const PALETTE = { ...C, panel: '#15151c', panelHi: '#1b1b24', grid: '#24242f', text2: '#cfcde0' };
 export const TONES: CanvasTone[] = ['violet', 'moss', 'papaya', 'amber'];
 
+/** Categorical palette for parts of a whole (pie, stacked bar) and multi-series charts, in FIXED slot order. Validated with the
+ *  dataviz validator against the canvas surface #15151c (dark: all checks pass; adjacent CVD ΔE 8.4 -> the legend and the 2 px gaps
+ *  are the secondary encoding). Never rotated by value; a series count of 1 uses slot 1 only. */
+export const CATEGORICAL_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#9085e9'] as const;
+/** The same slots for a light surface (#ffffff; green/amber/pink are below 3:1 there, so labels must stay visible). The desk is dark-only today. */
+export const CATEGORICAL_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#6250d6'] as const;
+/** Neutral for "Sonstige" (everything past the sixth part). */
+export const REST_COLOR = '#8d8ca3';
+
+/** WCAG relative luminance of `#rrggbb`. */
+export function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const lin = (v: number) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+}
+/** WCAG contrast ratio of two `#rrggbb` colours. */
+export const contrast = (a: string, b: string): number => {
+  const la = luminance(a), lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+/** Text colour on a filled shape: white or the canvas ink, whichever contrasts more. */
+export const onColor = (bg: string): string => (contrast(bg, '#ffffff') >= contrast(bg, '#0e0e12') ? '#ffffff' : '#0e0e12');
+
 export const tone = (t: CanvasTone | undefined, fallback = '#a5a4bb'): string =>
   !t || t === 'neutral' ? fallback : (C as Record<string, string>)[t] ?? fallback;
 
