@@ -389,3 +389,19 @@ describe('review findings F1-F7', () => {
     assert.equal(readingLoad(shown), undefined);
   });
 });
+
+describe('live check 14 Nov', () => {
+  it('"Nenn mir drei Gründe, warum die 1000 Alpha gleich geteilt werden" asks for reasons, drawn from the answer', () => {
+    const q = 'Nenn mir drei Gründe, warum die 1000 Alpha gleich geteilt werden und Vorfahren nichts bekommen.';
+    assert.equal(formOf({ question: q }).form, 'points');
+    assert.equal(answerFirst(q), true);
+    assert.equal(formOf({ question: 'Wie wird das Preisgeld aufgeteilt?' }).form, 'distribution');
+  });
+  it('a voice model\'s own points render with cues follows the speech', () => {
+    const bus = createCanvasBus();
+    const s = createCanvasSession({ bus, illustrator: { draw: async () => ({ ok: true }), cancel() {} }, by: 'voice', provider: 'xai', emit: () => {}, ctx: {}, audit: () => {} });
+    s.startTurn(); s.noteTurn({ role: 'user', text: 'Nenn mir drei Gründe' });
+    const r = s.render({ kind: 'points', title: 'Drei Gründe', sources: SRC, points: [{ label: 'Prüfbar', cue: 'Erstens' }, { label: 'Fest', cue: 'Zweitens' }] });
+    assert.equal(bus.latest().find((e) => e.id === r.id).spec.sync, 'speech');
+  });
+});

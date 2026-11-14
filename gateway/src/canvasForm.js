@@ -158,7 +158,11 @@ export function formOf({ question = '', answer = '' } = {}) {
   if (TIMELINE_RE.test(q)) return { form: 'timeline', strong: false, why: 'question about dates' };
   if (TREND_RE.test(q)) return { form: 'trend', strong: false, why: 'question about change over time' };
   // a split without numbers in what was said (Florian wishing for "Verteilungen" in a critique) is no split to draw
-  if ((pctCount(q) >= 2 || SPLIT_STRONG_RE.test(q) || (SPLIT_WEAK_RE.test(q) && numberCount(q) >= 2)) && !(a && numberCount(`${q} ${a}`) < 2)) return { form: 'distribution', strong: pctCount(q) >= 2, why: 'question about a split' };
+  const noNumbers = Boolean(a) && numberCount(`${q} ${a}`) < 2;
+  if ((pctCount(q) >= 2 || SPLIT_STRONG_RE.test(q)) && !noNumbers) return { form: 'distribution', strong: pctCount(q) >= 2, why: 'question about a split' };
+  // live 14 Nov: "Nenn mir drei Gründe, warum die 1000 Alpha gleich geteilt werden" asks for reasons; "geteilt" alone is no split
+  if (COUNTED_RE.test(q) || WHY_RE.test(q)) return { form: 'points', strong: false, why: 'question asks for reasons' };
+  if (SPLIT_WEAK_RE.test(q) && numberCount(q) >= 2 && !noNumbers) return { form: 'distribution', strong: false, why: 'question about a split' };
   if (COMPARE_RE.test(q)) return { form: 'comparison', strong: false, why: 'question compares' };
   if (PROCESS_RE.test(q)) return { form: 'process', strong: false, why: 'question about a process' };
   if (AMOUNT_Q_RE.test(q)) {
