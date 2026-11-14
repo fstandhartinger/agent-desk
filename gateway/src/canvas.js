@@ -299,7 +299,7 @@ function statsOf(spec) {
     s = asObject(s, `stats[${i}]`);
     const label = clean(s.label, LIMITS.label);
     let value = typeof s.value === 'string' && !Number.isFinite(parseNumber(s.value)) ? clean(s.value, 12) : parseNumber(s.value);
-    if (typeof s.value === 'string' && /[%a-zäöü]/i.test(s.value) && Number.isFinite(parseNumber(s.value))) value = clean(s.value, 12); // "70 %", "≥ 10 %" stay as written
+    if (typeof s.value === 'string' && /[%a-zäöü/–]|\d\s*-\s*\d/i.test(s.value) && Number.isFinite(parseNumber(s.value))) value = clean(s.value, 12); // "70 %", "≥ 10 %", "3/4", "5–7" stay as written
     if (value === '' || (typeof value === 'number' && !Number.isFinite(value))) bad(`stats[${i}]: value must be a number or a short text like "70 %"`);
     if (typeof value === 'number') value = round(value);
     return compact({ value, unit: clean(s.unit, 12), label, tone: tone(s.tone) });

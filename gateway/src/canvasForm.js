@@ -58,6 +58,10 @@ export function digitize(text) {
 // ---------------------------------------------------------------------------------------------------------------
 // Numbers of the conversation for the drawing model
 
+// a change or a rate, not a share: "stieg um 5 %", "lag 2023 bei 6 Prozent", "von 3 auf 5 %"
+const CHANGE_RE = /(?<![\p{L}])(?:stieg\w*|steigt|gestiegen|fiel|fällt|gefallen|sank|sinkt|gesunken|wuchs|wächst|gewachsen|lag\b|lagen|inflation|rendite|zins\w*|quote|rate|marge|von\s+\d[\d.,]*\s*(?:%|prozent)?\s+auf)(?![\p{L}])/iu;
+// "75 Prozent an den Champion", "10 % für den Zweiten": a share that goes to someone
+const PCT_TO_RE = /\d\s*(?:%|prozent)\s+(?:an|für|gehen an|geht an)\s/i;
 const PCT_RE = /(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(?:%|prozent\b)/gi;
 const sentencesOf = (text) => String(text ?? '').replace(/\s+/g, ' ').split(/(?<=[.!?;])\s+(?=[A-ZÄÖÜ0-9„"])/).map((s) => s.trim()).filter(Boolean);
 const num = (s) => Number(String(s).replace(',', '.'));
@@ -66,7 +70,7 @@ const num = (s) => Number(String(s).replace(',', '.'));
  * The sentences of `text` that carry numbers, with number words as digits, plus a remainder line for a split in percent
  * whose parts stay under 100 % ("70 %, 10 %, 5 %" -> "Summe 85 %, Rest bis 100 %: 15 %"). '' when the text has no numbers.
  */
-export function numberFacts(text, { max = 8 } = {}) {
+export function numberFacts(text, { max = 8, split = false } = {}) {
   const lines = [];
   for (const raw of sentencesOf(text)) {
     const s = digitize(raw);
@@ -77,8 +81,9 @@ export function numberFacts(text, { max = 8 } = {}) {
     const after = pcts.length === 1 ? [...s.slice(s.search(PCT_RE)).matchAll(/(?:,|und)\s*(\d+(?:[.,]\d+)?)\s+(?:an|für|bekomm|erhält|geh)/gi)].map((m) => num(m[1])) : [];
     const parts = [...pcts, ...after];
     const sum = Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
-    if (parts.length >= 2 && sum < 100 && sum > 0) line += ` [Desk gerechnet: Summe ${sum} %, Rest bis 100 %: ${Math.round((100 - sum) * 100) / 100} % - als "Rest offen" zeigen, außer das Gespräch sagt, wer ihn bekommt]`;
-    else if (parts.length >= 2 && Math.abs(sum - 100) < 0.01) line += ' [Desk gerechnet: Summe 100 %]';
+    const share = (split || SPLIT_RE.test(s) || PCT_TO_RE.test(s)) && !CHANGE_RE.test(s);
+    if (share && parts.length >= 2 && sum < 100 && sum > 0) line += ` [Desk gerechnet: Summe ${sum} %, Rest bis 100 %: ${Math.round((100 - sum) * 100) / 100} % - als "Rest offen" zeigen, außer das Gespräch sagt, wer ihn bekommt]`;
+    else if (share && parts.length >= 2 && Math.abs(sum - 100) < 0.01) line += ' [Desk gerechnet: Summe 100 %]';
     lines.push(line);
     if (lines.length >= max) break;
   }
@@ -141,10 +146,11 @@ export function formOf({ question = '', answer = '' } = {}) {
   const a = String(answer ?? '');
   // 1. the answer (what Florian hears) decides first
   if (a) {
+    // review F3/F4: a split needs a split word (three changes or rates in percent are no split) and wins over "erstens 75 % ..."
+    const pcts = pctCount(a);
+    if (pcts >= 2 && (SPLIT_RE.test(a) || SPLIT_RE.test(q) || PCT_TO_RE.test(digitize(a))) && !CHANGE_RE.test(a)) return { form: 'distribution', strong: true, why: 'answer splits a whole in percent' };
     const ordinals = countMatches(ORDINAL_RE, a);
     if (ordinals >= 2 || (COUNTED_RE.test(a) && ordinals >= 1)) return { form: 'points', strong: true, why: 'answer enumerates points' };
-    const pcts = pctCount(a);
-    if (pcts >= 2 && (SPLIT_RE.test(a) || SPLIT_RE.test(q) || pcts >= 3)) return { form: 'distribution', strong: true, why: 'answer splits a whole in percent' };
     if (COUNTED_RE.test(a) && !PROCESS_RE.test(q)) return { form: 'points', strong: true, why: 'answer announces counted points' };
   }
   // 2. the question
@@ -208,10 +214,10 @@ function visibleTexts(spec) {
   return out.filter(([, t]) => typeof t === 'string' && t.trim()).map(([where, text, max]) => ({ where, text, max }));
 }
 
-/** Words of the simple view (tables count their cells). */
+/** Words of the simple view (titles, captions, labels, notes; not table cells). */
 export function wordCount(spec) {
-  const cells = spec.kind === 'table' ? [...(spec.columns ?? []), ...(spec.rows ?? []).flat()].reduce((n, c) => n + words(c), 0) : 0;
-  return visibleTexts(spec).reduce((n, t) => n + words(t.text), 0) + cells;
+  // review F6: table cells are not counted (a table is the form for many short cells; its size is limited to 5 rows)
+  return visibleTexts(spec).reduce((n, t) => n + words(t.text), 0);
 }
 
 /** Short English reason when the simple view reads too long, else undefined. custom_svg is not counted. */

@@ -18,7 +18,7 @@ import { nowBerlin } from './prompt.js';
 import { short } from './redact.js';
 import { TOOL_DEFS, runTool } from './tools.js';
 import { pageFacts } from './pack.js';
-import { answerFirst, attachCues, flowToPoints, FORM_KINDS, formError, formHint, formOf, isLinearNonProcess, numberFacts, pointsFromAnswer, readingLoad, trimLoad } from './canvasForm.js';
+import { answerFirst, attachCues, digitize, flowToPoints, FORM_KINDS, formError, formHint, formOf, isLinearNonProcess, numberFacts, pointsFromAnswer, readingLoad, trimLoad } from './canvasForm.js';
 
 const CODE_TOOLS = new Set(['code_outline', 'read_file', 'search_files', 'read_core_doc']); // their text names models in code, not facts about the desk
 
@@ -352,7 +352,16 @@ export function groundNumbers(spec, corpus) {
   if (out.links) out.links = keep(out.links, (l) => l.value);
   if (out.series) out.series = out.series.map((s) => ({ ...s, points: keep(s.points, (p) => p.y) })).filter((s) => s.points.length);
   // a stat's value: a number, or a short text whose numbers must all be grounded ("≥ 10 %")
-  if (out.stats) out.stats = keep(out.stats, (st) => (typeof st.value === 'number' ? st.value : ((String(st.value).match(/\d[\d.,]*/g) ?? []).map(parseNumber).find((n) => !grounded(n)) ?? 0)));
+  // review F5: a text value is checked as digits ("zwölftausend" -> 12000); a text without any number must occur in the conversation
+  const lowerCorpus = String(corpus ?? '').toLowerCase();
+  const statValue = (st) => {
+    if (typeof st.value === 'number') return st.value;
+    const text = digitize(String(st.value));
+    const nums = (text.match(/\d[\d.,]*/g) ?? []).map(parseNumber);
+    if (!nums.length) return lowerCorpus.includes(String(st.value).toLowerCase().trim()) ? 0 : NaN;
+    return nums.find((n) => !grounded(n)) ?? 0;
+  };
+  if (out.stats) out.stats = keep(out.stats, statValue);
   const empty = (out.items && !out.items.length) || (out.links && !out.links.length) || (out.series && !out.series.length) || (out.stats && !out.stats.length);
   return { spec: out, dropped, error: empty ? 'none of the numbers occur in the tool results or the conversation: call ledger_spend or another tool and copy the numbers exactly' : undefined };
 }
@@ -834,7 +843,7 @@ export function createIllustrator({ bus, hub, complete = completeChat, run = run
     const spoken = job.memory?.lastAnswer?.() ?? '';
     const asked = job.question ?? job.memory?.lastUser?.() ?? '';
     if (!job.formInfo) job.formInfo = formOf({ question: `${asked}\n${job.request ?? ''}`, answer: spoken }); // the request names the topic of an explicit drawing
-    if (job.numbers === undefined) job.numbers = numberFacts(`${asked}\n${spoken}`);
+    if (job.numbers === undefined) job.numbers = numberFacts(`${asked}\n${spoken}`, { split: job.formInfo?.form === 'distribution' });
     job.answerText = spoken;
     const messages = [{ role: 'system', content: `${SYSTEM_PROMPT}\n\nHeute ist ${nowBerlin(now())}.\n\n${knowledgeLines().join('\n')}\n\n${deskModelFacts().join('\n')}` }, { role: 'user', content: userMessage(job, previous) }];
     const roundMs = [];
@@ -1080,6 +1089,8 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
   let forbidden = false; // the user said "nicht zeichnen" for this turn
   let awaitAnswer = false; // 14 Nov 2026: a question for reasons / an explanation is drawn from the spoken ANSWER, not from the question alone
   let reformed = false; // the early drawing of this turn was redrawn once in the form the answer showed
+  let earlySkipped = false; // the early run of this turn found nothing to draw in the question alone
+  let answerChance = false; // ...so the spoken answer got its own (single) drawing chance
   let namedId = null; // an existing canvas the user named ("... mit id x", "aktualisiere die Canvas") in this turn
   let closed = false;
   let turnSeq = 0; // counts user turns: a draw that finishes after the next turn began is a late draw (focus:false)
@@ -1112,7 +1123,7 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       if (id !== partial.id) partial = { ...partial, id, ...(partial.spec ? { spec: { ...partial.spec, id } } : {}) };
     }
     const event = bus.publish({ by, provider, ...partial }, { owner: ownerKey });
-    if (event.by === 'auto' && event.phase === 'ready') auto = { id: event.id, kind: event.kind };
+    if (event.by === 'auto' && event.phase === 'ready' && event.focus !== false) auto = { id: event.id, kind: event.kind }; // review F2: a late run of an older turn never becomes this turn's canvas
     if (event.phase === 'ready' && event.focus !== false) focused = event.id;
     if (event.phase === 'ready' && event.id) {
       own.delete(event.id);
@@ -1203,8 +1214,8 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       if (!deferred) {
         // 14 Nov 2026 (replay of "Wie hoch ist die Belohnung?"): the question alone gave nothing to draw (skip / failure); the
         // spoken answer may well have it (numbers, points): the answer gets its own chance, once
-        if (!auto?.kind && auto?.id === id && !toolRan) { autoRan = false; auto = null; if (answerBuf.trim()) session.autoTurn({ userText: turnUser || undefined, answerText: answerBuf }); return; }
-        maybeReform();
+        if (!auto?.kind && auto?.id === id && !toolRan) { earlySkipped = true; if (answerBuf.trim()) session.autoTurn({ userText: turnUser || undefined, answerText: answerBuf }); return; }
+        scheduleReform();
         return;
       }
       const next = deferred;
@@ -1218,10 +1229,22 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
    * 14 Nov 2026: the early drawing came from the question; when the spoken answer shows a clear form (an enumeration, a split
    * in percent) that the drawing does not have, it is redrawn once under the same id in that form (the canvas animates it).
    */
-  function maybeReform() {
-    if (reformed || toolRan || closed || writeTurn || forbidden || !auto?.kind || early || !answerBuf || limitReached()) return false;
+  const reformForm = () => {
+    if (reformed || toolRan || closed || writeTurn || forbidden || !auto?.kind || early || !answerBuf || limitReached()) return null;
     const f = formOf({ question: turnUser || memory.lastUser(), answer: answerBuf });
-    if (!f.strong || FORM_KINDS[f.form].includes(auto.kind)) return false;
+    return f.strong && !FORM_KINDS[f.form].includes(auto.kind) ? f : null;
+  };
+  /** Review F7: the reform waits until the answer has settled (the same debounce as the automatic drawing; a tool call or the next
+   *  final restarts it), so it draws the whole answer, not its first two points. True when a reform is due now. */
+  function scheduleReform() {
+    if (!reformForm()) return false;
+    clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; maybeReform(); }, debounceMs());
+    return true;
+  }
+  function maybeReform() {
+    const f = reformForm();
+    if (!f) return false;
     reformed = true;
     audit({ action: 'canvas.reform', ip: ctx.ip, detail: `${auto.id}: ${auto.kind} -> ${f.form} (${f.why})` });
     start({ id: auto.id, request: 'Zeichne das Bild zur gesprochenen Antwort neu, in der Form, die die Antwort hat (gleiche id).', question: turnUser || undefined, formInfo: f, quiet: true, by: 'auto' });
@@ -1298,6 +1321,14 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         normalized = normalizeCanvas({ ...input, detail: undefined });
       }
       if (!normalized.ok) throw new Error(normalized.error);
+      // 14 Nov 2026 (review): the agent's own finished drawing gets the deterministic part of the form / load rules too
+      const turnForm = formOf({ question: turnUser || memory.lastUser(), answer: answerBuf });
+      // only when the turn has a known non-process form (an agent's own render is not second-guessed on a turn without form words)
+      if (turnForm.form && !/ablauf|fluss|flow|prozess|schritt/i.test(`${turnUser} ${normalized.spec.title}`) && isLinearNonProcess(normalized.spec, turnForm)) {
+        const listed = normalizeCanvas(flowToPoints(normalized.spec));
+        if (listed.ok) { audit({ action: 'canvas.form', ip: ctx.ip, detail: `${normalized.spec.id}: linear flow -> points (render)` }); normalized = listed; }
+      }
+      if (readingLoad(normalized.spec)) { const trimmed = normalizeCanvas(trimLoad(normalized.spec)); if (trimmed.ok) normalized = trimmed; }
       normalized.spec.id = ownId(normalized.spec.id);
       if (auto && mismatch && normalized.spec.id === auto.id) normalized.spec.id = ownId(`${normalized.spec.id.slice(0, 44)}-2`);
       // Round 11 (critic r10 defect 2): invented names go back to the agent once with the list; the second time they are dropped
@@ -1399,10 +1430,10 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       clearTimeout(timer);
       timer = null;
       toolCount += 1;
-      if (researchTimer || toolRan || autoRan || forbidden || closed || !turnUser) return;
+      if (researchTimer || toolRan || autoRan || earlySkipped || forbidden || closed || !turnUser) return;
       researchTimer = setTimeout(() => {
         researchTimer = null;
-        if (toolRan || autoRan || closed || writeTurn || awaitAnswer || limitReached() || !cfg.canvasEarly()) return;
+        if (toolRan || autoRan || earlySkipped || closed || writeTurn || awaitAnswer || limitReached() || !cfg.canvasEarly()) return;
         if (isYesNoQuestion(turnUser) && !namedId) return;
         if (['screen', 'session', 'none'].includes(askKind(turnUser))) return;
         if (!isExplanatory(turnUser, '') && toolCount < 2) return;
@@ -1422,6 +1453,8 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
       answerBuf = '';
       awaitAnswer = false;
       reformed = false;
+      earlySkipped = false;
+      answerChance = false;
       toolCount = 0;
       dataOk = 0;
       dataFailed = 0;
@@ -1508,18 +1541,21 @@ export function createCanvasSession({ bus, illustrator, by, provider, emit, page
         session.draw({ request: user }, { auto: true });
         return 'refusal';
       }
-      if (!toolRan && autoRan) return maybeReform() ? 'reform' : 'skipped';
-      if (toolRan || autoRan) return 'skipped';
+      // review F1: an early run that skipped gives the answer ONE chance (autoRan stays set: no research re-runs of the question)
+      const chance = autoRan && earlySkipped && !answerChance && !auto?.kind && !toolRan;
+      if (!toolRan && autoRan && !chance) return scheduleReform() ? 'reform' : 'skipped';
+      if (toolRan || (autoRan && !chance)) return 'skipped';
       if (isMetaAnswer(answerText) || asksForSecrets(user)) return 'meta';
       if (['screen', 'session'].includes(askKind(user))) return 'screen'; // the answer describes the screen / the session: nothing to draw
       if (dataFailed > 0 && dataOk === 0) return 'tools-failed'; // r6 P2-3: nothing was read, so an automatic drawing could only invent
       if (String(answerText ?? '').trim().length < 20 || !isExplanatory(user, answerText)) return 'not-explanatory';
       // the first fragment of a voice answer ("Die Logik ist dreifach.") is no answer yet: wait for the next final
       if (awaitAnswer && answerBuf.length < 80 && countSentences(answerBuf) < 2) return 'waiting-answer';
+      if (chance) answerChance = true;
       clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        if (toolRan || autoRan || closed || writeTurn) return;
+        if (toolRan || (autoRan && !chance) || closed || writeTurn) return;
         if (limitReached()) return;
         autoRan = true;
         const current = ownStage() ?? undefined; // round 11: never another conversation's newest canvas

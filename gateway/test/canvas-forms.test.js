@@ -299,3 +299,93 @@ describe('session: reasons wait for the answer; an early drawing is reformed onc
     assert.equal(jobs[1].request, 'Illustriere die letzte Antwort');
   });
 });
+
+// ------------------------------------------------------------------------------------------------ review findings (worker "review", 14 Nov)
+describe('review findings F1-F7', () => {
+  let bus; let jobs; let drawKind;
+  const illustrator = () => ({ draw: async (job) => { jobs.push(job); await new Promise((r) => setTimeout(r, 5)); if (drawKind && job.id) job.publish({ phase: 'ready', id: job.id, kind: drawKind, title: 'X', by: 'auto', spec: { v: 2, id: job.id, kind: drawKind, title: 'X', sources: SRC } }); return { ok: true }; }, cancel() {} });
+  beforeEach(() => { bus = createCanvasBus(); jobs = []; drawKind = null; });
+  const session = (researchMs = 30) => createCanvasSession({ bus, illustrator: illustrator(), by: 'voice', provider: 'xai', emit: () => {}, ctx: {}, audit: () => {}, debounceMs: () => 10, researchMs: () => researchMs });
+
+  it('F1: after an early skip, agent tool calls never re-run the question; the answer still gets its one chance', async () => {
+    const s = session(20);
+    const q = 'Wie hoch ist die Belohnung für den Champion im Moment eigentlich genau?';
+    s.startTurn(); s.noteTurn({ role: 'user', text: q });
+    assert.equal(s.userTurn(q), 'early');
+    await s.idle();
+    for (let i = 0; i < 3; i += 1) { s.toolStarted('knowledge_read'); s.noteTool({ name: 'knowledge_read', ok: true, content: 'x' }); await new Promise((r) => setTimeout(r, 40)); }
+    await s.idle();
+    assert.equal(jobs.length, 1, 'no research re-run of the same question');
+    s.noteTurn({ role: 'assistant', text: CHAMPION.answer });
+    assert.equal(s.autoTurn({ answerText: CHAMPION.answer }), 'scheduled');
+    await s.idle();
+    assert.equal(jobs.length, 2);
+    assert.equal(s.autoTurn({ answerText: 'Noch ein Satz dazu, der lang genug ist.' }), 'skipped', 'only one chance');
+  });
+
+  it('F2: a reform that finishes after the next question began never becomes the next turn\'s canvas', async () => {
+    drawKind = 'flow';
+    const s = session();
+    s.startTurn(); s.noteTurn({ role: 'user', text: CHAMPION.question }); s.userTurn(CHAMPION.question);
+    await s.idle();
+    const first = jobs[0].id;
+    drawKind = 'bar';
+    s.noteTurn({ role: 'assistant', text: EMISSIONS.answer });
+    assert.equal(s.autoTurn({ answerText: EMISSIONS.answer }), 'reform');
+    await new Promise((r) => setTimeout(r, 12)); // the reform starts (debounce 10 ms) ...
+    s.startTurn(); s.noteTurn({ role: 'user', text: THREE_REASONS.question }); s.userTurn(THREE_REASONS.question); // ... and the next turn begins
+    await s.idle();
+    const r = s.render({ kind: 'bar', title: 'Andere Frage', items: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }], sources: SRC });
+    assert.notEqual(r.id, first);
+  });
+
+  it('F3: rates and changes in percent are no split and get no "Rest" line', () => {
+    const f = formOf({ question: 'Wie war das?', answer: 'Die Inflation lag 2023 bei 6 Prozent, 2024 bei 2,5 Prozent und jetzt bei 2,2 Prozent.' });
+    assert.notEqual(f.strong && f.form === 'distribution', true);
+    assert.doesNotMatch(numberFacts('Die Kosten stiegen um 5 % und die Marge fiel um 3 %.'), /Rest/);
+    assert.equal(formOf({ question: 'Wie stehen die drei?', answer: 'A hat 80 %, B 75 % und C 60 % Trefferquote.' }).strong, false);
+  });
+
+  it('F4: a split told as "erstens 75 % ..." stays a split', () => {
+    const f = formOf({ question: 'Wie wird verteilt?', answer: 'Die Emissionen gehen in drei Teile: erstens 75 Prozent an den Champion, zweitens 17 Prozent an den Entthronten, drittens 8 Prozent an den davor.' });
+    assert.deepEqual([f.form, f.strong], ['distribution', true]);
+  });
+
+  it('F5: stat values in words are checked; "3/4" stays text', async () => {
+    const memory = createMemory();
+    memory.noteTurn({ role: 'user', text: 'Wie viel?' });
+    memory.noteTurn({ role: 'assistant', text: 'Es sind tausend Alpha.' });
+    const ill = createIllustrator({ bus, hub: {}, complete: async () => answer({ v: 2, id: 'z', kind: 'stat', title: 'Zahl', sources: SRC, stats: [{ value: 'zwölftausend', label: 'erfunden' }, { value: 'Hälfte', label: 'erfunden' }, { value: '1000', unit: 'Alpha', label: 'gesagt' }] }), run: async () => ({ ok: true, content: '' }), audit: () => {} });
+    await ill.draw({ id: 'z', request: 'Illustriere die letzte Antwort', by: 'auto', publish: (p) => bus.publish(p), memory });
+    assert.deepEqual(bus.latest()[0].spec.stats.map((x) => x.label), ['gesagt']);
+    assert.equal(normalizeCanvas({ kind: 'stat', title: 'x', stats: [{ value: '3/4', label: 'der Fälle' }] }).spec.stats[0].value, '3/4');
+  });
+
+  it('F6: an explicit 5 x 5 table of short cells is within budget', () => {
+    const t = spec({ kind: 'table', columns: ['Modell', 'Score', 'Kosten', 'Tempo', 'Stand'], rows: Array.from({ length: 5 }, (_, i) => [`Modell ${i}`, `${i} Punkte`, `${i} Euro`, 'sehr schnell', 'live seit gestern']) });
+    assert.equal(readingLoad(t), undefined);
+  });
+
+  it('F7: the reform waits until the answer has settled and sees all of it', async () => {
+    drawKind = 'flow';
+    const s = session();
+    s.startTurn(); s.noteTurn({ role: 'user', text: CHAMPION.question }); s.userTurn(CHAMPION.question);
+    await s.idle();
+    const a1 = 'Im aktiven Track: fünfundsiebzig Prozent an den Champion, siebzehn Prozent an den zuletzt Entthronten.';
+    s.noteTurn({ role: 'assistant', text: a1 });
+    s.autoTurn({ answerText: a1 });
+    s.noteTurn({ role: 'assistant', text: 'Und acht Prozent an den davor.' });
+    s.autoTurn({ answerText: 'Und acht Prozent an den davor.' });
+    await s.idle();
+    assert.equal(jobs.length, 2, 'one reform');
+  });
+
+  it('render: the agent\'s own linear flow for reasons becomes a list; an over-long label is trimmed', () => {
+    const s = session();
+    s.startTurn(); s.noteTurn({ role: 'user', text: 'Wieso ist das besser?' }); s.userTurn('Wieso ist das besser?');
+    const r = s.render({ kind: 'flow', title: 'Warum besser', sources: SRC, nodes: [{ id: 'a', label: 'Eine Datei statt vier widersprüchlicher Stellen' }, { id: 'b', label: 'Prüfung vorab' }, { id: 'c', label: 'Ruhe' }], edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }] });
+    const shown = bus.latest().find((e) => e.id === r.id).spec;
+    assert.equal(shown.kind, 'points');
+    assert.equal(readingLoad(shown), undefined);
+  });
+});
