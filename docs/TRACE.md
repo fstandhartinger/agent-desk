@@ -23,7 +23,7 @@ Every voice session (`/api/voice`) and every text conversation (`/api/chat`) wri
   UTC day and device, created on the first event ("Geräteprotokoll 3 Nov", device id in `client.device`; the registry has to know `kind device`).
   If the registry refuses the kind the events are dropped after one stdout line `trace-fallback {... "reason":"kind-refused-<status>"}`; the next try is the next day.
   Up to 20000 client events per log. Gateway events written there: `dictation.result {ms,bytes,seconds,chars,providers,degraded,merged,dictationId?,index?,final?}`,
-  `dictation.failed {status,code,ms,bytes,seconds,providers}`, `caption.stats {calls,failures,lastStatus,medianMs,costUsd,windowS}` (never the caption text),
+  `dictation.failed {status,code,ms,bytes,seconds,providers}`, `caption.stats {calls,failures,lastStatus,medianMs,costUsd,windowS}`, `caption.log {d,items}` (the caption words for refinement rounds since 14 Nov 2026; off with `DESK_CAPTION_TEXT_LOG=off`; README, captions),
   `device.error`. A numeric `bytes` is kept (a size carries no payload); a string under `bytes`, `audio`, `image` and the like is still replaced.
 - **Error log.** Every HTTP answer >= 400 outside `/api/device/` writes the audit line `http.error {path,method,status,message?,ms,bytes}` (server.js); a failing device route
   `device.error {path,method,status,code?,message,ms,bytes,reason?,upstream?,providers?,repeats?}` (path with session/command ids folded; the same failure at most once per 10 s,

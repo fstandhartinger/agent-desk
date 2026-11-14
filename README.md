@@ -147,7 +147,13 @@ charge conservative estimates to the existing daily Desk spend cap, including fa
   optional `context` JSON `{visibleIds,recentTerms}` (phrases: dictionary + titles of the visible ids + recent terms, titles cached 5 min per device).
   3 s timeout. Returns `{text,ms,seconds}`. Own limits: 60 requests/device/minute, two in flight per device; the real `usage.cost` goes into the daily Desk cap.
   `503 {error,code:"no-key"|"mai-down"}` when the key is missing or MAI is down (the app then hides captions); `429` with `code:"budget"|"busy"`.
-  The caption text is never traced; per device a `caption.stats` event (calls, failures, lastStatus, medianMs, costUsd) goes to the device log at most every 60 s.
+  Optional fields `dictation` (the app's dictation id) and `seq` (window number). Per device a `caption.stats` event (calls, failures, lastStatus, medianMs,
+  costUsd) goes to the device log at most every 60 s, and since 14 Nov 2026 the words too: `caption.log {d, items}` holds each window's raw text (`k:"w"`) and
+  each live clean-up with input, answer and the text before it (`k:"p"`), a few events per dictation; the app (0.1.16) adds `caption.shown`, `caption.summary`,
+  `caption.live`, `caption.typed`. Words are kept only for a dictation (the app sends its id; a voice session's subtitle keeps counts and timings)
+  and only when the app allows it (`log=0` from the app with CaptionLog or TraceUpload off; also on `/api/device/dictate` and `/api/device/polish`).
+  `DESK_CAPTION_TEXT_LOG=off` (or 0/false/no) drops the words for everyone. Every string passes redact(), which masks secrets, not names or addresses;
+  the words stay as long as the device log.
 - `POST /api/device/log` (scope `screen`): `{events:[{ts?,type:"screen.*"|"hotkey.*"|"client.*",data?}]}`, up to 100 events and 256 KB, 60 requests/device/minute.
   Events with no session go straight into the device log of the day (see docs/TRACE.md). Timestamps up to 24 h old (retry queue) are kept and marked `data.late`.
   Answer `{ok,accepted,logged}`. `POST /api/device/session/:sid/trace` takes late events the same way (they go to the device log, answer carries `late:n`).

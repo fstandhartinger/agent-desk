@@ -54,7 +54,7 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     assert.equal(body.text, 'Diktat'); assert.equal(body.degraded, false); assert.equal(body.merged, false); assert.equal(body.seconds, 1); assert.equal(body.providers.mai.ok, true);
     await app.traces.flushAll(1000);
     const result = (await until(() => deviceEvents('dictation.result')[0])).data;
-    assert.equal(result.dictationId, 'd-1'); assert.equal(result.index, 2); assert.equal(result.final, true); assert(!('text' in result), 'no dictation text in the log');
+    assert.equal(result.dictationId, 'd-1'); assert.equal(result.index, 2); assert.equal(result.final, true); assert.equal(result.text, 'Diktat', 'since 14 Nov the chunk text is logged (DESK_CAPTION_TEXT_LOG=off drops it, see captionLog.test.js)');
     assert.equal(sessions.at(-1).kind, 'device'); assert.match(sessions.at(-1).title, /^Geräteprotokoll \d{1,2} (Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez)$/);
   });
 
@@ -99,7 +99,7 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     assert.equal((await fetch(`${base}/api/device/caption`, { method: 'POST' })).status, 401);
   });
 
-  it('caption: MAI down is 503 with {error, code}; the text is never traced; an aggregate caption.stats is', async () => {
+  it('caption: MAI down is 503 with {error, code}; an aggregate caption.stats is traced, and the words go to caption.log only', async () => {
     maiMode = 'down';
     const r = await post('/api/device/caption', captionForm(Buffer.alloc(32000)));
     assert.equal(r.status, 503);
@@ -111,7 +111,10 @@ describe('device routes: chunks, captions, device log, device.error', () => {
     const stats = (await until(() => deviceEvents('caption.stats').at(-1))).data;
     assert(stats.calls >= 3 && stats.failures === 1);
     assert.equal(stats.lastStatus, 500); assert.equal(typeof stats.medianMs, 'number'); assert(stats.costUsd > 0);
-    assert(!JSON.stringify(events).includes('Geheimtext4711'), 'caption text never reaches the trace');
+    // windows without a dictation id (this request shape, a voice session) go to caption.log with counts and timings, never with the words
+    const log = (await until(() => events.find(e => e.type === 'caption.log'))).data;
+    assert(log.items.length >= 2 && log.items.every(i => i.k === 'w' && !('text' in i) && typeof i.ms === 'number'), JSON.stringify(log).slice(0, 200));
+    assert(!events.some(e => JSON.stringify(e.data).includes('Geheimtext4711')), 'no caption words without a dictation id');
   });
 
   it('caption: own rate bucket of 60 per minute', async () => {

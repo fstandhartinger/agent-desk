@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { guardText, variantContext, termKeys, spokenNumber, apart, sentences, worthFormatting, parseBreaks, applyBreaks, sameWords, stitchWindows, numbered } from '../src/dictationGuard.js';
+import { guardText, variantContext, termKeys, spokenNumber, apart, sentences, worthFormatting, parseBreaks, applyBreaks, sameWords, stitchWindows, numbered, dropStutters } from '../src/dictationGuard.js';
 
 // Synthetic sentences of the classes found in a day of real recordings (10 Nov 2026). No real names, customers or prompts in here: the repository is public.
 const terms = termKeys(['JevBench', 'Claude Code', 'Beispiel GmbH', 'REAX', 'LeChonk']);
@@ -152,4 +152,22 @@ it('known names get their proper capitals, nothing else changes', async () => {
   assert.equal(properNames('Das Modell S1-Pro läuft\n\nbei der beispiel gmbh.', names), 'Das Modell s1-pro läuft\n\nbei der Beispiel GmbH.', 'line breaks and punctuation stay');
   assert.equal(properNames('Der Code von Claude ist da, Reaxx auch.', names), 'Der Code von Claude ist da, Reaxx auch.', 'only the exact letters, only the whole name');
   assert.equal(properNames('ohne Namen', []), 'ohne Namen'); assert.equal(properNames('', names), '');
+});
+
+it('stutters and restarts go the same way as in the live subtitle; doubled on purpose stays, line breaks stay', () => {
+  const d = t => dropStutters(t).text;
+  assert.equal(d('Ich, ich möchte die neue Version testen.'), 'Ich möchte die neue Version testen.');
+  assert.equal(d('Wir haben, wir haben bei REAX einen Fehler.'), 'Wir haben bei REAX einen Fehler.');
+  assert.equal(d('Der Cap- der Caption-Text springt.'), 'Der Caption-Text springt.');
+  assert.equal(d('Die dick Die Diktatfunktion im Screen Agent'), 'Die Diktatfunktion im Screen Agent');
+  assert.equal(d('Ich möchte, dass das das letzte Wort bleibt.'), 'Ich möchte, dass das letzte Wort bleibt.');
+  assert.equal(d('die Dik- Diktatfunktion'), 'die Diktatfunktion');
+  for (const keep of ['Die Leute, die die Regeln kennen, prüfen es.', 'viele Frauen die die Kinder', 'Das ist sehr, sehr wichtig.', 'Nein, nein, so nicht.', 'Die Nummer ist 11 11.', 'Gesamt- Kontext', 'Wenn das der Fall ist, ist es mit Sicherheit gut.', 'Ich mache das. Das dauert nicht lange.', 'Wir brauchen mehr Zeit. Zeit ist knapp.', 'Ich bin fertig. Fertig.', 'Sie kennen die Frauen die Frauenärzte behandeln', 'Wir brauchen ein Konzept ein Konzeptpapier', 'das ist sehr sehr gut', 'Er sagte nein nein nein'])
+    assert.equal(d(keep), keep);
+  assert.equal(d('Erster Punkt.\n\nIch ich will das.\nZweiter Punkt.'), 'Erster Punkt.\n\nIch will das.\nZweiter Punkt.');
+  assert.equal(dropStutters('ich ich habe').removed, 1);
+  assert.equal(d('hallo welt\n'), 'hallo welt\n');
+  const long = Array.from({ length: 3000 }, (_, i) => (i % 4 ? `w${i}` : 'ich ich')).join(' '), t0 = Date.now();
+  assert.equal(dropStutters(long).removed, 750);
+  assert(Date.now() - t0 < 2000);
 });
