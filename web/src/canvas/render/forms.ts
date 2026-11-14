@@ -4,7 +4,8 @@
 // list labels ≥ 22 px (phone) / ≥ 28 px (desktop), the headline number ≥ 48 px. Text is never in a series colour.
 import type { CanvasSpec, CanvasStat } from '../types';
 import { fmtNumber, fmtPercent, fmtValue } from '../format';
-import { CATEGORICAL_DARK, ellipsize, measure, onColor, PALETTE as P, r1, REST_COLOR, tone, wrap, type Prim, type Scene, type Size } from './scene';
+import { CATEGORICAL_DARK, ellipsize, measure, PALETTE as P, r1, tone, wrap, type Prim, type Scene, type Size } from './scene';
+import { onColor, REST_COLOR } from './palette';
 import { empty, isHi } from './charts';
 
 const num = (n: number) => Math.round(n * 100) / 100;

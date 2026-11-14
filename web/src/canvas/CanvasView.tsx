@@ -2,7 +2,7 @@
 // footnotes and the history strip. Presentational: it renders a CanvasState (bus or demo) and reports selections.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import {
-  ArrowRightLeft, Boxes, CalendarRange, ChevronRight, ChartBar, ChartLine, ChartPie, Check, Copy, Hash, ImageDown, ListOrdered, ListTree, Maximize2, Minimize2, Minus, PenTool, Plus, Scan, Table2, TriangleAlert, Waypoints, Workflow,
+  ArrowRightLeft, Boxes, CalendarRange, ChevronRight, ChartBar, ChartLine, ChartPie, Check, Copy, ImageDown, ListTree, Maximize2, Minimize2, Minus, PenTool, Plus, Scan, Table2, TriangleAlert, Waypoints, Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import type { CanvasKind, CanvasSpec } from './types';
@@ -20,7 +20,7 @@ import './canvas.css';
 
 export const KIND_ICON: Record<CanvasKind, LucideIcon> = {
   flow: Workflow, architecture: Boxes, sequence: ArrowRightLeft, pie: ChartPie, bar: ChartBar, line: ChartLine,
-  table: Table2, timeline: CalendarRange, sankey: Waypoints, custom_svg: PenTool, points: ListOrdered, stat: Hash,
+  table: Table2, timeline: CalendarRange, sankey: Waypoints, custom_svg: PenTool, points: ListTree, stat: ChartBar,
 };
 
 /** Bumps when the web font has loaded, so text measured with fallback metrics is laid out again. */
