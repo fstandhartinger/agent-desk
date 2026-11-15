@@ -39,7 +39,7 @@ export const RESEARCH_TOOLS = [
   'knowledge_read', 'read_core_doc', 'decisions_recent', 'read_file', 'list_jobs', 'job_status',
   'board_threads', 'board_read', 'board_entry', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
   'ledger_spend', 'run_readonly', 'desk_status', 'session_trace', 'code_outline', 'artifact_search', 'artifact_resolve',
-  'artifact_ref_read', 'web_read', 'web_search', 'http_get', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
+  'artifact_ref_read', 'shell', 'web_read', 'web_search', 'http_get', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
 ];
 // discord_read is left out on purpose: reading a channel moves Florian's read marker (tools.js description).
 // search_files and board_search are left out: `search` (full-text index, ~40 ms) covers both; they took 2-8 s each in the eval.
@@ -131,7 +131,8 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
   // read our own data: no web tools from now on. A run started while the post-delivery lock is on starts tainted (review P1-1).
   let tainted = Boolean(ctx.research?.guarded?.(ctx.sid ?? 'desk'));
   let outsider = false; // read text written by outsiders
-  const toolsNow = () => (tainted ? tools.filter((t) => !WEB_TOOLS.has(t.name)) : tools);
+  let webUsed = false; // web and shell are exclusive in one run: web first closes the shell, own data first closes the web
+  const toolsNow = () => tools.filter((t) => !(tainted && WEB_TOOLS.has(t.name)) && !(webUsed && t.name === 'shell'));
   let cost = 0;
   let steps = 0;
   let rounds = 0;
@@ -181,6 +182,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
     try {
       if (args === null) throw new Error('arguments were not valid JSON');
       if (!allowed.has(call.name)) throw new Error(`tool ${short(call.name, 40)} is not available here; use one of: ${[...allowed].filter((n) => n !== 'answer').join(', ')}`);
+      if (call.name === 'shell' && webUsed) throw new Error('shell is closed in this research after a web tool (a page could steer commands); answer from what you have');
       if (tainted && WEB_TOOLS.has(call.name)) throw new Error('web tools are closed in this research after reading Florian\'s own data (privacy rule); answer from what you have');
       if (call.name === 'ws_grep') content = ws.grep(args.ref, args.terms);
       else if (call.name === 'ws_read') content = ws.read(args.ref, args.line, args.count);
@@ -188,6 +190,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
       else {
         classes.add(classOf(call.name, args));
         if (OUTSIDER_TOOLS.has(call.name)) outsider = true;
+        if (WEB_TOOLS.has(call.name)) webUsed = true;
         if (!WEB_TOOLS.has(call.name)) tainted = true; // set before the call: parallel calls of this round already count
         touched.push({ tool: call.name, args: short(JSON.stringify(args), 160) });
         // research: only the lock is visible inside a run (no start, so no recursion); the web_read lock applies here too (review P1-1)

@@ -14,6 +14,7 @@ export const SOURCE_GUIDE = [
   'Artefakte (a#-IDs, Karten): artifact_search, artifact_resolve, artifact_ref_read. Skills: skills_list, skill_read. Code: code_outline, read_file.',
   'Mails (nur lesen, nur wenn die Frage Mails betrifft): mail_search, mail_read. Öffentliche Webseite mit bekannter Adresse: web_read.',
   'Internet: web_search (Suchmaschine) und http_get (eine Adresse lesen) NUR vor dem ersten Blick in Florians eigene Daten; erst Web, dann eigene Quellen.',
+  'Viele Dateien zählen, vergleichen oder mit Mustern durchsuchen: shell (Sandkasten ohne Netz, /data = bereinigte Kopie aller Quellen als <quelle>/<pfad>.txt; erste Zeile = echter Pfad; ein Befehl je Aufruf, 20 s). Nicht im selben Lauf wie eine Websuche.',
   'Weißt du nicht, wo es steht: discover() zeigt das Inhaltsverzeichnis aller Quellen; discover(pfad) geht eine Ebene tiefer; search(query) sucht überall.',
 ].join('\n');
 

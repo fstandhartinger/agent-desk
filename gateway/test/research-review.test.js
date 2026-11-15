@@ -84,3 +84,23 @@ test('search falls back to ctx.search while the map is not built (review P2-5)',
   assert.equal(r.ok, true);
   assert.deepEqual(hub.calls, ['map.search', 'ctx.search']);
 });
+
+test('web and shell exclude each other in one run; shell is research-only and never shows the command', async () => {
+  const { activityLabel } = await import('../src/tools.js');
+  const ran = [];
+  const seenTools = [];
+  let i = 0;
+  const rounds = [{ tool_calls: [call('web_read', { url: 'https://example.com/' })] }, { tool_calls: [call('shell', { command: 'rg -l x jobs' })] }, { tool_calls: [answer] }];
+  await runResearch({ question: 'q', ctx: { sid: 's7' }, model: 'm', warmStart: false }, {
+    runTool: async (name) => { ran.push(name); return { ok: true, content: 'ok' }; },
+    complete: async ({ tools }) => { seenTools.push(tools.map((t) => t.name)); return { message: rounds[i++], costUsd: 0 }; },
+    toolDefs: TOOL_DEFS,
+  });
+  assert.deepEqual(ran, ['web_read'], 'no shell after a web tool');
+  assert.ok(seenTools[0].includes('shell') && !seenTools[1].includes('shell'), 'shell leaves the tool list after web');
+  const def = TOOL_DEFS.find((t) => t.name === 'shell');
+  assert.equal(def.researchOnly, true);
+  const r = await runTool('shell', { command: 'ls' }, { hub: { call: async () => { throw new Error('must not run'); } }, sid: 's7', audit() {} });
+  assert.equal(r.ok, false, 'outside a research run the shell is refused');
+  assert.equal(activityLabel('shell', { command: 'cat /data/secret-looking-thing' }), 'Befehl im Sandkasten');
+});

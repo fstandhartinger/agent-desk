@@ -19,6 +19,7 @@ import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
 import * as map from './map.js';
+import * as sandbox from './sandbox.js';
 import { recent as laptopRecent } from './laptopRecent.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
@@ -47,6 +48,7 @@ export const METHOD_TIMEOUT_MS = {
   'ops.run': 30_000,
   'job.start': 60_000, // quota-pace (15 s) + job-start (30 s) + a card that is allowed to take 25 s
   'audio.finish': 120_000, // ffmpeg encodes up to 30 min of stereo
+  'sandbox.exec': 35_000, // up to 8 s in the queue + 20 s wall clock + kill grace; the gateway waits 40 s
 };
 
 /**
@@ -93,6 +95,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.recent': board.recent,
       'state.current': stateCurrent,
       'job.start': jobStart, // voice action: starts a real job; Sandy only
+      'sandbox.exec': sandbox.exec, // read-only shell in bubblewrap over the scrubbed corpus (bwrap with user namespaces works on Sandy only)
     };
   }
   return {

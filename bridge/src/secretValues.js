@@ -58,8 +58,9 @@ export const windowFile = (home) => path.join(home, '.config', 'agent-desk', 'se
 const HOME_DEPTH = 7; // files up to ~/a/b/c/d/e/f/<file>
 export const SCAN_EVERY_MS = 30 * 60_000;
 const PRUNE = /^(?:node_modules|bower_components|\.git|\.hg|\.svn|venvs?|\.venv[\w.-]*|virtualenvs?|site-packages|dist-packages|__pycache__|\.mypy_cache|\.pytest_cache|\.ruff_cache|\.tox|\.cache|[Cc]ache|caches|Code Cache|GPUCache|Service Worker|IndexedDB|\.npm|\.pnpm-store|\.yarn|\.cargo|\.rustup|\.nvm|\.bun|\.deno|\.dotnet|\.nuget|\.gradle|\.m2|go|snap|flatpak|google-chrome[\w-]*|chromium[\w-]*|BraveSoftware|\.mozilla|agent-profile|File Seek|\.agent-browser-profiles|\.browser-profiles|Trash|\.Trash[\w-]*|fonts|icons|\.next|\.nuxt|\.svelte-kit|\.turbo|\.terraform)$/;
-// home-relative directories that are read targets (jobs, transcripts) or bulk data, never stores
-const PRUNE_REL = /^(?:jobs|jevbench-sealed|\.local\/lib|\.claude[\w-]*\/projects|\.codex\/(?:sessions|archived_sessions)|\.cline\/(?:tasks|data\/(?:sessions|checkpoint[\w-]*|cache|logs)))$/;
+// home-relative directories that are read targets (jobs, transcripts) or bulk data, never stores (the sandbox corpus is the
+// index's already scrubbed text of notes: files such as token-notes.md.txt in it are text, not stores)
+const PRUNE_REL = /^(?:jobs|jevbench-sealed|desk-knowledge\/corpus|\.local\/share\/desk-corpus(?:\.gen)?|\.local\/lib|\.claude[\w-]*\/projects|\.codex\/(?:sessions|archived_sessions)|\.cline\/(?:tasks|data\/(?:sessions|checkpoint[\w-]*|cache|logs)))$/;
 const SECRETISH_FILE = /token|secret|passw|credential|api[-_]?key|apikey|(?:^|[._-])key$|\.key$|\.pem$|\.env(?:$|\.)|^\.env$|^id_(?:rsa|dsa|ecdsa|ed25519)|^\.npmrc$|^\.pypirc$|^\.netrc$|^\.git-credentials$|^\.pgpass$|^rclone\.conf$|^config\.ini$/i;
 const JSON_STORE = /(?:^|[._-])(?:auth|credentials?|tokens?|secrets?|web_session|mcp-auth|accounts?)\.json$|^\.claude\.json$/i;
 // every file below these is a store candidate (ssh keys without a telling name, wallet files, OAuth caches)
