@@ -26,7 +26,7 @@ export const HARD_CAP_MS = 30 * 60_000;
 export const CAP_WARN_MS = 2 * 60_000;
 export const CAP_GRACE_MS = 60_000; // at the cap an answer or tool still running may finish, at most this long
 export const MEMORY_REFRESH_MS = 5 * 60_000; // the running summary while a session goes on
-const START_SUMMARY_MS = 3500; // a start waits at most this long for a summary of older turns that did not fit verbatim
+const START_SUMMARY_MS = 6000; // a start waits at most this long for a summary of older turns that did not fit verbatim (only when no running summary exists yet; 30 minutes of talk take 1.6-4 s)
 const PROMPT_PART = 3800; // trace text per event (the registry keeps `text` up to 4096 characters)
 const OUTPUT_PARTS = 8; // a tool result is logged in full up to 8 x 3800 characters
 // a#13554b (15 Nov): chats_search and read_file never returned and left no trace; the model answered without them. Every call now ends.

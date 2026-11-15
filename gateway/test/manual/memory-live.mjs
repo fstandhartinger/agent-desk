@@ -44,9 +44,9 @@ function session({ cookie, provider, conversation, questions, label }) {
       if (m.type === 'error') out.errors.push(m.message);
       if (m.type === 'notice') out.notices.push(m.message);
       if (m.type === 'memory') out.memory = m.summary;
-      if (m.type === 'tool' && m.status === 'start') out.turns.push({ role: 'tool', text: `${m.name} ${JSON.stringify(m.args ?? {}).slice(0, 120)}`, ts: Date.now() });
+      if (m.type === 'tool' && m.status === 'start') { out.turns.push({ role: 'tool', text: `${m.name} ${JSON.stringify(m.args ?? {}).slice(0, 120)}`, ts: Date.now() }); lastAssistant = Date.now(); const mine = ++answered; setTimeout(() => { if (answered === mine && !done) next(); }, 15000); } // a tool runs: the answer follows
       if (m.type === 'ready') { pump = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(silence); }, 40); setTimeout(next, 1500); }
-      if (m.type === 'transcript' && m.role === 'assistant' && m.final && m.text?.trim()) {
+      if (m.type === 'transcript' && m.role === 'assistant' && m.final && m.text?.trim() && idx >= 0) {
         out.turns.push({ role: 'assistant', text: m.text.trim(), ts: Date.now() });
         lastAssistant = Date.now();
         const mine = ++answered;
