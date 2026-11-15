@@ -3,7 +3,6 @@ import { ACTIVITY_LINGER_MS, isActivity, nextActivity, type ActivityLine } from 
 import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
 import { SpeechOnset } from './speechOnset';
-import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { SpeechTracker } from './speechCursor';
 import { drainClientErrors } from './clientError';
@@ -62,6 +61,7 @@ export class VoiceSession {
   private player: AudioWorkletNode | null = null;
   private mic: AudioWorkletNode | null = null;
   private ready = false;
+  private startMessage: (() => unknown) | null = null;
   private closed = false;
   private decay = 0;
   private onset = new SpeechOnset();
@@ -89,6 +89,10 @@ export class VoiceSession {
     this.gate.muted = this.startMuted;
     voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null }));
     this.set('connecting', '');
+    // Capture the selection at start; changes during connection also belong to the next session.
+    try { this.startMessage = await (await import('./voiceStart')).prepareVoiceStart(this.opt, this.page); }
+    catch { this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.'); return; }
+    if (this.closed) return;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
       this.gate.applyTracks();
@@ -148,8 +152,7 @@ export class VoiceSession {
     this.ws = ws;
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
     ws.onopen = () => {
-      const desktop = Boolean(globalThis.matchMedia?.('(min-width: 1024px)').matches);
-      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', client: clientInfo(desktop), entry: buildEntry(location, this.page?.pointId), focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}) }));
+      ws.send(JSON.stringify(this.startMessage!()));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
       this.event('ws.open', {});
       this.flushEvents();

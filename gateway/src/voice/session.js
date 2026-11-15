@@ -1,6 +1,7 @@
 // Browser side of a voice session: protocol with the web client (docs/SPEC.md "Voice"), tool execution, limits,
 // usage/cost ticks and audit. Provider specifics live in the adapters.
 import { cfg } from '../config.js';
+import { resolveVoice } from './voices.js';
 import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
 import { short } from '../redact.js';
 import { asksForDrawing, cjkRuns, isGermanText, stripCjk } from '../canvas.js';
@@ -667,7 +668,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const sessionTools = inScreenAgent ? toolDefs.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : toolDefs;
     const vocab = collectVocabulary({ page, dictionary: speechDictionary });
     trace?.event('voice.vocabulary', { provider, terms: vocab.hints.length, wordlist: vocab.wordlist.length });
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints }, onEvent);
+    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
@@ -693,7 +694,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       finish('hard-cap');
     }, HARD_CAP_MS);
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
-    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
+    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de' });
     Promise.resolve(trace.ready).then((info) => { if (info?.aid) { sendJson({ type: 'session', aid: info.aid }); void deskStamp(makeCtx(page)).catch(() => /* lookup failed: the first prompt looks it up */ null); } }).catch(() => {}); // ready never rejects; the id is a courtesy
   }
 
