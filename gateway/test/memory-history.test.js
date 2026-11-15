@@ -195,7 +195,7 @@ function session(provider, { memoryPost, now } = {}) {
   const adapter = { sendAudio() {}, sendText() {}, interrupt() {}, close() {}, sendToolResult() {}, recover() {} };
   const trace = { event: (type, d) => events.push({ type, ...d }), close() {} };
   const cache = createMemoryCache();
-  const deps = { sid: 'sv', toolDefs: [], audit() {}, limits: { check: () => ({ ok: true }), addCost() {} }, createViz: () => ({ noteTurn() {}, noteEvent() {}, close() {} }), makeCtx: () => ({ sid: 'sv' }), runTool: async (name, args, ctx) => { toolCtx = ctx; return { ok: true, content: 'R'.repeat(9000) }; }, openTrace: () => trace, memoryCache: cache, memoryPost };
+  const deps = { sid: 'sv', toolDefs: [], audit() {}, limits: { check: () => ({ ok: true }), addCost() {} }, createViz: () => ({ noteTurn() {}, noteEvent() {}, close() {} }), makeCtx: () => ({ sid: 'sv' }), runTool: async (name, args, ctx) => { toolCtx = ctx; return { ok: true, content: 'R'.repeat(15000) }; }, openTrace: () => trace, memoryCache: cache, memoryPost };
   runVoiceSession(ws, deps, { provider, apiKey: 'k', create: (o, e) => { emit = e; created = o; return adapter; }, ...(now ? { now } : {}) });
   const msg = (o) => ws.emit('message', Buffer.from(JSON.stringify(o)), false);
   return { msg, emit: (e) => emit(e), events, ws, created: () => created, toolCtx: () => toolCtx, cache };
@@ -239,7 +239,7 @@ test('session: a long conversation without summary waits (bounded) for one; the 
   assert.equal(s.toolCtx().conversation.turns().length, 191);
   assert.equal(s.toolCtx().conversation.turns().at(-1).text, 'Was hatte ich zu den Kosten gesagt?');
   const done = s.events.find((e) => e.type === 'tool.done');
-  assert.equal(done.fullChars, 9000);
+  assert.equal(done.fullChars, 15000);
   assert.equal(done.cut, true);
   assert.ok(s.events.filter((e) => e.type === 'tool.output').length >= 1);
   s.msg({ type: 'stop' });

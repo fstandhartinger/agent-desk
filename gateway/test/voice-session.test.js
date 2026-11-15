@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { runVoiceSession, HARD_CAP_MS, CAP_WARN_MS, USAGE_TICK_MS } from '../src/voice/session.js';
+import { runVoiceSession, HARD_CAP_MS, CAP_WARN_MS, USAGE_TICK_MS, voiceCapFor } from '../src/voice/session.js';
 
 function harness(t, { limit = { ok: true }, runTool, costToday } = {}) {
   const ws = new EventEmitter();
@@ -42,7 +42,7 @@ test('limit denial: error to the browser, adapter never created, no audit start'
   assert.equal(h.audits.length, 0);
 });
 
-test('tool call: start/done events, truncated to 2500 chars, result handed back, viz fed', async (t) => {
+test('tool call: start/done events, truncated to the provider cap (Part 6: job_status is asked for on purpose), result handed back, viz fed', async (t) => {
   const h = harness(t);
   h.msg({ type: 'start', page: { slug: 'a' } });
   h.emit({ t: 'ready', model: 'm' });
@@ -50,7 +50,7 @@ test('tool call: start/done events, truncated to 2500 chars, result handed back,
   await new Promise((r) => setImmediate(r));
   const tools = h.ws.sent.filter((m) => m.type === 'tool');
   assert.deepEqual(tools.map((t) => t.status), ['start', 'done']);
-  assert.equal(h.results[0][2].length, 2500);
+  assert.equal(h.results[0][2].length, Math.min(5000, voiceCapFor('gemini', 'job_status')));
   assert.ok(h.audits.some((a) => a.action === 'voice.tool'));
   assert.equal(h.noted.filter((n) => n.type === 'tool').length, 2);
 });
