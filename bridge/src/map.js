@@ -103,7 +103,8 @@ function widen(variants) {
 
 /** The expanded term groups of a query: [{word, variants}] (DE<->EN rows, compounds, stems, umlaut transliteration). */
 export function queryGroups(query) {
-  return expandQuery(query).map((g) => ({ word: g.word, variants: widen(g.variants) }));
+  // "LLM-Routing-Anzeige" is three words in the index (unicode61 splits at the hyphen); as one stemmed phrase it matched nothing
+  return expandQuery(String(query ?? '').replace(/[-_/]+/g, ' ')).map((g) => ({ word: g.word, variants: widen(g.variants) }));
 }
 
 /** One FTS5 term: a quoted phrase (never an operator), prefix-matched when it is a single token of 4+ characters. */
@@ -209,10 +210,12 @@ function candidates(h, built, f, need) {
   const take = (rows) => { for (const r of rows) if (!seen.has(r.rid)) seen.set(r.rid, r); };
   take(fetchRows(h, built.strict, f, pool));
   if (built.groups.length > 1) {
-    const dfs = built.groups.map((g) => groupDf(h, g));
-    const drop = dfs.indexOf(Math.max(...dfs));
-    const rest = built.groups.filter((_, i) => i !== drop);
-    take(fetchRows(h, rest.map((g) => `(${g.terms.join(' OR ')})`).join(' AND '), f, pool));
+    // relax step by step: drop the most common word first and keep the rarest longest, until enough places match
+    // (a 6-word question rarely has every word in one chunk; coverage still ranks the fuller matches first)
+    const byRarity = built.groups.map((g) => ({ g, df: groupDf(h, g) })).sort((a, b) => a.df - b.df).map((x) => x.g);
+    for (let k = built.groups.length - 1; k >= 1 && seen.size < need * 3; k -= 1) {
+      take(fetchRows(h, byRarity.slice(0, k).map((g) => `(${g.terms.join(' OR ')})`).join(' AND '), f, pool));
+    }
   }
   const foldedGroups = built.groups.map((g) => ({ word: g.word, variants: g.variants.map(fold) }));
   const now = Date.now();

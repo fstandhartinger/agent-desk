@@ -315,7 +315,8 @@ function collectLaptop(o) {
       source: 'chats/laptop', node: `chats/laptop/${project}/${sid}/${day}`, parent: `chats/laptop/${project}/${sid}`, sort: -Number(day.replace(/-/g, '')),
       analyze: 'laptop-day', titleHint: day,
     });
-    if (d) descs.push(d);
+    // the mirror rewrites every day file on each sync: the content date is the day in the name (freshness ranking, "updated")
+    if (d) { d.mtime = Math.min(d.mtime, Date.parse(`${day}T23:59:59Z`)); descs.push(d); }
   }
   for (const e of readdirOrNull(path.join(root, 'memory')) ?? []) {
     if (!e.isFile() || !e.name.endsWith('.md')) continue;

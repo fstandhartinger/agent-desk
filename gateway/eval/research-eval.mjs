@@ -32,13 +32,25 @@ methods['board.entry'] ??= async ({ id }) => {
   const { stdout } = await run(`${process.env.HOME}/bin/sandy-read`, ['board-sql', `select e.id, e.thread_id, e.author, e.kind, e.created_at, e.body from entries e where e.id = ${Number(id)}`], { timeout: 20_000, maxBuffer: 4 << 20 });
   return { text: stdout.slice(0, 20_000) };
 };
+// Eval guard: the job that builds this test set holds the questions and answers (briefs, prompt, worker chats). Hidden
+// from every search, map line and read, so the agent cannot find the answer key. HIDE = substrings of paths / projects.
+const HIDE = String(process.env.EVAL_HIDE ?? 'agent-desk-context-discovery-20261115,desk-knowledge/eval').split(',').filter(Boolean);
+const hidden = (v) => HIDE.some((h) => JSON.stringify(v ?? '').includes(h));
+function scrub(method, params, result) {
+  if (/^ctx\.read$|^chats\.read$/.test(method) && hidden(params)) throw new Error('path not allowed or not found');
+  if (result && Array.isArray(result.hits)) return { ...result, hits: result.hits.filter((h) => !hidden(h)) };
+  if (result && Array.isArray(result.lines)) return { ...result, lines: result.lines.filter((l) => !hidden(l)) };
+  if (result && Array.isArray(result.jobs)) return { ...result, jobs: result.jobs.filter((j) => !hidden(j.name)) };
+  return result;
+}
 const hub = {
   pick: () => 'lechonk',
   hostsFor: () => ['lechonk'],
   async call(method, params = {}) {
     const fn = methods[method];
     if (!fn) throw new Error(`unknown method ${method}`);
-    return redactDeepAsync(await fn(params));
+    if (method === 'jobs.get' && hidden(params)) throw new Error('no such job');
+    return redactDeepAsync(scrub(method, params, await fn(params)));
   },
 };
 
