@@ -325,6 +325,7 @@ const ACTIVITY = {
   code_outline: ({ path }) => `Lese die Code-Struktur ${last(path)}`.trim(),
   web_read: ({ url }) => `Lese Webseite ${(() => { try { return new URL(url).hostname; } catch { /* malformed */ return ''; } })()}`.trim(),
   web_search: ({ query }) => `Websuche: ${snip(query, 60)}`,
+  shell: () => 'Befehl im Sandkasten', // never the command itself (critic A12: commands and queries stay off the screen)
   http_get: ({ url }) => `Rufe ab: ${(() => { try { return new URL(url).hostname; } catch { /* malformed */ return ''; } })()}`.trim(), // the host only, never the path or query
   discord_read: () => 'Lese Discord',
   mail_search: () => 'Suche in den Mails',

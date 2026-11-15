@@ -52,7 +52,7 @@ function resolveCorpus() {
     const real = fs.realpathSync(corpusPath());
     if (!fs.statSync(real).isDirectory() || fs.readdirSync(real).length === 0) return null;
     return real;
-  } catch { return null; }
+  } catch { return null; /* absent corpus copy (the hourly pull has not run yet): exec refuses with a clear message */ }
 }
 
 /** The bubblewrap arguments up to and including `--`; exported so a test can pin the exact line. */

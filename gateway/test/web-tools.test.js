@@ -729,7 +729,7 @@ describe('http_get: robots.txt', () => {
 
 describe('web_search and http_get: researchOnly', () => {
   it('are defined as researchOnly tools, and only those two are', () => {
-    assert.deepEqual(TOOL_DEFS.filter((t) => t.researchOnly).map((t) => t.name), ['web_search', 'http_get']);
+    assert.deepEqual(TOOL_DEFS.filter((t) => t.researchOnly).map((t) => t.name), ['web_search', 'http_get', 'shell']);
     for (const t of TOOL_DEFS.filter((d) => d.researchOnly)) {
       assert.equal(t.parameters.type, 'object');
       assert.equal(t.voiceOnly, undefined);

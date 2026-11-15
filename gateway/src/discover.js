@@ -22,6 +22,8 @@ export const DISCOVERY_TOOL_DEFS = () => [
     parameters: obj({ query: str('Suchwörter (Florians Worte oder Fachbegriffe)'), source: str('Optional: Quelle, z. B. "chats/laptop", "jobs", "board", "entscheidungen"'), since: str('Optional: nur ab diesem Datum YYYY-MM-DD') }, ['query']) },
   { name: 'research', description: 'Recherche im Hintergrund durch einen eigenen Agenten (10 bis 120 Sekunden, mehrere Suchschritte über alle Quellen, liest lange Texte stückweise). Nimm es, sobald eine Frage mehr als einen Griff braucht oder du nicht weißt, wo die Antwort steht, z. B. "Was habe ich zu X gesagt / entschieden / gerechnet?", "Wie lange dauerte …?", "Wie viele … haben wir?", "Was ist aus … geworden?", "Warum …?". Nicht für heutige Entscheidungen (decisions_recent), eine bekannte Datei (read_file) oder Smalltalk. Kommt "läuft" zurück, sag genau den Satz aus dem Ergebnis und nenne noch KEIN Ergebnis; es kommt später als Hinweis vom Desk.',
     parameters: obj({ question: str('Die Frage in Florians Worten, vollständig (wer, was, welcher Zeitraum)'), focus: str('Optional: wo es stehen könnte (z. B. "Laptop-Sitzung von gestern", "Board Thread 22")') }, ['question']) },
+  { name: 'shell', researchOnly: true, description: 'Einen Lese-Befehl in einem abgeschotteten Sandkasten ausführen (bash, ohne Netz, nur lesen, 20 s, 50.000 Zeichen Ausgabe): /data enthält eine bereinigte Textkopie aller indizierten Quellen als <quelle>/<pfad>.txt (jobs/, board/<thread>/<nummer>.txt, chats/laptop/, entscheidungen/, wissen/, daten/, skills/); die erste Zeile jeder Datei nennt den echten Pfad für read_file. Werkzeuge: rg, grep, find, awk, sed, sort, uniq, wc, jq, python3 -I, sqlite3. Für Zählen, Vergleichen, Durchsuchen vieler Dateien auf einmal. Nicht nach einer Websuche im selben Lauf.',
+    parameters: obj({ command: str('Ein bash-Befehl, höchstens 2000 Zeichen, z. B. rg -l "Bewertungsphase" jobs | head') }, ['command']) },
   { name: 'research_result', description: 'Stand oder Ergebnis der Recherchen dieser Sitzung (für "schon was gefunden?"). Ohne id: die letzten drei.',
     parameters: obj({ id: str('Optional: Recherche-ID wie "r3"') }) },
 ];
@@ -137,7 +139,14 @@ async function researchResultTool({ id }, ctx) {
   return { result: list.length ? list.map((r) => (r.result ? `${r.id} (${r.question}): fertig\n${r.result}` : `${r.id} (${r.question}): läuft seit ${r.laeuftSeit} s, ${r.schritte} Schritte`)).join('\n\n') : 'Keine Recherche in dieser Sitzung.', host: 'gateway' };
 }
 
-export const DISCOVERY_HANDLERS = { discover: discoverTool, search: searchTool, research: researchTool, research_result: researchResultTool };
+/** shell (research agent only): one read-only command in the Sandy bridge's bubblewrap sandbox over the scrubbed corpus. */
+async function shellTool({ command }, ctx) {
+  const r = await ctx.hub.call('sandbox.exec', { command });
+  const head = `exit ${r.exitCode}${r.timedOut ? ', Zeitlimit erreicht' : ''}${r.truncated ? ', Ausgabe gekürzt' : ''}, ${r.ms} ms`;
+  return { result: `${head}\n---\n${String(r.output ?? '')}`, host: ctx.hub.pick?.('sandbox.exec') ?? 'sandy' };
+}
+
+export const DISCOVERY_HANDLERS = { discover: discoverTool, search: searchTool, research: researchTool, research_result: researchResultTool, shell: shellTool };
 
 // Critic B3: a quick search in voice that finds nothing hands the question to the research agent by itself.
 const QUICK_SEARCH = new Set(['search', 'search_files', 'chats_search', 'board_search']);
