@@ -129,6 +129,10 @@ export function discoveryLines({ spoken = false } = {}) {
     'Bezieht sich Florian auf etwas, das er selbst gesagt, gerechnet oder entschieden hat, gelten seine eigenen Worte vor Dokumenten: erst nachschlagen (conversation_history, sonst research), nie mit Dokumenttext widersprechen, ohne dessen Quelle zu nennen.',
     'Nenne die Quelle in Worten ("laut deiner Laptop-Sitzung vom 14.11.", "laut DECISIONS von heute"). Findet nichts etwas, sag klar "Dazu habe ich nichts gefunden" und wo du gesucht hast; rate nie.',
     'Sprich nie ein Ergebnis aus, bevor das Werkzeug geantwortet hat.',
+    ...(spoken ? [
+      'Jede Zahl, jeden Namen, jedes Datum und jede Entscheidung, die du Florian nennst, holst du in DIESER Frage aus einem Werkzeug (knowledge_read, search, decisions_recent, research …). Die Themenübersicht in deinen Anweisungen ist nur ein Wegweiser, keine Antwortquelle; antworte nie nur aus ihr oder aus dem Gedächtnis.',
+      'Schließe jede Sachantwort mit der Quelle in wenigen Wörtern ab ("steht in den Entscheidungen von heute", "laut deiner Laptop-Sitzung vom 14.11.", "laut Board-Eintrag 62320").',
+    ] : []),
   ];
 }
 
