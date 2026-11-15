@@ -37,7 +37,20 @@ Every voice session (`/api/voice`) and every text conversation (`/api/chat`) wri
   told to the live model as a passive note (`handoff.note {how,chars}`, briefing channel, no reply asked). `session_trace` prints them and the diagnosis counts failed clicks. A trace that has already closed
   (voice session over, chat idle 15 min) takes no more events; the audit lines `handoff.posted|failed|refused` are written regardless.
 - **Test.** `gateway/test/errors-logged.test.js` and `web/test/errors-logged.test.ts` scan the source for user-visible error strings and fail when one has no path to a log event.
-- **Reading.** Tool `session_trace {which}`; route `GET /api/session-lookup?q=<a#id|hex|slug|last>[&full=1]`.
+- **Complete logs (15 Nov 2026, Florian: "super umfangreiche vollumfängliche detaillierte logs").** Everything the model got:
+  `prompt.text {kind: instructions|history|briefing|screen|vocabulary|tools, hash, part, of, chars, text}` (3,800 chars per event; the same text twice
+  in a session only as `prompt.repeat {kind,hash}`; screen text with digits masked, at most one per 30 s). Every tool result as the model got it:
+  `tool.output {id,name,part,of,chars,fullChars,text}` (up to 8 parts; computer runs: size only), `tool.done` adds `fullChars` and `cut`;
+  `tool.timeout {name,ms}` (30 s), `tool.abandoned {count,reason}` at the session end. Tokens per vendor response: `usage {input, cached,
+  outputTokens, reasoning|thinking, audioIn, audioOut, model?, responseId?}` (OpenAI delegate, Gemini usageMetadata; xAI reports none).
+  Timing: `audio.first {msAfterQuestion}`, `audio.end {audioSeconds, firstChunkAgoMs}`, `turn.timing {kind, firstAudioMs, firstUsefulMs,
+  firstToolMs, tools, toolMs, firstWords}` (first useful = first assistant text that is no filler or promise). Memory: `memory.seed {conversation,
+  turns, seeded, older, tokens, summary: client|cache|fresh|none, text}`, `memory.summary {why, turns, upto, costUsd, text}`, `memory.summary_late`,
+  `memory.summary_failed`. Provider: `provider.go_away {timeLeft}`, `provider.closed {afterS, code, reason}`. Cap: `session.cap_warning`,
+  `session.rollover {reason}`, `session.rollover_skipped {reason, idleS}`. `session.start` adds `conversation` and the OpenAI `delegate`.
+  The 40-line timeline of `session_trace` leaves the detailed events out; `desk-trace <id> --json` has them all.
+- **Reading.** Tool `session_trace {which}` (diagnosis; start/end in Berlin time); the words: `conversation_history {query, session, from, to, page}`
+  and `desk_sessions {day}` (gateway/src/history.js); route `GET /api/session-lookup?q=<a#id|hex|slug|last>[&full=1]`.
 
 Env: `ARTIFACTS_URL`, `ARTIFACTS_DESK_TOKEN` (as for the device routes), `SOURCE_COMMIT` (recorded as `gateway_commit`;
 the Dockerfile exposes the Coolify build arg of that name).
