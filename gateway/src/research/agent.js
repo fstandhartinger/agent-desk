@@ -11,7 +11,23 @@ const str = (description, extra = {}) => ({ type: 'string', description, ...extr
 const int = (description) => ({ type: 'integer', description });
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
-export const BUDGET = Object.freeze({ rounds: 10, ms: 110_000, usd: 0.25, parallel: 4, subChunks: 12, subParallel: 4 });
+export const BUDGET = Object.freeze({ rounds: 8, ms: 110_000, usd: 0.25, parallel: 4, subChunks: 12, subParallel: 4 });
+export const WARM_CHARS = 2800;
+// Questions about the internet keep the web tools: no warm start (it reads our own data, which closes the web; taint rule).
+const WEB_QUESTION = /\b(?:web|internet|online|webseite|website|homepage|im netz|googl\w*)\b/i;
+// Search words of a spoken question: content words only (a whole sentence is no search query, and the bridge refuses long
+// tokens that look like key fragments).
+const STOP = new Set(('mit wie viel viele vielen habe hab hast hat haben hatte hatten ich du er sie es wir ihr man mir mich dir mein meine meinen meinem meiner '
+  + 'unser unsere unseren unserem für fuer die der das den dem des ein eine einen einem einer und oder zu zur zum was wer wann wo wie welche welcher welches welchen '
+  + 'ist sind war waren wird werden wurde wurden in im ins auf an am von vom bei nach vor über ueber unter aus als auch noch schon nicht kein keine keinen '
+  + 'soll sollen sollte darf dürfen durfte kann können konnte muss müssen bitte denn dass ob eigentlich gerade mal also dazu dafür davon sich sein seine '
+  + 'the a an of to for and or is are was were what which who when where how much many did do does have has had our we i my me').split(' '));
+export function keywords(question, max = 6) {
+  const words = String(question ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOP.has(w) && w.length <= 30);
+  return [...new Set(words)].slice(0, max).join(' ');
+}
+// Florian's own words: also search the laptop mirror first.
+const OWN_WORDS = /\b(?:ich|mein\w*|mir|mich|wir|unser\w*)\b/i;
 const FINAL_RESERVE_MS = 12_000; // the forced final answer needs time too
 export const RESULT_CHARS = 40_000; // per tool call into the workspace (the voice path gets 2,500)
 
@@ -99,18 +115,16 @@ function answerFromText(content) {
  * {message:{content, tool_calls:[{id,name,args}]}, costUsd}, toolDefs, now}. Returns
  * {answer, found, sources, unconfirmed, confidence, classes, rounds, steps, ms, costUsd, model, stopped}.
  */
-export async function runResearch({ question, focus = '', context = '', ctx = {}, model, subModel = model, budget = BUDGET, onStep = () => {}, signal }, deps) {
+export async function runResearch({ question, focus = '', context = '', ctx = {}, model, subModel = model, budget = BUDGET, onStep = () => {}, signal, warmStart = true, reasoning }, deps) {
   const now = deps.now ?? Date.now;
   const started = now();
   const ws = createWorkspace();
   const tools = researchToolDefs(deps.toolDefs ?? [], ctx);
   const allowed = new Set(tools.map((t) => t.name));
-  const messages = [
-    { role: 'system', content: systemPrompt({ now: new Date(started), page: ctx.page, maxRounds: budget.rounds }) },
-    { role: 'user', content: userPrompt(question, { focus, context }) },
-  ];
+  const messages = [{ role: 'system', content: systemPrompt({ now: new Date(started), page: ctx.page, maxRounds: budget.rounds }) }];
   const classes = new Set();
   const touched = [];
+  const timing = { modelMs: [], toolMs: {} }; // where the time goes (eval and trace)
   let tainted = false; // read our own data: no web tools from now on
   let outsider = false; // read text written by outsiders
   const toolsNow = () => (tainted ? tools.filter((t) => !WEB_TOOLS.has(t.name)) : tools);
@@ -119,10 +133,12 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
   let rounds = 0;
   const left = () => budget.ms - (now() - started);
   const over = () => left() < FINAL_RESERVE_MS || cost >= budget.usd;
-  const done = (res, stopped) => ({ ...res, classes: [...classes], outsider, touched: touched.slice(0, 30), rounds, steps, ms: now() - started, costUsd: Math.round(cost * 10000) / 10000, model, stopped });
+  const done = (res, stopped) => ({ ...res, timing, classes: [...classes], outsider, touched: touched.slice(0, 30), rounds, steps, ms: now() - started, costUsd: Math.round(cost * 10000) / 10000, model, stopped });
   const ask = async (msgs, opts = {}) => {
     const timeout = AbortSignal.timeout(Math.max(3000, Math.min(left(), 45_000)));
-    const r = await deps.complete({ model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...opts });
+    const m0 = now();
+    const r = await deps.complete({ model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(reasoning ? { reasoning } : {}), ...opts });
+    timing.modelMs.push(now() - m0);
     cost += Number(r.costUsd) || 0;
     return r.message ?? { content: '', tool_calls: [] };
   };
@@ -150,7 +166,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
     return `${ref}: ${out.length} Fundstellen in ${Math.min(total, budget.subChunks)} von ${total} Stücken${total > budget.subChunks ? ' (Rest nicht gelesen)' : ''}\n${out.join('\n') || '(nichts Passendes)'}`;
   }
 
-  async function exec(call) {
+  async function exec(call, { store = true } = {}) {
     const args = parseArgs(call.args);
     const t0 = now();
     const label = call.name.startsWith('ws_') ? `Arbeitsbereich: ${call.name.slice(3)}` : activityLabel(call.name, args ?? {});
@@ -172,16 +188,28 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
         const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: undefined, voiceTurn: undefined });
         ok = res.ok !== false;
         content = String(res.content ?? '');
-        if (content.length > STORE_FROM) content = ws.stub(ws.put(content, `${call.name} ${short(JSON.stringify(args), 120)}`));
+        if (store && content.length > STORE_FROM) content = ws.stub(ws.put(content, `${call.name} ${short(JSON.stringify(args), 120)}`));
       }
     } catch (err) {
       ok = false;
       content = `ERROR: ${short(err.message ?? err, 300)}`;
     }
     steps += 1;
+    (timing.toolMs[call.name] ??= []).push(now() - t0);
     onStep({ phase: ok ? 'done' : 'fail', id: call.id, name: call.name, label, ms: now() - t0 });
     return content;
   }
+
+  // Warm start: the desk searches once before the first model call (saves a round). Counts as a step; reads our own data.
+  let warm = '';
+  if (warmStart && allowed.has('search') && !WEB_QUESTION.test(question)) {
+    const q = keywords(question);
+    const own = OWN_WORDS.test(String(question));
+    const calls = q ? [{ id: 'warm1', name: 'search', args: JSON.stringify({ query: q }) }, ...(own ? [{ id: 'warm2', name: 'search', args: JSON.stringify({ query: q, source: 'chats/laptop' }) }] : [])] : [];
+    const got = await Promise.all(calls.map((c) => exec(c, { store: false })));
+    warm = got.filter((g) => !g.startsWith('ERROR')).map((g, i) => `${i ? '[Laptop-Sitzungen] ' : ''}${short(g, WARM_CHARS / calls.length)}`).join('\n---\n');
+  }
+  messages.push({ role: 'user', content: userPrompt(question, { focus, context, warm }) });
 
   try {
     for (rounds = 0; rounds < budget.rounds && !over() && !signal?.aborted;) {

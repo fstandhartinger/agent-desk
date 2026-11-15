@@ -59,5 +59,6 @@ export const METHOD_PARAMS = {
   'map.discover': { path: 'string', query: 'string', offset: 'integer', limit: 'integer', since: 'string' },
   'map.search': { query: 'string', source: 'string', path: 'string', limit: 'integer', since: 'string', offset: 'integer' },
   'map.status': {},
+  'laptop.recent': { limit: 'integer' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
 };

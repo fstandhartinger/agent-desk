@@ -18,6 +18,7 @@ import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
 import * as map from './map.js';
+import { recent as laptopRecent } from './laptopRecent.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
 import { redact, redactDeep, redactDeepAsync } from './redact.js';
@@ -98,6 +99,7 @@ export function buildMethods(claude, host = 'lechonk') {
     'map.discover': map.discover,
     'map.search': map.search,
     'map.status': map.status,
+    'laptop.recent': laptopRecent, // start briefing fallback: last messages of the laptop main session (mirror)
     'claude.start': claude.start,
     'claude.send': claude.send,
     'claude.stop': claude.stop,

