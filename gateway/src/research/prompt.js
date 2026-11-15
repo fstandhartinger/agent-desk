@@ -7,7 +7,7 @@ export const SOURCE_GUIDE = [
   'Florians eigene Worte zuerst, wenn er sich auf etwas bezieht, das er gesagt, gerechnet oder entschieden hat:',
   '  conversation_history (seine Desk-Gespräche, falls das Werkzeug da ist) · search mit source "chats/laptop" (Wortlaut seiner Laptop-Hauptsitzung, Tagesdateien) · chats_search (Agenten-Chats auf Sandy und LeChonk) · decisions_recent / search source "entscheidungen".',
   'Jobs: search source "jobs", job_status(name), list_jobs, read_file(/home/flori/jobs/<job>/STATE.md oder RESULT.md).',
-  'Agent-Board: board_search, board_read(thread), board_entry(nummer); search source "board".',
+  'Agent-Board: search mit source "board" (Volltext aller Einträge), board_read(thread), board_entry(nummer).',
   'Wissen und Regeln: knowledge_read(thema), read_core_doc (AGENTS, STATE, DECISIONS, MODEL_POLICY).',
   'Geld: ledger_spend (nie schätzen). Server, Quoten, Termine: run_readonly. Der Desk selbst: desk_status, session_trace.',
   'Artefakte (a#-IDs, Karten): artifact_search, artifact_resolve, artifact_ref_read. Skills: skills_list, skill_read. Code: code_outline, read_file.',

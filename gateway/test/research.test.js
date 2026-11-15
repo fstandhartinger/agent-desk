@@ -66,7 +66,7 @@ describe('research tool allowlist (critic A5)', () => {
     for (const t of TOOL_DEFS.filter((d) => d.voiceOnly)) assert.ok(!names.includes(t.name), t.name);
   });
   it('offers the read tools and the workspace tools', () => {
-    for (const good of ['search', 'discover', 'read_file', 'board_search', 'chats_search', 'chat_read', 'decisions_recent', 'ws_grep', 'ws_read', 'ws_ask', 'answer']) assert.ok(names.includes(good), good);
+    for (const good of ['search', 'discover', 'read_file', 'board_entry', 'chats_search', 'chat_read', 'decisions_recent', 'ws_grep', 'ws_read', 'ws_ask', 'answer']) assert.ok(names.includes(good), good);
   });
   it('explainer tools only with an open page', () => {
     assert.ok(!names.includes('explainer_context'));
@@ -90,7 +90,7 @@ describe('runResearch', () => {
     const { complete, seen } = scripted([
       { tool_calls: [call('search', { query: '48 Stunden Bewertungsphase USD', source: 'chats/laptop' }), call('decisions_recent', {})] },
       { tool_calls: [call('read_file', { path: '/home/flori/data/laptop-mirror/sessions/x.md' })] },
-      (messages) => ({ tool_calls: [call('ws_grep', { ref: /@w\d/.exec(messages.at(-1).content)[0], terms: ['48-Stunden'] })] }),
+      (messages) => ({ tool_calls: [call('ws_grep', { ref: /@w\d/.exec(messages.filter((m) => m.role === 'tool').at(-1).content)[0], terms: ['48-Stunden'] })] }),
       { tool_calls: [answerCall('Du hast mit 500 US-Dollar für die 48-Stunden-Bewertungsphase gerechnet.')] },
     ]);
     const steps = [];
@@ -103,6 +103,7 @@ describe('runResearch', () => {
     assert.deepEqual(r.classes.sort(), ['open', 'personal']);
     assert.ok(toolCalls.every((t) => t.maxChars > 2500 && t.research === undefined && t.voiceTurn === undefined), 'big caps, no recursion, no voice context');
     const toolMsgs = seen[3].messages.filter((m) => m.role === 'tool');
+    assert.ok(seen[3].messages.some((m) => m.role === 'user' && /Runde \d von 8/.test(m.content)), 'round nudge');
     assert.ok(toolMsgs.some((m) => /"workspace":"@w1"/.test(m.content)), 'long result became a handle');
     assert.ok(toolMsgs.some((m) => /Ich rechne mit 500 USD/.test(m.content)), 'ws_grep found the line');
     assert.ok(steps.some((s) => s.phase === 'start') && steps.every((s) => typeof s.label === 'string'));
@@ -163,7 +164,7 @@ describe('runResearch', () => {
     let sub = 0;
     const complete = async ({ messages, json }) => {
       if (json) { sub += 1; const hit = messages[1].content.includes('445 GPU-Stunden'); return { message: { content: JSON.stringify(hit ? { relevant: true, auszug: 'gut 10 Tage, 445 GPU-Stunden', zeile: messages[1].content.split('\n').slice(2).findIndex((l) => l.includes('445')) } : { relevant: false }) }, costUsd: 0.0001 }; }
-      const last = messages.at(-1);
+      const last = messages.filter((m) => m.role !== 'user' || !/^Runde \d/.test(m.content)).at(-1); // skip the round nudge
       if (last.role === 'user') return { message: { tool_calls: [call('read_file', { path: '/home/flori/jobs/x/RESULT.md' })] }, costUsd: 0 };
       if (/"workspace":"(@w\d)"/.test(last.content)) return { message: { tool_calls: [call('ws_ask', { ref: /"workspace":"(@w\d)"/.exec(last.content)[1], question: 'Wie lange dauerte die Bewertung?' })] }, costUsd: 0 };
       return { message: { tool_calls: [answerCall(`Laut Auswertung: ${/Z\.(\d+): (.*)/.exec(last.content)?.[2]}`)] }, costUsd: 0 };

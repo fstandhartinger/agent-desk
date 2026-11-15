@@ -157,3 +157,37 @@ questions take 10–100 ms). The first call after a (re)open adds the document-f
 - The index is a copy of what the notes mirror had at the last run (every 5 min) plus the build interval (15 min): a note written a minute ago is found by
   `ctx.search`/`job_status`, not yet by `map.search`.
 - Laptop `INDEX.md` is indexed as a doc but its structure is not parsed: the tree is derived from the day file names (`<project>__<sid8>__<day>.md`).
+
+## Gateway side: discover, search, research (job agent-desk-context-discovery-20261115)
+
+Tools (`gateway/src/discover.js`, registered in `tools.js`): `discover(path?, query?, offset?)` → `map.discover`
+(static root when the LeChonk bridge does not serve it yet), `search(query, source?, since?)` → `map.search` (falls back to
+`ctx.search`), `research(question, focus?)`, `research_result(id?)`. Voice gets compact results (≤ 6 lines for discover,
+≤ 5 hits for search); titles and summaries from files are shown quoted, the open call is built from ids and paths.
+
+Research agent (`gateway/src/research/`):
+- `agent.js`: one question, up to 8 rounds / 110 s / USD 0.25. A keyword warm start searches the index before the first
+  model call (and the laptop mirror when the question is about Florian's own words). Up to 4 tools per round in parallel,
+  then a short German answer with sources, open points and a confidence (`answer` tool; forced at the limit).
+  Results above 3,000 characters go into a workspace (`@w1` …): the model sees size, outline and a preview and reads with
+  `ws_grep` (literal terms), `ws_read` (by line) or `ws_ask` (cheap sub-calls over 30,000-character chunks, depth 1,
+  4 at once): the recursive-language-model idea without a free REPL. Tool set: the Desk's read tools only (explicit list;
+  no handoff, Claude, canvas, voice action, Discord or screen tool; `search_files`/`board_search` replaced by `search`).
+- Taint rule: web tools exist in a run only until it reads our own data. A run that read outsider text (mail, web)
+  closes `web_read` for 5 minutes after its answer is told.
+- Model calls go through OpenRouter with zero-data-retention routing and no fallback (`completeChat({ zdrOnly: true })`).
+  Model: `DESK_RESEARCH_MODEL`, sub-calls `DESK_RESEARCH_SUB_MODEL`; kill switch `DESK_RESEARCH=off`.
+- `manager.js`: runs per Desk session (cookie sid), at most 2 at a time, the same question again = the same run.
+  Voice waits 2.5 s (text chat up to 115 s); a slower result is told through the computer manager's `say()` hook
+  (`withResearchAttach` in `server.js`), only when `idle()` (session.js: nothing spoken, no tool running, no open question,
+  3 s quiet; at most 90 s hold). A pending research settles the no-answer watchdog. Results stay 30 min; an untold result
+  is told at the next voice start of the same sid. Trace events: `research.start|done|delivered|undelivered`
+  (`research.done.answer` feeds `conversation_history`).
+- Voice escalation: a quick search in voice that finds nothing starts `research` for Florian's last sentence.
+
+Evaluation: `gateway/eval/research-eval.mjs` runs a private question set (never in the repo; on LeChonk
+`~/desk-knowledge/eval/questions.jsonl`) through the agent with an in-process LeChonk hub; the job folder holds the grader
+(Claude via the subscription) and the measured tables.
+
+Start briefing fallback: `laptop.recent` (LeChonk bridge, `bridge/src/laptopRecent.js`) returns the last messages of the
+laptop main session from the compact mirror; `briefing.js` uses them when the Screen Agent sends no main-session messages.

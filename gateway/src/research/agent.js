@@ -34,12 +34,13 @@ export const RESULT_CHARS = 40_000; // per tool call into the workspace (the voi
 /** Read tools the research model may call (existing Desk tools; everything here only reads). */
 export const RESEARCH_TOOLS = [
   'search', 'discover', 'conversation_history', 'desk_sessions',
-  'knowledge_read', 'read_core_doc', 'decisions_recent', 'search_files', 'read_file', 'list_jobs', 'job_status',
-  'board_threads', 'board_read', 'board_entry', 'board_search', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
+  'knowledge_read', 'read_core_doc', 'decisions_recent', 'read_file', 'list_jobs', 'job_status',
+  'board_threads', 'board_read', 'board_entry', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
   'ledger_spend', 'run_readonly', 'desk_status', 'session_trace', 'code_outline', 'artifact_search', 'artifact_resolve',
   'artifact_ref_read', 'web_read', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
 ];
 // discord_read is left out on purpose: reading a channel moves Florian's read marker (tools.js description).
+// search_files and board_search are left out: `search` (full-text index, ~40 ms) covers both; they took 2-8 s each in the eval.
 const PAGE_TOOLS = new Set(['explainer_context', 'explainer_point']);
 // Critic A1 (taint): tools that reach the internet exist in a run only until it reads our own data (web first, then private
 // is fine). A planted page or mail can then never make the agent carry private facts out in a URL or a search query.
@@ -224,7 +225,10 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
       if (run.some((c) => !WEB_TOOLS.has(c.name) && !c.name.startsWith('ws_') && allowed.has(c.name))) tainted = true; // same round: no web call next to a private read
       const results = await Promise.all(run.map(exec));
       run.forEach((c, i) => messages.push({ role: 'tool', tool_call_id: c.id, content: results[i] }));
-      if (calls.length > run.length) messages.push({ role: 'user', content: `Hinweis: nur die ersten ${budget.parallel} Werkzeugaufrufe wurden ausgeführt.` });
+      const notes = [];
+      if (calls.length > run.length) notes.push(`Nur die ersten ${budget.parallel} Werkzeugaufrufe wurden ausgeführt.`);
+      if (rounds >= 2) notes.push(`Runde ${rounds} von ${budget.rounds}. Steht die Antwort belegt in den Ergebnissen, rufe JETZT answer auf; sonst suche gezielt anders (nicht dasselbe noch einmal).`);
+      if (notes.length) messages.push({ role: 'user', content: notes.join(' ') });
     }
     if (signal?.aborted) return done(normaliseAnswer({ antwort: 'Die Recherche wurde abgebrochen.', gefunden: false }), 'aborted');
     // budget or rounds used up: one last call that must answer
