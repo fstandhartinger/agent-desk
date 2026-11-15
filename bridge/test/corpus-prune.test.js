@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-corpus-prune-'));
 process.env.BRIDGE_HOME = home;
@@ -13,7 +14,7 @@ const write = (rel, text) => { const p = path.join(home, rel); fs.mkdirSync(path
 after(() => fs.rmSync(home, { recursive: true, force: true }));
 
 test('secret-store discovery skips the sandbox corpus on both hosts and still finds a store next to it', () => {
-  const line = 'SESSION_SECRET=Zk3mQ9vT7xRb2LpW8nYc4HdF6gJs5AaE\n';
+  const line = `SESSION_SECRET=${crypto.randomBytes(24).toString('base64url')}`; // built at run time: no high-entropy literal in the repo (GitGuardian)
   const planted = [
     write('desk-knowledge/corpus/jobs/home/x/jobs/foo/token-notes.md.txt', line),
     write('desk-knowledge/corpus/board/22/secrets-thread.txt', line),
