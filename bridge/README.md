@@ -12,6 +12,7 @@ It holds no vendor keys; the only secret is `BRIDGE_TOKEN`, and the `claude` chi
 | `src/redact.js` | `redact()` applied to every string that leaves the bridge |
 | `src/jobs.js`, `src/board.js`, `src/chats.js` | `jobs.*`, `board.*` (read-only `agent-board` relay), `chats.*` |
 | `src/claude.js`, `src/events.js`, `src/prompt.js` | Claude Code sessions, stream-json normalisation, PROMPT.md |
+| `src/map.js`, `src/mapIndex.js`, `scripts/map/build.mjs` | the map (`map.discover/search/status`, LeChonk only, Node >= 22.5): a walkable table of contents plus an FTS5 index over notes, decisions, chats and the board; a timer builds `~/desk-knowledge/map/` every 15 min. See `docs/DISCOVERY.md` |
 | `src/audit.js` | `~/desk-audit/YYYY-MM-DD.jsonl` (0600) |
 
 Claude turns write stream-json to `~/desk-sessions/<sid>/turn-N.out` and the bridge tails the file, so a running turn

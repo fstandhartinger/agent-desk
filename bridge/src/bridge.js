@@ -17,6 +17,7 @@ import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
+import * as map from './map.js';
 import { startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
 import { redact, redactDeep, redactDeepAsync } from './redact.js';
@@ -93,6 +94,10 @@ export function buildMethods(claude, host = 'lechonk') {
   }
   return {
     ...shared,
+    // the walkable map + full-text index (scripts/map/build.mjs, node:sqlite): LeChonk only, the Sandy bridge runs Node 20
+    'map.discover': map.discover,
+    'map.search': map.search,
+    'map.status': map.status,
     'claude.start': claude.start,
     'claude.send': claude.send,
     'claude.stop': claude.stop,
