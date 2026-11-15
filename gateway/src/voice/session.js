@@ -17,6 +17,7 @@ import { hearingHint } from '../screenText.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, isYes, needsAnswer, offerOf, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 import { bestSummary, cleanHistory, conversationIdOf, memoryCache, memoryInstructions, openaiInput, planSeed, summarize, turnLine, uncoveredTurns } from './memory.js';
 import { completeChat } from '../llm.js';
+import { createRecorder } from './recorder.js';
 import { createHash } from 'node:crypto';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -26,7 +27,7 @@ export const HARD_CAP_MS = 30 * 60_000;
 export const CAP_WARN_MS = 2 * 60_000;
 export const CAP_GRACE_MS = 60_000; // at the cap an answer or tool still running may finish, at most this long
 export const MEMORY_REFRESH_MS = 5 * 60_000; // the running summary while a session goes on
-const START_SUMMARY_MS = 3500; // a start waits at most this long for a summary of older turns that did not fit verbatim
+const START_SUMMARY_MS = 6000; // a start waits at most this long for a summary of older turns that did not fit verbatim (only when no running summary exists yet; 30 minutes of talk take 1.6-4 s)
 const PROMPT_PART = 3800; // trace text per event (the registry keeps `text` up to 4096 characters)
 const OUTPUT_PARTS = 8; // a tool result is logged in full up to 8 x 3800 characters
 // a#13554b (15 Nov): chats_search and read_file never returned and left no trace; the model answered without them. Every call now ends.
@@ -194,6 +195,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let screenLoggedAt = 0;
   // per-turn timing (Part 4 of 15 Nov): when his turn was complete, first audio, first useful words, tool time
   let timing = null;
+  let recorder = null; // the session's sound for 30 days (recorder.js)
   const audioRun = { bytes: 0, at: 0, timer: null }; // 24 kHz PCM16 mono = 48,000 bytes a second
   const promptHashes = new Set();
   /** Everything the model is given goes into the trace in full (hash + text in parts); the same text twice in one session only by hash. */
@@ -631,6 +633,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         audioRun.timer = setTimeout(() => { trace.event('audio.end', { turn: turnId, audioSeconds: Math.round(audioRun.bytes / 480) / 100, firstChunkAgoMs: now() - audioRun.at }); audioRun.bytes = 0; audioRun.at = 0; }, AUDIO_END_MS);
         audioRun.timer.unref?.();
         if (!dropAudio && ws.readyState === ws.OPEN) ws.send(e.pcm, { binary: true });
+        if (!dropAudio) recorder?.push('assistant', e.pcm);
         if (pending.active && !isSilent(e.pcm)) restartNoAnswer(); // still speaking (its transcript may lag): the clock starts when the sound stops
         break;
       case 'transcript':
@@ -767,6 +770,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (history.length) logPrompt('history', history.map((m) => `${m.role}: ${m.content[0].text}`).join('\n'), { provider, items: history.length });
     logPrompt('vocabulary', [...vocab.wordlist, '--', ...vocab.hints].join('\n'));
     logPrompt('tools', sessionTools.map((t) => t.name).join(', '));
+    recorder = createRecorder({ sink: deps.audioSink, aid: () => (/^a#[0-9a-f]{6}$/.test(trace.aid ?? '') ? trace.aid : null), now, trace: (type, data) => trace.event(type, data), quiet: () => Boolean(deps.computer?.quiet?.(sid, 'user')), enabled: cfg.audioRecord() });
+    trace.event('audio.recorder', { on: recorder.on });
     adapter = create({ apiKey, instructions, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
@@ -948,6 +953,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       tick();
       audit({ action: 'voice.stop', detail: `${provider} ${reason} ${billedSeconds}s`, cost_usd: estimateCost(provider, billedSeconds) });
     }
+    const rec = recorder?.stop();
+    if (rec?.started) trace.event('audio.recording', rec);
     trace.event('session.stop', { reason, seconds: billedSeconds, costUsd: estimateCost(provider, billedSeconds), mutedSeconds: Math.round(mutedMs / 1000), framesWhileMuted });
     trace.close();
     unregisterText?.();
@@ -1047,7 +1054,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (closed) return;
     if (isBinary) {
       if (muted) { framesWhileMuted += 1; return; } // the client stops sending; a frame still in flight never reaches the vendor
-      if (adapter) adapter.sendAudio(Buffer.from(data));
+      if (adapter) { const pcm = Buffer.from(data); adapter.sendAudio(pcm); recorder?.push('user', pcm); }
       return;
     }
     let msg;

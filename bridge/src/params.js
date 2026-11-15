@@ -61,4 +61,6 @@ export const METHOD_PARAMS = {
   'map.status': {},
   'laptop.recent': { limit: 'integer' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
+  'audio.append': { aid: 'string', chunks: 'array' },
+  'audio.finish': { aid: 'string' },
 };

@@ -10,6 +10,7 @@ import * as mail from './mail.js';
 import * as ops from './ops.js';
 import * as journal from './journal.js';
 import * as audit from './audit.js';
+import * as audio from './audio.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
 import { cardLink, cardRead, cardsRecent } from './notify.js';
@@ -45,6 +46,7 @@ export const METHOD_TIMEOUT_MS = {
   'mail.read': 40_000,
   'ops.run': 30_000,
   'job.start': 60_000, // quota-pace (15 s) + job-start (30 s) + a card that is allowed to take 25 s
+  'audio.finish': 120_000, // ffmpeg encodes up to 30 min of stereo
 };
 
 /**
@@ -107,6 +109,8 @@ export function buildMethods(claude, host = 'lechonk') {
     'claude.get': claude.get,
     'notify.loginLink': queueLoginLink,
     'audit.append': audit.append,
+    'audio.append': audio.append, // voice session audio, 30 days (Florian 15 Nov, card 19712); LeChonk only
+    'audio.finish': audio.finish,
   };
 }
 
@@ -135,6 +139,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
   claude.restore();
   const stopJobRefresh = jobs.startJobIndexRefresh();
   const stopNotesMirror = sandy ? () => {} : startNotesMirror({ log });
+  const stopAudioSweep = sandy ? () => {} : audio.startAudioSweep(log);
   const methods = buildMethods(claude, host);
 
   async function handleReq(frame) {
@@ -193,6 +198,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
       clearInterval(pingTimer);
       stopJobRefresh();
       stopNotesMirror();
+      stopAudioSweep();
       claude.shutdown();
       ws?.close();
     },

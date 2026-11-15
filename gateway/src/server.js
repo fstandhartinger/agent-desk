@@ -207,6 +207,8 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       briefing: devices.briefing,
       computer: withResearchAttach(devices.computer, research),
       registerText: (send) => artifacts.registerVoice(sid, send),
+      // the sound of the session, 30 days on LeChonk (Florian 15 Nov, card 19712); only when the LeChonk bridge has the method
+      audioSink: { available: () => hub.hostsFor('audio.append').includes('lechonk'), append: (p) => hub.call('audio.append', p, { host: 'lechonk' }), finish: (p) => hub.call('audio.finish', p, { host: 'lechonk' }) },
       openTrace: ({ provider }) => (currentTrace = traces.open({ provider, kind: 'voice', sid })),
       makeCtx: (page) => ({ artifacts, vision: devices.vision, briefing: devices.briefing, computer: devices.computer, research, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
