@@ -655,9 +655,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         if (!userOpen) canvas?.turnDone();
         if (capDue && !responseOpen && runningTools === 0) maybeRollover();
         break;
-      case 'usage': // tokens of one vendor response (OpenAI delegate, Gemini usageMetadata, xAI response.done)
-        trace.event('usage', { turn: turnId, ...e.usage });
+      case 'usage': { // tokens of one vendor response (OpenAI delegate, Gemini usageMetadata, xAI response.done)
+        const { output, ...rest } = e.usage ?? {}; // the trace treats a key "output" as a result body (length only): the count goes as outputTokens
+        trace.event('usage', { turn: turnId, ...rest, outputTokens: output ?? null });
         break;
+      }
       case 'go_away': // Gemini ends every connection after about 10 minutes and says so first
         trace.event('provider.go_away', { turn: turnId, timeLeft: e.timeLeft ?? null });
         if (!capDue) { capDue = now(); capReason = 'go-away'; }
