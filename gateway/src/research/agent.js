@@ -14,7 +14,9 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 export const BUDGET = Object.freeze({ rounds: 8, ms: 110_000, usd: 0.25, parallel: 4, subChunks: 12, subParallel: 4 });
 export const WARM_CHARS = 2800;
 // Questions about the internet keep the web tools: no warm start (it reads our own data, which closes the web; taint rule).
-const WEB_QUESTION = /\b(?:web|internet|online|webseite|website|homepage|im netz|googl\w*)\b/i;
+// Broader since the web tools exist (web-tools review): outside facts, prices, versions, news. An own-data question that matches only
+// loses the warm start (one round), never correctness.
+const WEB_QUESTION = /\b(?:web|internet|online|webseite|website|homepage|im netz|googl\w*|recherchier\w*|nachrichten|news|neueste[nrs]? version|release notes|changelog|dokumentation|docs?|github|wikipedia|hersteller|marktpreis\w*|listenpreis\w*|preisliste|was kostet .{0,40} bei)\b/i;
 // Search words of a spoken question: content words only (a whole sentence is no search query, and the bridge refuses long
 // tokens that look like key fragments).
 const STOP = new Set(('mit wie viel viele vielen habe hab hast hat haben hatte hatten ich du er sie es wir ihr man mir mich dir mein meine meinen meinem meiner '
@@ -37,7 +39,7 @@ export const RESEARCH_TOOLS = [
   'knowledge_read', 'read_core_doc', 'decisions_recent', 'read_file', 'list_jobs', 'job_status',
   'board_threads', 'board_read', 'board_entry', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
   'ledger_spend', 'run_readonly', 'desk_status', 'session_trace', 'code_outline', 'artifact_search', 'artifact_resolve',
-  'artifact_ref_read', 'web_read', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
+  'artifact_ref_read', 'web_read', 'web_search', 'http_get', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
 ];
 // discord_read is left out on purpose: reading a channel moves Florian's read marker (tools.js description).
 // search_files and board_search are left out: `search` (full-text index, ~40 ms) covers both; they took 2-8 s each in the eval.
@@ -189,7 +191,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
         if (!WEB_TOOLS.has(call.name)) tainted = true; // set before the call: parallel calls of this round already count
         touched.push({ tool: call.name, args: short(JSON.stringify(args), 160) });
         // research: only the lock is visible inside a run (no start, so no recursion); the web_read lock applies here too (review P1-1)
-        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: { guarded: (s) => Boolean(ctx.research?.guarded?.(s)) }, voiceTurn: undefined });
+        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: { guarded: (s) => Boolean(ctx.research?.guarded?.(s)) }, voiceTurn: undefined, researchRun: true }); // researchRun: web_search / http_get exist only here (tools.js)
         ok = res.ok !== false;
         content = String(res.content ?? '');
         if (store && content.length > STORE_FROM) content = ws.stub(ws.put(content, `${call.name} ${short(JSON.stringify(args), 120)}`));

@@ -761,7 +761,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
     inScreenAgent = msg.client?.app === 'screen-agent';
     // In the app the Desk window is hidden: a handoff button there is out of his sight, and with no page open there is no explainer to look up (trace a#92a698: "Gerade ist keine Erklärseite offen" as the answer to his marking).
-    const sessionTools = inScreenAgent ? toolDefs.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : toolDefs;
+    // researchOnly tools (web_search, http_get) belong to the background research agent: no voice model is offered them (and runTool refuses them outside a research run)
+    const voiceTools = toolDefs.filter(t => !t.researchOnly);
+    const sessionTools = inScreenAgent ? voiceTools.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : voiceTools;
     const vocab = collectVocabulary({ page, dictionary: speechDictionary });
     trace?.event('voice.vocabulary', { provider, terms: vocab.hints.length, wordlist: vocab.wordlist.length });
     const instructions = buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock + (provider === 'openai' ? '' : memoryInstructions(seed));
