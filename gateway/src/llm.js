@@ -121,9 +121,9 @@ export async function completeJSON({ model, messages, maxTokens = 800, timeoutMs
  * One non-streaming chat turn with optional tools (the illustrator's loop). Returns {message, usage, costUsd};
  * `message.tool_calls` is [{id, name, args}] (args = raw JSON string). Cost goes into the daily spend like every other call.
  */
-export async function completeChat({ model, messages, tools, json = false, maxTokens = 4000, signal }) {
+export async function completeChat({ model, messages, tools, json = false, maxTokens = 4000, signal, reasoning = null }) {
   if (!cfg.openrouterKey()) throw new Error(TEXT.textModelMissing);
-  const body = { model, messages, max_tokens: maxTokens, usage: { include: true }, reasoning: { effort: cfg.reasoningEffort() } };
+  const body = { model, messages, max_tokens: maxTokens, usage: { include: true }, reasoning: reasoning ?? { effort: cfg.reasoningEffort() } };
   if (tools?.length) Object.assign(body, { tools: toolSpecs(tools), tool_choice: 'auto' });
   if (json) body.response_format = { type: 'json_object' };
   const response = await postOpenRouter(`${cfg.openrouterBase()}/chat/completions`, HEADERS(), body, signal);
