@@ -538,5 +538,8 @@ export async function describeSession({ which = 'current', service, current, now
   }
   if (!diagnosis) diagnosis = localDiagnosis(events);
   const lines = timelineLines(events, 40);
-  return `Sitzung ${id ?? '(ohne ID)'}${note}\nDiagnose: ${diagnosis}\nVerlauf (letzte ${lines.length} von ${events.length} Ereignissen):\n${lines.join('\n')}`;
+  // a#89f540 (15 Nov): the model gave a session's time in UTC as Berlin time; the times are now stated in Berlin time here
+  const times = events.map((e) => Date.parse(e.ts)).filter(Number.isFinite);
+  const span = times.length ? `\nZeit (Berliner Zeit): ${berlinClock(Math.min(...times))} bis ${berlinClock(Math.max(...times))}` : '';
+  return `Sitzung ${id ?? '(ohne ID)'}${note}${span}\nDiagnose: ${diagnosis}\nVerlauf (letzte ${lines.length} von ${events.length} Ereignissen):\n${lines.join('\n')}`;
 }

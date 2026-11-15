@@ -213,7 +213,7 @@ describe('session_trace tool and describeSession', () => {
     t.event('turn.unanswered', { turn: 50, reason: 'no-answer', question: 'Frage 50' });
     const res = await runTool('session_trace', { which: 'current' }, { traces: s, trace: () => t, audit() {} });
     assert.equal(res.ok, true, res.content);
-    assert.match(res.content, /^Sitzung a#[0-9a-f]{6}\nDiagnose: Eine Frage blieb ohne Antwort/);
+    assert.match(res.content, /^Sitzung a#[0-9a-f]{6}(?:\nZeit \(Berliner Zeit\): [^\n]+)?\nDiagnose: Eine Frage blieb ohne Antwort/);
     const lines = res.content.split('\n').filter((l) => /^\+/.test(l));
     assert.equal(lines.length, 40);
     assert.match(lines.at(-1), /turn\.unanswered no-answer/);
@@ -340,7 +340,7 @@ describe('gateway routes', () => {
     assert.equal((await fetch(url('a b;rm'), { headers: { cookie } })).status, 400);
     assert.equal((await fetch(url('nope'), { headers: { cookie } })).status, 404);
     const full = await (await fetch(url('a#abc001', '&full=1'), { headers: { cookie } })).json();
-    assert.match(full.summary, /^Sitzung a#abc001\nDiagnose: alles gut/);
+    assert.match(full.summary, /^Sitzung a#abc001(?:\nZeit \(Berliner Zeit\): [^\n]+)?\nDiagnose: alles gut/);
   });
 });
 

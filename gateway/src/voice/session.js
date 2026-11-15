@@ -42,7 +42,7 @@ const START_TIMEOUT_MS = 10_000;
 const VOICE_TOOL_CHARS = 2500;
 export const FACTS_WAIT_MS = 2500;
 // Gemini researches in long loops (8 tools on one question, critic r7; 5 sequential calls = 20 s and no answer, critic r9): after 3 it must answer
-export const MAX_RESEARCH_TOOLS = { gemini: 3 };
+export const MAX_RESEARCH_TOOLS = { gemini: 3, openai: 6 }; // a#a54cbb t9 (15 Nov): ten board_search calls in a row, 50 s before an answer
 const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 // Action tools wait for him to finish and are no research: they never count against the research cap
 const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job', 'computer_task']);
