@@ -101,7 +101,7 @@ describe('runResearch', () => {
     assert.equal(r.rounds, 4);
     assert.equal(r.steps, 4);
     assert.deepEqual(r.classes.sort(), ['open', 'personal']);
-    assert.ok(toolCalls.every((t) => t.maxChars > 2500 && t.research === undefined && t.voiceTurn === undefined), 'big caps, no recursion, no voice context');
+    assert.ok(toolCalls.every((t) => t.maxChars > 2500 && t.research?.start === undefined && t.voiceTurn === undefined), 'big caps, no recursion, no voice context');
     const toolMsgs = seen[3].messages.filter((m) => m.role === 'tool');
     assert.ok(seen[3].messages.some((m) => m.role === 'user' && /Runde \d von 8/.test(m.content)), 'round nudge');
     assert.ok(toolMsgs.some((m) => /"workspace":"@w1"/.test(m.content)), 'long result became a handle');

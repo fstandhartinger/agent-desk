@@ -6,7 +6,7 @@
 // below; tool calls are single "[Werkzeug …]" lines and are skipped. Read-only; the bridge redacts the result like every other.
 import fs from 'node:fs';
 import path from 'node:path';
-import { LAPTOP_MIRROR, isDenied } from './paths.js';
+import { LAPTOP_MIRROR, isDenied, resolveAllowed } from './paths.js';
 
 const MAX_TAIL = 256 * 1024; // the newest messages are at the end of a day file (files stay < 1.5 MB)
 const MSG_CHARS = 600;
@@ -51,7 +51,8 @@ export async function recent({ limit = 12 } = {}, { dir = LAPTOP_MIRROR } = {}) 
   const stats = await Promise.all(names.map(async (f) => ({ f, m: DAY_FILE.exec(f), mtime: (await fs.promises.stat(path.join(sessions, f))).mtimeMs })));
   const pool = main ? stats.filter((s) => s.m[2] === main) : [];
   const pick = (pool.length ? pool : stats).sort((a, b) => b.m[3].localeCompare(a.m[3]) || b.mtime - a.mtime)[0];
-  const file = path.join(sessions, pick.f);
+  // the allowlist check with realpath (a symlinked day file must not lead outside the mirror); tests pass their own dir
+  const file = dir === LAPTOP_MIRROR ? resolveAllowed(path.join(sessions, pick.f)) : path.join(sessions, pick.f);
   const fh = await fs.promises.open(file, 'r');
   let text;
   try {

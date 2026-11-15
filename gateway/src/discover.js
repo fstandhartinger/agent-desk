@@ -11,7 +11,7 @@ const int = (description) => ({ type: 'integer', description });
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
 export const VOICE_RESEARCH_WAIT_MS = 2500; // critic B4: GPT-Live already needs up to ~9 s to its first call
-export const TEXT_RESEARCH_WAIT_MS = 115_000;
+export const TEXT_RESEARCH_WAIT_MS = 170_000; // above a worst-case run (110 s budget + final call + a slow tool)
 export const VOICE_LINES = 6; // critic B5: a voice result must stay far below 2,500 characters
 export const PENDING_MARK = '"status":"recherchiere"';
 
@@ -83,7 +83,8 @@ export function formatSearch(r, { voice = false, max = 6000 } = {}) {
 }
 
 const isVoice = (ctx) => Boolean(ctx?.voiceTurn);
-const missingMethod = (err) => /unknown method|no bridge|not connected|method not found|nicht verbunden|keine bridge/i.test(String(err?.message ?? err).slice(0, 400));
+// the map not served (old bridge), not built yet (first run takes minutes), no node:sqlite, or an old schema: fall back (review P2-5)
+const missingMethod = (err) => /unknown method|no bridge|not connected|method not found|nicht verbunden|keine bridge|not built yet|node:sqlite|needs Node|schema/i.test(String(err?.message ?? err).slice(0, 400));
 
 async function discoverTool({ path, query, offset }, ctx, max) {
   const voice = isVoice(ctx);

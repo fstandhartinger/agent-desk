@@ -126,14 +126,16 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
   const classes = new Set();
   const touched = [];
   const timing = { modelMs: [], toolMs: {} }; // where the time goes (eval and trace)
-  let tainted = false; // read our own data: no web tools from now on
+  // read our own data: no web tools from now on. A run started while the post-delivery lock is on starts tainted (review P1-1).
+  let tainted = Boolean(ctx.research?.guarded?.(ctx.sid ?? 'desk'));
   let outsider = false; // read text written by outsiders
   const toolsNow = () => (tainted ? tools.filter((t) => !WEB_TOOLS.has(t.name)) : tools);
   let cost = 0;
   let steps = 0;
   let rounds = 0;
   const left = () => budget.ms - (now() - started);
-  const over = () => left() < FINAL_RESERVE_MS || cost >= budget.usd;
+  const spendOk = () => ctx.limits?.check?.(ctx.sid ?? 'desk', 'spend')?.ok !== false; // the Desk daily cap (review P2-4)
+  const over = () => left() < FINAL_RESERVE_MS || cost >= budget.usd || !spendOk();
   const done = (res, stopped) => ({ ...res, timing, classes: [...classes], outsider, touched: touched.slice(0, 30), rounds, steps, ms: now() - started, costUsd: Math.round(cost * 10000) / 10000, model, stopped });
   const ask = async (msgs, opts = {}) => {
     const timeout = AbortSignal.timeout(Math.max(3000, Math.min(left(), 45_000)));
@@ -186,7 +188,8 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
         if (OUTSIDER_TOOLS.has(call.name)) outsider = true;
         if (!WEB_TOOLS.has(call.name)) tainted = true; // set before the call: parallel calls of this round already count
         touched.push({ tool: call.name, args: short(JSON.stringify(args), 160) });
-        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: undefined, voiceTurn: undefined });
+        // research: only the lock is visible inside a run (no start, so no recursion); the web_read lock applies here too (review P1-1)
+        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: { guarded: (s) => Boolean(ctx.research?.guarded?.(s)) }, voiceTurn: undefined });
         ok = res.ok !== false;
         content = String(res.content ?? '');
         if (store && content.length > STORE_FROM) content = ws.stub(ws.put(content, `${call.name} ${short(JSON.stringify(args), 120)}`));
@@ -203,7 +206,9 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
 
   // Warm start: the desk searches once before the first model call (saves a round). Counts as a step; reads our own data.
   let warm = '';
-  if (warmStart && allowed.has('search') && !WEB_QUESTION.test(question)) {
+  const webQuestion = WEB_QUESTION.test(question);
+  if (webQuestion) context = ''; // a web question keeps the web tools, so no private conversation text before them (review P2-3)
+  if (warmStart && allowed.has('search') && !webQuestion) {
     const q = keywords(question);
     const own = OWN_WORDS.test(String(question));
     const calls = q ? [{ id: 'warm1', name: 'search', args: JSON.stringify({ query: q }) }, ...(own ? [{ id: 'warm2', name: 'search', args: JSON.stringify({ query: q, source: 'chats/laptop' }) }] : [])] : [];

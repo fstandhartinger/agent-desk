@@ -586,7 +586,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       adapter.sendToolResult(id, requestedName, output, { stale: true }); // OpenAI/xAI: keep the call/output pairing, no new response
       return;
     }
-    if (pending.active && output.includes('"status":"recherchiere"')) {
+    if (pending.active && output.trimStart().startsWith('{"status":"recherchiere"')) { // only the research tool / its escalation start with it (review P2-6)
       // the research runs in the background (research/manager.js): its one sentence now, the result later as a desk note; no recovery meanwhile
       pending.active = false; pending.settled = turnId; clearTimeout(pending.timer);
       trace.event('watchdog.settled', { turn: turnId, reason: 'research', name });

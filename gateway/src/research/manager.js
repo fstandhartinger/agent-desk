@@ -36,7 +36,11 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
     for (const [id, r] of runs) if (r.status !== 'running' && now() - r.endedAt > RESULT_TTL_MS) runs.delete(id);
   }
 
+  /** A told run no longer needs the voice session's closures (review P2-7). */
+  function release(run) { run.voiceTurn = null; run.trace = null; }
+
   function attach(sid, hooks) {
+    prune();
     sessions.set(sid, hooks);
     for (const r of runs.values()) if (r.sid === sid && r.async && r.status === 'done' && !r.delivered) void deliver(r); // a result that finished between two voice sessions
     return () => { if (sessions.get(sid) === hooks) sessions.delete(sid); };
@@ -60,12 +64,14 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
       await sleep(POLL_MS);
     }
     if (vt?.turn !== undefined && vt.epoch?.() !== run.epoch) later = true;
+    if (run.delivered) { run.delivering = false; return; } // claimed by a tool result while it waited (review P2-1)
     const hooks = hooksOf(run.sid);
     const said = hooks?.say?.(deliveryNote(run, { later })) ?? false;
     run.delivering = false;
     if (said) {
       run.delivered = true;
       if (run.result?.outsider) guards.set(run.sid, now() + GUARD_MS);
+      release(run);
       traceTo(run, 'research.delivered', { id: run.id, waitedMs: now() - t0, later });
     } else traceTo(run, 'research.undelivered', { id: run.id, reason: hooks ? 'say-refused' : 'no-voice-session' }); // kept for research_result and the next session
   }
@@ -79,6 +85,7 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
     const running = [...runs.values()].filter((r) => r.sid === sid && r.status === 'running');
     const same = running.find((r) => norm(r.question) === norm(question)); // critic B6: the same question again = the same run
     if (same) { same.reused = true; return same; }
+    if (ctx.limits?.check?.(sid, 'spend')?.ok === false) throw new Error('Der Tagesdeckel des Desks ist erreicht; heute keine weitere Recherche.'); // review P2-4
     if (running.length >= MAX_RUNNING_PER_SID) throw new Error(`Es laufen schon ${running.length} Recherchen (${running.map((r) => r.id).join(', ')}); warte auf deren Ergebnis.`);
     const id = `r${++seq}`;
     const run = { id, sid, question: String(question), focus, startedAt: now(), endedAt: 0, status: 'running', result: null, async: false, delivered: false, voiceTurn: ctx.voiceTurn ?? null, epoch: ctx.voiceTurn?.epoch?.(), trace: ctx.trace?.()?.event ? (type, data) => ctx.trace().event(type, data) : null, steps: [] };
@@ -116,13 +123,14 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
     prune();
     const mine = [...runs.values()].filter((r) => r.sid === sid);
     const pick = id ? mine.filter((r) => r.id === id) : mine.slice(-3);
+    for (const r of pick) if (r.status === 'done' && !r.delivered) claimed(r); // read now = told now: lock and no second telling (review P2-2)
     return pick.map((r) => ({ id: r.id, question: short(r.question, 200), status: r.status, ...(r.result ? { result: formatResult(r.result) } : { schritte: r.steps.length, laeuftSeit: Math.round((now() - r.startedAt) / 1000) }) }));
   }
 
   /** True while web_read / the action tools must wait after an outsider-text research was told (tools.js, voiceActions.js). */
   const guarded = (sid) => (guards.get(sid) ?? 0) > now();
   /** A result the tool already returned in the same turn (fast path): its outsider text counts as delivered. */
-  const claimed = (run) => { run.delivered = true; if (run.result?.outsider) guards.set(run.sid, now() + GUARD_MS); };
+  function claimed(run) { run.delivered = true; if (run.result?.outsider) guards.set(run.sid, now() + GUARD_MS); release(run); }
 
   return { attach, start, results, deliver, guarded, claimed, runs };
 }

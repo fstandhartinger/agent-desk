@@ -299,12 +299,16 @@ const PROMPT_FAIL = {
 
 // During a computer run and for 5 minutes after it, these two tools would need the app's confirm (code on the overlay). That confirm exists only for
 // computer actions, so here they stay closed: text the loop could have influenced must not reach a prompt box or start a job unconfirmed.
+// discovery (review P1-2): after a research answer built on mails or web pages was told, the action tools wait 5 minutes too
+const RESEARCH_GUARD = 'Nichts passiert: eine Recherche hat eben Mails oder Webseiten gelesen und ihr Ergebnis wurde gerade gesagt; fünf Minuten lang sind deshalb Prompts an den Main Agent, neue Jobs und die Computer-Steuerung gesperrt (Schutz gegen eingeschleuste Anweisungen). Sag Florian das in EINEM Satz und dass er es danach noch einmal sagen kann.';
+const researchGuardedOut = (g, ctx, name) => { release(g, name); return refuse(ctx, name, 'research-guard', RESEARCH_GUARD); };
 const guardedOut = (g, ctx, name) => { release(g, name); return refuse(ctx, name, 'computer-guard', 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach sind Prompts an den Main Agent und neue Jobs gesperrt. Sag Florian in EINEM Satz, warum (Sicherheitssperre nach der Computer-Steuerung) und dass er es nach den fünf Minuten noch einmal sagen kann.'); };
 
 async function mainPrompt({ text }, ctx, clock) {
   const g = await gate('output_main_agent_prompt', ctx, clock);
   if (g.refused) return g.refused;
   if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'output_main_agent_prompt');
+  if (ctx.research?.guarded?.(ctx.sid ?? 'desk')) return researchGuardedOut(g, ctx, 'output_main_agent_prompt');
   const body = String(text ?? '').trim();
   if (!body || body.length > 8000) return release(g, 'output_main_agent_prompt'), out(false, 'Der Text muss 1 bis 8000 Zeichen lang sein. Nichts passiert.');
   const sid = ctx.sid ?? 'desk', now = clock.now();
@@ -367,6 +371,7 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   const g = await gate('start_agent_job', ctx, clock, null, { unclear: JOB_UNCLEAR, 'not-a-job': JOB_NOT, unchecked: JOB_UNCHECKED });
   if (g.refused) return g.refused;
   if (ctx.computer?.guarded?.(ctx.sid ?? 'desk')) return guardedOut(g, ctx, 'start_agent_job');
+  if (ctx.research?.guarded?.(ctx.sid ?? 'desk')) return researchGuardedOut(g, ctx, 'start_agent_job');
   const t = String(title ?? '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   const p = String(prompt ?? '').trim();
   if (!t || !p) return release(g, 'start_agent_job'), out(false, 'Titel und Auftrag dürfen nicht leer sein. Nichts gestartet; rufe das Werkzeug mit beidem noch einmal auf.');
