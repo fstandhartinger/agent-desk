@@ -60,6 +60,8 @@ export const METHOD_PARAMS = {
   'map.search': { query: 'string', source: 'string', path: 'string', limit: 'integer', since: 'string', offset: 'integer' },
   'map.status': {},
   'laptop.recent': { limit: 'integer' },
+  // read-only shell in bubblewrap over the scrubbed corpus (Sandy bridge only, src/sandbox.js): 1-2,000 characters, no NUL
+  'sandbox.exec': { command: 'string' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
   'audio.append': { aid: 'string', chunks: 'array' },
   'audio.finish': { aid: 'string' },

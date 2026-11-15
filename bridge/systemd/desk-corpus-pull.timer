@@ -1,0 +1,11 @@
+[Unit]
+Description=Agent Desk sandbox corpus pull, hourly
+
+[Timer]
+# one hour after the previous pull FINISHED (the first one moves about 300 MB, later ones only what changed)
+OnBootSec=3min
+OnUnitInactiveSec=1h
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

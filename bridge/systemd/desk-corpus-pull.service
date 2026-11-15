@@ -1,0 +1,12 @@
+[Unit]
+Description=Agent Desk sandbox corpus: pull the scrubbed text copy from LeChonk (read-only data of sandbox.exec)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/apps/agent-desk-bridge-sandy/scripts/sandbox/pull-corpus.sh
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=15min
