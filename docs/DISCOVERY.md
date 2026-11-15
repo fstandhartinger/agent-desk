@@ -175,6 +175,17 @@ Research agent (`gateway/src/research/`):
   no handoff, Claude, canvas, voice action, Discord or screen tool; `search_files`/`board_search` replaced by `search`).
 - Taint rule: web tools exist in a run only until it reads our own data. A run that read outsider text (mail, web)
   closes `web_read` for 5 minutes after its answer is told.
+- Web tools (`researchOnly` in `TOOL_DEFS`: offered to the research agent only, never to the text chat or a voice model, and `runTool` refuses them
+  outside a research run; the taint rule above and the lock after a delivered run cover both):
+  - `web_search(query, count?)` (`gateway/src/webSearch.js`): Brave Search API, key `BRAVE_API_KEY` (shared with other agents; free plan 1 request/s,
+    2,000/month). Calls are spaced 1.1 s (at most 3 waiting, the next is refused), `DESK_WEB_SEARCH_DAY` per UTC day (default 40), 15 per hour, 10 s timeout;
+    the query is 2-200 characters on one line and must not look like a secret. At most 8 hits `{title, url, snippet, age}`, strings redacted.
+  - `http_get(url)` (`gateway/src/httpGet.js`): the raw body of text, JSON (re-indented, numbers untouched), XML or RSS, cut at 200,000 characters. It uses the same
+    pinned-address fetch as `web_read` (`fetchChecked` in `webRead.js`: one fetch path). No cookies, no auth headers, 15 s, `DESK_HTTP_GET_HOUR` per hour (default 60).
+    robots.txt of each host (and each redirect target) is respected: `User-agent: *` or `AgentDesk` groups, Allow/Disallow with `*` and `$`; cached 1 h, a read that
+    failed is retried after 60 s, unreadable = allowed.
+  - Every web tool refuses private and reserved addresses and our own servers' public addresses (65.109.49.103, 37.27.102.32, 65.108.15.165 and the IPv6 /64s
+    2a01:4f9:5a:26c0::, 2a01:4f9:3070:1882::, 2a01:4f9:6a:4b62::), also behind a host name, an IPv4-in-IPv6 form or a redirect.
 - Model calls go through OpenRouter with zero-data-retention routing and no fallback (`completeChat({ zdrOnly: true })`).
   Model: `DESK_RESEARCH_MODEL`, sub-calls `DESK_RESEARCH_SUB_MODEL`; kill switch `DESK_RESEARCH=off`.
 - `manager.js`: runs per Desk session (cookie sid), at most 2 at a time, the same question again = the same run.

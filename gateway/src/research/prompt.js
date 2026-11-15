@@ -12,6 +12,7 @@ export const SOURCE_GUIDE = [
   'Geld: ledger_spend (nie schätzen). Server, Quoten, Termine: run_readonly. Der Desk selbst: desk_status, session_trace.',
   'Artefakte (a#-IDs, Karten): artifact_search, artifact_resolve, artifact_ref_read. Skills: skills_list, skill_read. Code: code_outline, read_file.',
   'Mails (nur lesen, nur wenn die Frage Mails betrifft): mail_search, mail_read. Öffentliche Webseite mit bekannter Adresse: web_read.',
+  'Internet: web_search (Suchmaschine) und http_get (eine Adresse lesen) NUR vor dem ersten Blick in Florians eigene Daten; erst Web, dann eigene Quellen.',
   'Weißt du nicht, wo es steht: discover() zeigt das Inhaltsverzeichnis aller Quellen; discover(pfad) geht eine Ebene tiefer; search(query) sucht überall.',
 ].join('\n');
 
