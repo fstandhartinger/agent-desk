@@ -21,6 +21,7 @@ export const ROUTE = {
   'mail.*': ['sandy'],
   'ops.*': ['sandy'],
   'job.*': ['sandy'],
+  'sandbox.*': ['sandy'], // the research shell (bubblewrap) runs on Sandy only (CoS deputy decision #62544)
   'board.*': ['sandy', 'lechonk'],
   'ctx.*': ['sandy', 'lechonk'],
   'jobs.*': ['sandy', 'lechonk'],

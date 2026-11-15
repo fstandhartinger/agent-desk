@@ -104,3 +104,10 @@ test('web and shell exclude each other in one run; shell is research-only and ne
   assert.equal(r.ok, false, 'outside a research run the shell is refused');
   assert.equal(activityLabel('shell', { command: 'cat /data/secret-looking-thing' }), 'Befehl im Sandkasten');
 });
+
+test('sandbox.exec is routed to the Sandy bridge (the default route is LeChonk, which has no sandbox)', async () => {
+  const { routeOf } = await import('../src/bridgeHub.js');
+  assert.deepEqual(routeOf('sandbox.exec'), ['sandy']);
+  assert.deepEqual(routeOf('map.search'), ['lechonk']);
+  assert.deepEqual(routeOf('laptop.recent'), ['lechonk']);
+});
