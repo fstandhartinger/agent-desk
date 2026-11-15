@@ -1,6 +1,7 @@
 // Browser side of a voice session: protocol with the web client (docs/SPEC.md "Voice"), tool execution, limits,
 // usage/cost ticks and audit. Provider specifics live in the adapters.
 import { cfg } from '../config.js';
+import { resolveVoice } from './voices.js';
 import { activityLabel, pseudoPathRefusal, resolveToolName } from '../tools.js';
 import { short } from '../redact.js';
 import { asksForDrawing, cjkRuns, isGermanText, stripCjk } from '../canvas.js';
@@ -752,7 +753,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (history.length) logPrompt('history', history.map((m) => `${m.role}: ${m.content[0].text}`).join('\n'), { provider, items: history.length });
     logPrompt('vocabulary', [...vocab.wordlist, '--', ...vocab.hints].join('\n'));
     logPrompt('tools', sessionTools.map((t) => t.name).join(', '));
-    adapter = create({ apiKey, instructions, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
+    adapter = create({ apiKey, instructions, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (now() - screenLoggedAt >= 30_000) { screenLoggedAt = now(); logPrompt('screen', maskDigits(text)); } // at most one screen text per 30 s (trace size, critic H3)
@@ -787,7 +788,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     memoryTimer = setInterval(() => { if (conv.live.length - conv.summarizedLive >= 4) void refreshSummary('interval'); }, MEMORY_REFRESH_MS);
     memoryTimer.unref?.();
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
-    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de', conversation: conv.id, delegate: provider === 'openai' ? { model: cfg.openaiDelegateModel(), effort: cfg.openaiDelegateEffort() } : null });
+    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', conversation: conv.id, delegate: provider === 'openai' ? { model: cfg.openaiDelegateModel(), effort: cfg.openaiDelegateEffort() } : null });
     trace.event('memory.seed', { conversation: conv.id, turns: conv.history.length, seeded: seed.turns.length, older: seed.older, tokens: seed.tokens, summary: conv.best?.source ?? 'none', summaryChars: conv.best?.summary?.length ?? 0, ...(conv.best?.summary ? { text: conv.best.summary } : {}) });
     Promise.resolve(trace.ready).then((info) => { if (info?.aid) { sendJson({ type: 'session', aid: info.aid }); void deskStamp(makeCtx(page)).catch(() => /* lookup failed: the first prompt looks it up */ null); } }).catch(() => {}); // ready never rejects; the id is a courtesy
   }

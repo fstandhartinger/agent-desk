@@ -6,6 +6,7 @@ import { IDLE_ALL_MS, LOOKAHEAD_CHARS, UNCUED_GAP_CHARS, normalize, normalizeWit
 import { PUBLISH_MS, SpeechTracker, noteSpecTurn, specTurnOf, speechCursor, type SpeechCursor, type SpeechCursorState } from '../src/lib/speechCursor.ts';
 import { createStore } from '../src/lib/store.ts';
 import { VoiceSession, VOICE_OPTIONS } from '../src/lib/voice.ts';
+import { voiceStartMessage } from '../src/lib/voiceStart.ts';
 import { canvasBus } from '../src/canvas/bus.ts';
 import type { CanvasSpec } from '../src/canvas/types.ts';
 import pointsFx from '../src/canvas/fixtures/points-three-reasons.json' with { type: 'json' };
@@ -224,12 +225,13 @@ test('VoiceSession: audio chunks, assistant transcripts and player reports feed 
   Object.assign(globalThis, { WebSocket: FakeWs, location: { protocol: 'http:', host: 'desk.test' } });
   const handlers = { onTranscript() {}, onTool() {}, onViz() {}, onHandoff() {}, onClaudeProposal() {}, onFallback() {}, onError() {}, onUsage() {} };
   const s = new VoiceSession(VOICE_OPTIONS[0], undefined, handlers) as unknown as {
-    connect(): void; ws: FakeWs; handle(m: unknown): void; cursor: SpeechTracker; player: { port: { postMessage(m: unknown): void; onmessage: ((e: { data: unknown }) => void) | null; close(): void } } | null; stop(n?: boolean): void;
+    connect(): void; startMessage(): unknown; ws: FakeWs; handle(m: unknown): void; cursor: SpeechTracker; player: { port: { postMessage(m: unknown): void; onmessage: ((e: { data: unknown }) => void) | null; close(): void } } | null; stop(n?: boolean): void;
     gate: { allowBargeIn(): boolean };
   };
   const posted: unknown[] = [];
   s.player = { port: { postMessage: (m) => posted.push(m), onmessage: null, close() {} } };
   s.gate.allowBargeIn = () => true;
+  s.startMessage = () => voiceStartMessage(VOICE_OPTIONS[0], undefined);
   s.connect();
   await new Promise((r) => queueMicrotask(() => r(null)));
   const turn0 = speechCursor.get().turn;

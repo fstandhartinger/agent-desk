@@ -12,7 +12,7 @@ const ROOT = [process.env.DESK_PUBLIC_DIR, path.resolve(here, '../public'), path
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.map': 'application/json',
+  '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.map': 'application/json', '.mp3': 'audio/mpeg',
 };
 const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.webmanifest', '.txt', '.map']);
 const brotli = promisify(zlib.brotliCompress);
@@ -59,7 +59,7 @@ export async function serveStatic(req, res, pathname) {
   res.writeHead(200, {
     'content-type': entry.type,
     'content-length': body.length,
-    'cache-control': isHtml || !file.includes(`${path.sep}assets${path.sep}`) ? 'no-cache' : 'public, max-age=31536000, immutable',
+    'cache-control': file.includes(`${path.sep}voice-samples${path.sep}`) ? 'public, max-age=86400' : isHtml || !file.includes(`${path.sep}assets${path.sep}`) ? 'no-cache' : 'public, max-age=31536000, immutable',
     vary: 'Accept-Encoding',
     ...(encoding && { 'content-encoding': encoding === 'br' ? 'br' : 'gzip' }),
   });

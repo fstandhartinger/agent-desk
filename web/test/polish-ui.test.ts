@@ -11,7 +11,8 @@ test('voice controls show the effective provider, typed badge, phone state and u
   try {
     const { voiceStore } = await vite.ssrLoadModule('/src/lib/voice.ts');
     const { statusStore } = await vite.ssrLoadModule('/src/lib/status.ts');
-    const { default: Composer, ProviderMenu } = await vite.ssrLoadModule('/src/components/chat/Composer.tsx');
+    const { default: Composer } = await vite.ssrLoadModule('/src/components/chat/Composer.tsx');
+    const { default: ProviderMenu } = await vite.ssrLoadModule('/src/components/voice/ProviderMenu.tsx');
     statusStore.set({ ...statusStore.get(), providers: { xai: { state: 'failed' }, gemini: { state: 'ok' } } });
     voiceStore.set({ ...voiceStore.get(), state: 'idle', option: 'xai' });
     const composer = renderToStaticMarkup(createElement(Composer));
