@@ -24,6 +24,17 @@ export function belongsToOldQuestion(args, previous, current) {
 export const fitsQuestion = (text, question) => overlaps(words(text), words(question));
 
 const CLOSING = /^(?:ja|nein|ok|okay|gut|danke|genau|hm+|mhm|ah|aha|ach so|alles klar|passt|super|tschüss|ciao|bye|hallo|hi)(?:\s+(?:danke|schön|gut|klar|genau))?[.!?]*$/i;
+// a#a54cbb 19:05 (15 Nov): "Soll ich das im Hintergrund einarbeiten lassen?" - "Ja" - nothing for 68 s, the job started only when he asked again.
+const OFFER = /(?:^|[.!?…]\s+)((?:soll|darf|kann)\s+ich\b[^?]{3,240}\?|(?:willst|möchtest|magst)\s+du\b[^?]{3,240}\?|(?:sollen|wollen)\s+wir\b[^?]{3,240}\?)\s*$/i;
+const YES = /^(?:ja|jawohl|jo|jep|gerne|gern|bitte|ja,?\s*bitte|ja,?\s*gerne|ja,?\s*genau|genau|mach(?:\s+(?:das|mal|es))?|leg los|klar|okay|ok|einverstanden|passt|yes)\b[\s\p{L},.!]{0,40}$/iu;
+/** The Desk's own closing offer ("Soll ich …?") in its last answer, or null. */
+export function offerOf(text) {
+  const m = OFFER.exec(String(text ?? '').trim().slice(-400));
+  return m ? m[1].trim() : null;
+}
+/** A short yes ("Ja", "Ja bitte, mach das"): at most six words that start with an agreement. */
+export const isYes = (text) => { const t = String(text ?? '').trim(); return t.split(/\s+/).length <= 6 && YES.test(t); };
+
 /** Short acknowledgements and noise need no answer; everything else with at least two words, or a question mark, does. */
 export function needsAnswer(text) {
   const t = String(text ?? '').trim();

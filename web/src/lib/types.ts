@@ -44,7 +44,7 @@ export interface ActivityEvent { type: 'activity'; id: string; phase: 'thinking'
 
 export type VoiceServerMsg =
   | { type: 'ready'; provider: string; model: string }
-  | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean }
+  | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean; quiet?: boolean; context?: boolean }
   | { type: 'speech_started' }
   | ToolEvent
   | HandoffEvent

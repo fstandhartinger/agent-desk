@@ -1,6 +1,6 @@
 import { setClientErrorSink } from './clientError';
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, convStore, finish, removeMessage, setConversationMemory, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool, voiceConversation } from './conversation';
+import { addMessage, appendText, convStore, finish, markMemory, removeMessage, setConversationMemory, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool, voiceConversation } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -98,7 +98,7 @@ function closeTurn(role: 'user' | 'assistant') {
   open[role] = null;
 }
 
-export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed = false, replace = false) {
+export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed = false, replace = false, flags: { quiet?: boolean; context?: boolean } = {}) {
   if (typed || (replace && role === 'user' && final)) dropPlaceholder(); // typed text is not his speech; a grown fragment belongs to the earlier bubble
   if (replace && role === 'user' && final && lastUser && convStore.get().messages.some((m) => m.id === lastUser)) {
     // the gateway merged a growing fragment into the previous turn: same message, whole sentence
@@ -125,6 +125,7 @@ export function receiveVoiceTranscript(role: 'user' | 'assistant', text: string,
   }
   if (final) {
     if (role === 'user') lastUser = id;
+    if (flags.quiet || flags.context) markMemory(id, flags); // computer-run words stay out of the next session's memory; context turns are labelled
     closeTurn(role);
     if (role === 'user') logActivity('voice', typed ? 'Getippt' : 'Gesprochen', text.slice(0, 120), 'violet');
   }

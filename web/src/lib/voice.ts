@@ -23,7 +23,7 @@ export const VOICE_OPTIONS: VoiceOption[] = [
 export const optionByKey = (k: string) => VOICE_OPTIONS.find((o) => o.key === k) ?? VOICE_OPTIONS[0];
 
 export interface VoiceHandlers {
-  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean, replace?: boolean): void;
+  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean, replace?: boolean, flags?: { quiet?: boolean; context?: boolean }): void;
   onTool(t: ToolEvent): void;
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
@@ -211,7 +211,7 @@ export class VoiceSession {
         break;
       case 'transcript': {
         const text = m.delta ?? m.text ?? '';
-        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace);
+        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace, { quiet: m.quiet, context: m.context });
         if (m.role === 'assistant') this.cursor.transcript(text, m.final, m.delta !== undefined);
         if (m.role === 'user' && m.final) { this.cursor.reset(); this.set('thinking'); } // a new user turn: the earlier answer is over
         break;

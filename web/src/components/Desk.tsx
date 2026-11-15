@@ -1,6 +1,6 @@
 import Companion from './Companion';
 import ArtifactContext from './ArtifactContext';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { Clapperboard, MessagesSquare, PanelLeftOpen, PanelRightOpen, PanelLeftClose, PanelRightClose, Radio, X } from 'lucide-react';
 import { useStatusPolling } from '../lib/status';
 import { useStore } from '../lib/store';
@@ -13,7 +13,8 @@ import ExplainerPanel from './explainer/ExplainerPanel';
 import Thread from './chat/Thread';
 import Composer from './chat/Composer';
 import ChatBar from './chat/ChatBar';
-import History from './chat/History';
+// the conversation list opens on demand: its own chunk keeps the initial JS under the 230 KB budget (15 Nov, voice memory)
+const History = lazy(() => import('./chat/History'));
 import VoiceDock from './voice/VoiceDock';
 import VoiceFab from './voice/VoiceFab';
 import LivePanel from './live/LivePanel';
@@ -51,6 +52,8 @@ export default function Desk({ onLoggedOut }: { onLoggedOut: () => void }) {
   explainerOnRef.current = explainerOn;
   const picker = useStore(pickerStore, (s) => s.open);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const historyLoaded = useRef(false); // mounted from the first open on, so its close animation still runs
+  if (historyOpen) historyLoaded.current = true;
   const { kino, chat: kinoChat } = useStore(kinoStore);
   const row = useWidth<HTMLDivElement>();
   // Once an explainer is chosen in the floating picker it moves into its slot; the picker closes.
@@ -124,7 +127,7 @@ export default function Desk({ onLoggedOut }: { onLoggedOut: () => void }) {
       <VoiceDock />
       <Thread />
       <Composer />
-      <History open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      {historyLoaded.current && <Suspense fallback={null}><History open={historyOpen} onClose={() => setHistoryOpen(false)} /></Suspense>}
     </div>
   );
   const live = <LivePanel />;

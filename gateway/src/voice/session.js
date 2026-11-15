@@ -13,7 +13,7 @@ import { markOk } from '../providerHealth.js';
 import { unavailableError } from './adapter.js';
 import { deskStamp, SETTLE_MS } from '../voiceActions.js';
 import { hearingHint } from '../screenText.js';
-import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
+import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, isYes, needsAnswer, offerOf, RECOVERY_LEAD, routingHint } from './noAnswer.js';
 import { bestSummary, cleanHistory, conversationIdOf, memoryCache, memoryInstructions, openaiInput, planSeed, summarize, turnLine, uncoveredTurns } from './memory.js';
 import { completeChat } from '../llm.js';
 import { createHash } from 'node:crypto';
@@ -28,6 +28,14 @@ export const MEMORY_REFRESH_MS = 5 * 60_000; // the running summary while a sess
 const START_SUMMARY_MS = 3500; // a start waits at most this long for a summary of older turns that did not fit verbatim
 const PROMPT_PART = 3800; // trace text per event (the registry keeps `text` up to 4096 characters)
 const OUTPUT_PARTS = 8; // a tool result is logged in full up to 8 x 3800 characters
+// a#13554b (15 Nov): chats_search and read_file never returned and left no trace; the model answered without them. Every call now ends.
+export const TOOL_TIMEOUT_MS = 30_000;
+const LONG_TOOLS = new Set(['computer_task', 'start_agent_job', 'output_main_agent_prompt', 'look_at_screen']); // they report themselves
+const OFFER_ANSWER_MS = 4000; // a "Ja" to the Desk's own offer with nothing following: answered this soon
+const AUDIO_END_MS = 1200;
+export const ROLLOVER_IDLE_MS = 10 * 60_000;
+export const ROLLOVERS_PER_HOUR = 6;
+const rollovers = new Map(); // sid -> times of carried-over sessions (one browser / app) // no audio for this long: the answer's sound is complete (its playback ends audioSeconds after the first chunk)
 export const USAGE_TICK_MS = 10_000;
 const START_TIMEOUT_MS = 10_000;
 const VOICE_TOOL_CHARS = 2500;
@@ -59,7 +67,7 @@ const RECOVERY_FACT_CHARS = 1500;
 const HALF_SENTENCE_MS = 1500; // a mute this soon after the last word cut a sentence (GPT-Live transcripts often have no punctuation)
 const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
 
-export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0) }) {
+export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0), toolTimeoutMs = TOOL_TIMEOUT_MS }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   let inScreenAgent = false;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
@@ -171,9 +179,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let memoryTimer = null;
   let warnTimer = null;
   let capDue = 0; // when the time cap was reached (0 = not yet)
+  let capReason = 'hard-cap';
   let rolledOver = false;
+  let lastHisAt = now(); // his last own words (speech or typed): a session nobody talks to is not carried over (critic H1)
+  let screenLoggedAt = 0;
   // per-turn timing (Part 4 of 15 Nov): when his turn was complete, first audio, first useful words, tool time
   let timing = null;
+  const audioRun = { bytes: 0, at: 0, timer: null }; // 24 kHz PCM16 mono = 48,000 bytes a second
   const promptHashes = new Set();
   /** Everything the model is given goes into the trace in full (hash + text in parts); the same text twice in one session only by hash. */
   function logPrompt(kind, text, extra = {}) {
@@ -222,6 +234,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const quietTurn = deps.computer?.quiet?.(sid, role);
     trace.event(`transcript.${role}.final`, quietTurn ? { turn: turnId, chars: text.length, computer: true } : { turn: turnId, text }); // the app's R2 text and his answer to an ask: length only
     if (!quietTurn) noteLive(role, text);
+    if (role === 'user') lastHisAt = now();
     if (role === 'assistant' && timing && timing.turn === turnId && !timing.usefulAt && !isPromiseOnly(text) && !isFiller(text)) { timing.usefulAt = now(); timing.firstWords = text.slice(0, 80); }
     if (role === 'assistant') {
       deps.computer?.assistantFinal(sid, text);
@@ -233,7 +246,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     turn.role = null;
     turn.text = '';
     turn.itemId = null;
-    sendJson({ type: 'transcript', role, text, final: true });
+    sendJson({ type: 'transcript', role, text, final: true, ...(quietTurn ? { quiet: true } : {}) }); // quiet: the browser keeps it out of the next session's memory
     if (role === 'user') {
       activity({ id: `heard-${turnId}`, phase: 'heard', label: short(text, 80) });
       collectUser(text);
@@ -332,8 +345,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   /** The question waits for an answer: `noAnswerMs` of silence with no running tool -> recovery. */
   function armNoAnswer(text) {
     if (pending.settled === turnId) return; // the fragments of this turn were committed after its answer had begun
-    pending.active = needsAnswer(text);
-    pending.text = text;
+    const offer = isYes(text) && now() - heardBack.at < 120_000 ? offerOf(heardBack.text) : null;
+    pending.active = needsAnswer(text) || Boolean(offer);
+    pending.text = offer ? `${text} (Florians Antwort auf dein Angebot: "${offer}". Führe es jetzt aus und sag in einem Satz, dass es läuft.)` : text;
+    pending.offer = Boolean(offer);
     pending.promised = false;
     pending.at = now();
     if (pending.active) restartNoAnswer();
@@ -343,7 +358,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function restartNoAnswer() {
     clearTimeout(pending.timer);
     if (!pending.active || closed) return;
-    pending.timer = setTimeout(fireNoAnswer, noAnswerMs());
+    pending.timer = setTimeout(fireNoAnswer, pending.offer ? Math.min(OFFER_ANSWER_MS, noAnswerMs()) : noAnswerMs());
     pending.timer.unref?.();
   }
 
@@ -510,7 +525,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     let output;
     try {
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
-      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote, conversation: convCtx });
+      const running = runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote, conversation: convCtx });
+      let limitTimer = null;
+      const res = LONG_TOOLS.has(name) || DRAW_TOOLS.has(name) ? await running : await Promise.race([running, new Promise((_, reject) => { limitTimer = setTimeout(() => { trace.event('tool.timeout', { turn: turnId, id, name, ms: toolTimeoutMs }); reject(new Error(`Zeitüberschreitung: ${name} hat nach ${Math.round(toolTimeoutMs / 1000)} s nicht geantwortet. Sag Florian, dass dieses Ergebnis fehlt, statt so zu tun, als hättest du es.`)); }, toolTimeoutMs); })]).finally(() => clearTimeout(limitTimer));
       const full = String(res.content ?? '');
       output = full.slice(0, voiceCap(name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length, fullChars: full.length, cut: full.length > output.length });
@@ -595,6 +612,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
         if (timing && !timing.audioAt && !isSilent(e.pcm)) { timing.audioAt = now(); trace.event('audio.first', { turn: timing.turn, msAfterQuestion: timing.audioAt - timing.at }); }
+        audioRun.bytes += e.pcm.length;
+        if (!audioRun.at) audioRun.at = now();
+        clearTimeout(audioRun.timer);
+        audioRun.timer = setTimeout(() => { trace.event('audio.end', { turn: turnId, audioSeconds: Math.round(audioRun.bytes / 480) / 100, firstChunkAgoMs: now() - audioRun.at }); audioRun.bytes = 0; audioRun.at = 0; }, AUDIO_END_MS);
+        audioRun.timer.unref?.();
         if (!dropAudio && ws.readyState === ws.OPEN) ws.send(e.pcm, { binary: true });
         if (pending.active && !isSilent(e.pcm)) restartNoAnswer(); // still speaking (its transcript may lag): the clock starts when the sound stops
         break;
@@ -631,8 +653,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         break;
       case 'go_away': // Gemini ends every connection after about 10 minutes and says so first
         trace.event('provider.go_away', { turn: turnId, timeLeft: e.timeLeft ?? null });
-        capDue = capDue || now();
-        maybeRollover('go-away');
+        if (!capDue) { capDue = now(); capReason = 'go-away'; }
+        maybeRollover();
         break;
       case 'response_started':
         tracksResponses = true;
@@ -663,13 +685,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('provider.error', { turn: turnId, message: String(e.message ?? '').slice(0, 300), code: e.code, soft: Boolean(e.soft), status: e.status });
         if (e.soft && /cancel|no active response|not active/i.test(`${e.code ?? ''} ${e.message ?? ''}`)) break; // response.cancel with nothing to cancel
         if (e.soft) { sendJson({ type: 'error', message: e.message }); break; }
-        if (capDue && readyAt !== null && !rolledOver && !e.fallback) { rollover('go-away', 'Das Sprachmodell erneuert seine Verbindung: weiter in einer neuen Sitzung im selben Gespräch …'); break; } // the announced end of a connection
+        if (capDue && readyAt !== null && !rolledOver && !e.fallback && mayRollOver()) { rollover('go-away', 'Das Sprachmodell erneuert seine Verbindung: weiter in einer neuen Sitzung im selben Gespräch …'); break; } // the announced end of a connection
         sendJson({ type: 'error', message: e.message, fallback: e.fallback });
         finish(e.fallback ? 'unavailable' : 'vendor-error');
         break;
       case 'closed':
         // a vendor that drops a session that ran a while (connection lifetime, an outage): carry the conversation into a new session
-        if (readyAt !== null && now() - readyAt > 60_000 && !rolledOver) { trace.event('provider.closed', { turn: turnId, afterS: Math.round((now() - readyAt) / 1000), code: e.code ?? null, reason: e.reason ?? null }); rollover('vendor-closed', 'Die Verbindung zum Sprachmodell wurde beendet: neue Sitzung im selben Gespräch …'); }
+        if (readyAt !== null && now() - readyAt > 5 * 60_000 && !rolledOver && mayRollOver()) { trace.event('provider.closed', { turn: turnId, afterS: Math.round((now() - readyAt) / 1000), code: e.code ?? null, reason: e.reason ?? null }); rollover('vendor-closed', 'Die Verbindung zum Sprachmodell wurde beendet: neue Sitzung im selben Gespräch …'); }
         else finish('vendor-closed');
         break;
     }
@@ -714,7 +736,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       else audit({ action: 'voice.page.fallback', detail: `${provider} slug=${page.slug}` });
     }
     artifactBlock = deps.artifactInstructions?.() ?? '';
-    const seed = await memoryReady;
+    const seed = typeof memoryReady?.then === 'function' ? await memoryReady : memoryReady; // synchronous unless a summary is awaited (bounded)
     if (closed) return;
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
@@ -733,7 +755,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     adapter = create({ apiKey, instructions, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
-      logPrompt('screen', maskDigits(text));
+      if (now() - screenLoggedAt >= 30_000) { screenLoggedAt = now(); logPrompt('screen', maskDigits(text)); } // at most one screen text per 30 s (trace size, critic H3)
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
       return adapter?.setScreenContext?.(text) ?? 'unsupported';
     } });
@@ -795,20 +817,24 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (t) conv.live.push({ role, text: t, at: now() });
   }
 
-  /** The start's memory: the browser's turns + the best summary; a fresh summary when older turns would otherwise be missing (bounded wait). */
-  async function prepareMemory(msg) {
+  /**
+   * The start's memory: the browser's turns + the best summary. Returns the seed at once, or a promise when older turns that do not fit
+   * verbatim have no summary yet (then a fresh one is awaited at most START_SUMMARY_MS).
+   */
+  function prepareMemory(msg) {
     conv.id = conversationIdOf(msg.conversation?.id);
-    conv.history = cleanHistory(msg.conversation?.turns);
+    const skew = Number.isFinite(msg.conversation?.now) && Math.abs(msg.conversation.now - now()) < 86_400_000 ? msg.conversation.now - now() : 0;
+    conv.history = cleanHistory(msg.conversation?.turns, skew);
     conv.best = bestSummary(msg.conversation?.memory, (deps.memoryCache ?? memoryCache).get(conv.id));
     let seed = planSeed(provider, { summary: conv.best?.summary, history: conv.history });
     const older = conv.history.slice(0, seed.older);
-    if (older.length && uncoveredTurns(older, conv.best).length) {
-      const fresh = refreshSummary('start', conv.history);
-      const done = await Promise.race([fresh, new Promise((resolve) => { const t = setTimeout(resolve, START_SUMMARY_MS, null); t.unref?.(); })]);
-      if (done) seed = planSeed(provider, { summary: conv.best?.summary, history: conv.history });
-      else trace.event('memory.summary_late', { waitedMs: START_SUMMARY_MS, older: older.length });
-    }
-    return seed;
+    if (!older.length || !uncoveredTurns(older, conv.best).length) return seed;
+    const fresh = refreshSummary('start', conv.history);
+    return Promise.race([fresh, new Promise((resolve) => { const t = setTimeout(resolve, START_SUMMARY_MS, null); t.unref?.(); })]).then((done) => {
+      if (done) return planSeed(provider, { summary: conv.best?.summary, history: conv.history });
+      trace.event('memory.summary_late', { waitedMs: START_SUMMARY_MS, older: older.length });
+      return seed;
+    });
   }
 
   const memoryPost = deps.memoryPost ?? ((messages, signal) => completeChat({ model: cfg.memoryModel(), messages, maxTokens: 1500, signal }).then((r) => ({ text: r.message.content, costUsd: r.costUsd })));
@@ -854,17 +880,34 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     for (let i = 0; i < parts; i += 1) trace.event('tool.output', { id, name, part: i + 1, of: parts, chars: output.length, fullChars, text: body.slice(i * PROMPT_PART, (i + 1) * PROMPT_PART) });
   }
 
-  /** At the cap (or a vendor's go-away): hand over once nothing is running, at the latest after CAP_GRACE_MS. */
-  function maybeRollover(reason = 'hard-cap') {
+  /** Carry over only a conversation that is alive (his own words in the last 10 minutes) and at most 6 times an hour per device (critic H1). */
+  function mayRollOver() {
+    if (now() - lastHisAt > ROLLOVER_IDLE_MS) return false;
+    const key = sid ?? 'desk', list = (rollovers.get(key) ?? []).filter((t) => now() - t < 3_600_000);
+    rollovers.set(key, list);
+    return list.length < ROLLOVERS_PER_HOUR;
+  }
+
+  /** At the cap (or a vendor's go-away): hand over once nothing is running, at the latest after CAP_GRACE_MS; a silent session just ends. */
+  function maybeRollover() {
+    const reason = capReason;
     if (closed || rolledOver || !capDue) return;
     const busy = responding || responseOpen || runningTools > 0 || (turn.role === 'assistant' && turn.text.trim());
-    if (busy && now() - capDue < CAP_GRACE_MS) { setTimeout(() => maybeRollover(reason), 1000).unref?.(); return; }
+    if (busy && now() - capDue < CAP_GRACE_MS) { setTimeout(() => maybeRollover(), 1000).unref?.(); return; }
+    if (!mayRollOver()) {
+      trace.event('session.rollover_skipped', { reason, idleS: Math.round((now() - lastHisAt) / 1000) });
+      sendJson({ type: 'notice', code: 'cap-end', message: reason === 'go-away' ? 'Die Sprachsitzung ist beendet (das Sprachmodell hat die Verbindung erneuert, und es wurde länger nichts gesagt).' : 'Die Sprachsitzung ist nach 30 Minuten beendet (in den letzten 10 Minuten wurde nichts gesagt).' });
+      finish(reason);
+      return;
+    }
     rollover(reason, reason === 'go-away' ? 'Das Sprachmodell erneuert seine Verbindung: weiter in einer neuen Sitzung im selben Gespräch …' : '30 Minuten erreicht: weiter in einer neuen Sitzung im selben Gespräch …');
   }
 
   function rollover(reason, message) {
     if (closed || rolledOver) return;
     rolledOver = true;
+    const key = sid ?? 'desk';
+    rollovers.set(key, [...(rollovers.get(key) ?? []), now()]);
     trace.event('session.rollover', { reason, turn: turnId });
     sendJson({ type: 'rollover', reason, message });
     finish(reason);
@@ -880,6 +923,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(capTimer);
     clearTimeout(warnTimer);
     clearInterval(memoryTimer);
+    clearTimeout(audioRun.timer);
+    if (runningTools > 0) trace.event('tool.abandoned', { count: runningTools, reason });
     flushTiming();
     if (conv.live.length > conv.summarizedLive) void refreshSummary('end'); // the next session of this conversation finds it in the cache
     clearTimeout(pending.timer);
@@ -929,12 +974,13 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     viz?.noteTurn({ role: 'user', text });
     canvas?.noteTurn({ role: 'user', text });
     expectFacts(canvas?.userTurn(text));
-    sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true });
+    sendJson({ type: 'transcript', role: 'user', text, final: true, typed: true, ...(typedByHim ? {} : { context: true }) });
     lastUserText = text;
     if (typedByHim) { speechAt = now(); noteSpoken(text, now(), turnId, { typed: true }); } // typed in the Desk composer: his words; a context turn is not
     armNoAnswer(text);
     trace.event('transcript.user.final', { turn: turnId, text, typed: true });
-    noteLive('user', text);
+    noteLive('user', typedByHim ? text : `[Kontext, nicht von Florian selbst] ${text}`); // a context turn or a suggested question is not his word (critic M1)
+    if (typedByHim) lastHisAt = now();
     startTiming('typed');
     adapter.sendText(text);
     return true;
@@ -947,6 +993,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function deliverMarker(raw, quiet = false) {
     const text = String(raw ?? '').slice(0, 12000).trim();
     if (!text || !adapter || closed) return false;
+    // a#89f540 (15 Nov): his speech pre-empted the answer to the run's end, and the model then spoke of "den laufenden Lauf"
+    if (quiet && /Der Computer-Lauf ist beendet/.test(text)) contextNote('Der letzte Computer-Lauf ist beendet; gerade läuft keiner. Sprich nicht von einem laufenden Lauf.');
     flushTranscript();
     commitUser();
     const spoken = lastFinal;

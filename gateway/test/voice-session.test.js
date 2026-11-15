@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { runVoiceSession, HARD_CAP_MS, USAGE_TICK_MS } from '../src/voice/session.js';
+import { runVoiceSession, HARD_CAP_MS, CAP_WARN_MS, USAGE_TICK_MS } from '../src/voice/session.js';
 
 function harness(t, { limit = { ok: true }, runTool, costToday } = {}) {
   const ws = new EventEmitter();
@@ -90,7 +90,7 @@ test('fallback error from the adapter is forwarded and ends the session', (t) =>
   assert.ok(h.audits.some((a) => a.action === 'voice.stop'));
 });
 
-test('usage ticks every 10 s add cost; 30 min hard cap closes the session', (t) => {
+test('usage ticks every 10 s add cost; 30 min hard cap warns 2 min before and hands over to a new session', (t) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
   const h = harness(t);
   h.msg({ type: 'start' });
@@ -98,8 +98,11 @@ test('usage ticks every 10 s add cost; 30 min hard cap closes the session', (t) 
   t.mock.timers.tick(USAGE_TICK_MS);
   assert.equal(h.ws.sent.filter((m) => m.type === 'usage').length, 1);
   assert.ok(h.costs[0] > 0);
-  t.mock.timers.tick(HARD_CAP_MS);
-  assert.ok(h.ws.sent.some((m) => m.type === 'error' && /30 Minuten/.test(m.message)));
+  t.mock.timers.tick(HARD_CAP_MS - CAP_WARN_MS - USAGE_TICK_MS);
+  assert.ok(h.ws.sent.some((m) => m.type === 'notice' && m.code === 'cap-soon' && /2 Minuten/.test(m.message))); // 15 Nov: warned before the cap
+  t.mock.timers.tick(CAP_WARN_MS);
+  assert.ok(h.ws.sent.some((m) => m.type === 'rollover' && m.reason === 'hard-cap' && /30 Minuten/.test(m.message))); // and carried over, no error
+  assert.ok(!h.ws.sent.some((m) => m.type === 'error'));
   assert.equal(types(h).at(-1), 'closed');
 });
 

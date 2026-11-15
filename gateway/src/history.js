@@ -10,7 +10,7 @@ import { berlinClock, parseWhich } from './trace.js';
 export const PAGE_CHARS = 5500;
 const TZ = 'Europe/Berlin';
 const DAY_MS = 86_400_000;
-const MAX_DAY_SESSIONS = 15;
+const MAX_DAY_SESSIONS = 25;
 const CACHE_MAX = 40;
 const traceCache = new Map(); // a#id -> {at, events} (ended sessions only; the running one is always read fresh)
 
@@ -189,7 +189,7 @@ async function turnsFor(session, ctx) {
     for (const f of list) {
       try { for (const t of transcriptOf(await eventsOf(ctx.traces, f.id, { fresh: f.running }))) all.push({ ...t, session: f.id }); } catch { /* one unreadable session does not hide the others */ }
     }
-    return { turns: all, label: `alle ${list.length} Sitzungen ${s}` };
+    return { turns: all, label: `${list.length >= MAX_DAY_SESSIONS ? `die ersten ${list.length}` : `alle ${list.length}`} Sitzungen ${s}` };
   }
   let id = null;
   if (/^(?:a\s?#\s?)?[0-9a-f]{6}$/i.test(s)) id = `a#${s.replace(/^a\s?#\s?/i, '').toLowerCase()}`;
