@@ -11,6 +11,7 @@ A voice or text assistant has to find anything quickly and walk from a table of 
 Design: `/home/flori/jobs/agent-desk-context-discovery-20261115/DESIGN.md` §1. Code: `bridge/src/map.js` (read side),
 `bridge/scripts/map/build.mjs` (builder), `bridge/src/mapIndex.js` (schema, chunker, classes, shared helpers).
 The map methods exist on the **LeChonk bridge only** (`buildMethods(…, 'lechonk')`); the Sandy bridge runs Node 20 and has no `node:sqlite`.
+The shell sandbox over a scrubbed text copy of the index runs on the Sandy bridge: see "Shell sandbox" below.
 
 ## Where it lives
 
@@ -148,6 +149,51 @@ line offset. Below a DECISIONS month/entry or an AGENTS.md section the scope is 
 41 mixed German/English queries (incl. 1-word, injection and common-word ones; one cold run plus three warm runs each, 123 warm runs) against the full 90,851-doc index on LeChonk:
 **p50 39 ms, p95 207 ms, max 273 ms** (the slowest are single very common words such as `review`: one group, 80,000 matching chunks; typical 3-term
 questions take 10–100 ms). The first call after a (re)open adds the document-frequency counts (cached afterwards).
+
+## Shell sandbox: the scrubbed corpus (job agent-desk-context-discovery-20261115, slice shell-sandbox)
+
+The research agent's `shell(cmd)` runs on the **Sandy bridge** (`sandbox.exec`, `bridge/src/sandbox.js`): bubblewrap with user namespaces works
+there and is blocked on LeChonk (CoS deputy, board #62544). The program list is not the boundary (`python3`, `awk`, `find -exec`,
+`sqlite3 .shell` run other programs); the sandbox is, and what it can read is **only the index's scrubbed text**:
+
+```
+LeChonk  desk-map.timer (15 min) -> build.mjs -> index.sqlite -> export-corpus.mjs -> ~/desk-knowledge/corpus/<source>/<path>.txt   (0700/0600)
+   |  rsync over ssh, hourly (Sandy: desk-corpus-pull.timer, pull-corpus.sh)
+Sandy    ~/.local/share/desk-corpus.gen/gen-<ts>/  <- symlink ~/.local/share/desk-corpus  == /data in the sandbox (read-only)
+```
+
+- **File names:** `<source>/<canonical path without the leading slash>.txt` (`jobs/home/flori/jobs/<job>/RESULT.md.txt`, `chats/laptop/...`,
+  `entscheidungen/home/flori/DECISIONS.md.txt`); board entries `board/<thread>/<id>.txt`. First line `# <canonical path> | updated <ISO>`,
+  then the document's chunks in line order, separated by a blank line (the pieces of one very long line are re-joined with a space).
+  The file's mtime is the document's mtime. Line numbers in the file are not the original line numbers; the header gives the path to open.
+- **Scrubbing:** every chunk was redacted before it entered the index and passes `redact()` once more at export (secrets that became known
+  after indexing), and the sandbox output passes the Sandy bridge's `redact` again. A doc with a denied path (`isDenied`), without text or
+  with a path that cannot be mapped to a safe file name (`..`, odd source names) gets no file.
+- **Export** (`scripts/map/export-corpus.mjs [--db] [--out] [--full] [--no-redact] [--force]`, Node >= 22.5, called by `refresh.sh` after a
+  successful build, a failure never fails the refresh): builds `corpus.new/`, swaps it in (old tree renamed away, new one renamed in, old
+  one deleted). Unchanged documents (same mtime) are hard links of the old files, so an export with little change takes seconds; everything
+  is re-read and re-scrubbed with `--full`, when the number of known secret values changed, and at least daily. Chunks are read from FTS5's
+  own content table `chunks_content` (a rowid range on the virtual table scans all 268,000 chunks: 267 ms per document, about 7 hours in all).
+  A new tree with less than half of the old files is not swapped in without `--force`.
+- **Pull** (`scripts/sandbox/pull-corpus.sh`): rsync into `gen-*.partial` with `--link-dest` of the current generation, checks (meta file,
+  file count, not less than half), renames, moves the symlink atomically, keeps the newest 3 generations and anything younger than
+  10 minutes. A failed pull leaves everything as it was; `sandbox.exec` binds the symlink's target when a command starts, so a command
+  never sees a half copy or a swap.
+- **Secret scan:** `desk-knowledge/corpus` and `.local/share/desk-corpus[.gen]` are pruned from the bridge's secret-store discovery (a note
+  called `token-notes.md.txt` is text, not a store; the walk would otherwise visit 99,000 files).
+
+### Measured (15 Nov 2026, the real index: 99,213 docs)
+
+| | |
+|---|---|
+| corpus | 98,991 files (222 documents are empty), 311 MiB of text (628 MiB on disk with 4 KiB blocks), sources: board 62,456, jobs 36,132, chats/laptop 224, skills 150, wissen 15, code 6, regeln 4, daten 3, entscheidungen 1 |
+| full export on LeChonk (`--full`) | **114 s**, 103 s CPU, 330 MB RSS; **11 s** with `--no-redact`: the second scrub costs 100 s |
+| incremental export, nothing changed | **6.4 s** (98,991 hard links) |
+| pull to Sandy, first / nothing changed | 9 s (345 MB over the wire) / 5 s (new generation of hard links, 34 MB of directory entries) |
+| `sandbox.exec` per command | 25-40 ms for `cat`/`jq`/`awk`/`python3 -I -c`, 0.3-0.9 s for `rg`/`find` over all 99,000 files, 1.6 s for a case-insensitive `rg` over the board (62,000 files) |
+
+Limits and the exact bubblewrap line are in `bridge/README.md` ("`sandbox.exec`"). Not covered: nested user namespaces inside the sandbox are
+possible (`unshare -U` works; bubblewrap 0.6.1 has no `--disable-userns`); a seccomp filter would close that and is the next hardening step.
 
 ## Known limits
 

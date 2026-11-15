@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Map refresh (run by desk-map.timer every 15 minutes, LeChonk). Writes only ~/desk-knowledge/map.
+# Map refresh (run by desk-map.timer every 15 minutes, LeChonk). Writes only ~/desk-knowledge/map and ~/desk-knowledge/corpus.
 # Runs build.mjs from the deployed bridge checkout (~/apps/agent-desk-bridge/scripts/map/), so a bridge deploy updates the builder.
 set -uo pipefail
 DIR="${DESK_MAP_DIR:-$HOME/desk-knowledge/map}"
@@ -16,5 +16,14 @@ status=0
   printf '%s ' "$(date -u +%FT%TZ)"
   "$NODE" "$HERE/build.mjs" --dir "$DIR" --quiet
 } >> "$DIR/.refresh.log" 2>&1 || status=$?
+# The scrubbed text copy of the index for the research agent's sandbox (Sandy pulls it hourly). It reads the index we just built and
+# writes only ~/desk-knowledge/corpus (hard links for unchanged documents: seconds when little changed). A failing export is logged and
+# never fails the map refresh.
+if [ "$status" -eq 0 ]; then
+  {
+    printf '%s ' "$(date -u +%FT%TZ)"
+    "$NODE" "$HERE/export-corpus.mjs" --db "$DIR/index.sqlite" ${DESK_CORPUS_OUT:+--out "$DESK_CORPUS_OUT"}
+  } >> "$DIR/.refresh.log" 2>&1 || printf '%s export-corpus exited with %s (the map refresh itself is fine)\n' "$(date -u +%FT%TZ)" "$?" >> "$DIR/.refresh.log"
+fi
 tail -n 200 "$DIR/.refresh.log" > "$DIR/.refresh.log.tmp" && mv "$DIR/.refresh.log.tmp" "$DIR/.refresh.log"
 exit "$status"

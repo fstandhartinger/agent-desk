@@ -13,6 +13,7 @@ It holds no vendor keys; the only secret is `BRIDGE_TOKEN`, and the `claude` chi
 | `src/jobs.js`, `src/board.js`, `src/chats.js` | `jobs.*`, `board.*` (read-only `agent-board` relay), `chats.*` |
 | `src/claude.js`, `src/events.js`, `src/prompt.js` | Claude Code sessions, stream-json normalisation, PROMPT.md |
 | `src/map.js`, `src/mapIndex.js`, `scripts/map/build.mjs` | the map (`map.discover/search/status`, LeChonk only, Node >= 22.5): a walkable table of contents plus an FTS5 index over notes, decisions, chats and the board; a timer builds `~/desk-knowledge/map/` every 15 min. See `docs/DISCOVERY.md` |
+| `src/sandbox.js`, `scripts/sandbox/pull-corpus.sh`, `scripts/map/export-corpus.mjs` | `sandbox.exec` (Sandy only): a read-only shell in bubblewrap over the scrubbed corpus of the map, see below and `docs/DISCOVERY.md` |
 | `src/audit.js` | `~/desk-audit/YYYY-MM-DD.jsonl` (0600) |
 
 Claude turns write stream-json to `~/desk-sessions/<sid>/turn-N.out` and the bridge tails the file, so a running turn
@@ -78,6 +79,36 @@ Deploy to Sandy (not done by the feature branch): merge, copy `bridge/` to `~/ap
 `systemctl --user restart agent-desk-bridge`; the hello `caps` then lists `job.start`. The gateway must be deployed first or
 together (it waits 70 s for the method, `METHOD_TIMEOUT_MS`). The Sandy bridge needs `~/bin/job-start`, `~/bin/quota-pace` and
 `~/bin/notify` on its PATH-independent home paths and `XDG_RUNTIME_DIR` for `systemd --user`.
+
+### `sandbox.exec` (Sandy only, 15 Nov 2026)
+
+`sandbox.exec({command})` (`src/sandbox.js`) runs `bash -c <command>` (1-2,000 characters, no NUL) in bubblewrap and returns
+`{exitCode, timedOut, truncated, ms, output}` (stdout and stderr merged, in arrival order). The command sees only `/usr` (read-only,
+`/usr/local` hidden), `/etc/alternatives` (symlinks, for `awk`) and the scrubbed corpus of the map at `/data` (read-only, the working
+directory); own `/proc`, `/dev`, `/tmp` and `/run` (tmpfs), an empty environment, no network, no host processes, no sockets, no `$HOME`.
+bubblewrap with user namespaces works on Sandy (Ubuntu 22.04) and is blocked on LeChonk (24.04): the method is registered on the Sandy
+bridge only and the LeChonk-side research agent reaches it through the gateway like every other Sandy method.
+
+- **Limits:** a systemd scope (`MemoryMax=1G`, `MemorySwapMax=0`, `TasksMax=64`, `CPUQuota=100%`; the bridge unit needs `XDG_RUNTIME_DIR`,
+  and the scope is only used after a probe has read the limits back from the cgroup, otherwise `prlimit --as=1G --cpu=20` outside and
+  `--nproc=64` inside the namespace), a 20 s wall clock that kills the whole process group (exit code 124, `timedOut`), 50,000 bytes of
+  output (the command is stopped, `truncated`, a cut marker), one run at a time (two more wait up to 8 s, everything else is refused as busy),
+  120 runs per hour. Input errors, "busy", the rate limit and a missing `bwrap` or corpus are errors, not results.
+- **Budget:** `METHOD_TIMEOUT_MS['sandbox.exec']` is 35 s (queue wait 8 s + probe 3 s + wall clock 20 s + kill grace); the gateway's
+  `methodTimeout` must wait at least 40 s.
+- **Redaction:** the result passes `redactDeepAsync` like every other result (Sandy's known secret values); the corpus itself was
+  scrubbed on LeChonk. Every run is logged to the journal (exit, time, the first 160 characters of the command, redacted).
+- **Corpus:** `scripts/map/export-corpus.mjs` (LeChonk, after each map refresh, `refresh.sh`) writes `~/desk-knowledge/corpus/`; the
+  Sandy timer `desk-corpus-pull.timer` runs `scripts/sandbox/pull-corpus.sh` hourly into `~/.local/share/desk-corpus.gen/gen-*` and moves
+  the symlink `~/.local/share/desk-corpus` (`BRIDGE_CORPUS_DIR` overrides it). A running command keeps the generation it started with.
+- **Install (not done by the feature branch):** copy `bridge/` to `~/apps/agent-desk-bridge-sandy`; `cp systemd/desk-corpus-pull.* ~/.config/systemd/user/`;
+  `systemctl --user daemon-reload && systemctl --user enable --now desk-corpus-pull.timer`; first pull now:
+  `systemctl --user start desk-corpus-pull.service` (about 10 s, 330 MB); then restart the bridge: its hello `caps` lists `sandbox.exec`.
+  On LeChonk deploy the bridge checkout first (the next 15-minute refresh then writes the corpus).
+- **Tests:** `test/sandbox.test.js` (skips without bubblewrap + user namespaces), `test/pull-corpus.test.js` (needs rsync + flock),
+  `test/export-corpus.test.js` (Node >= 22.5), `test/corpus-prune.test.js`.
+- Test-only variables: `BRIDGE_CORPUS_DIR`, `BRIDGE_SANDBOX_BWRAP`, `BRIDGE_SANDBOX_LIMITS=scope|prlimit`, and `BRIDGE_SANDBOX_WALL_MS`,
+  `BRIDGE_SANDBOX_QUEUE_WAIT_MS`, `BRIDGE_SANDBOX_PER_HOUR` (these three can only lower a limit).
 
 ## Secret redaction and the fragment hash file (critic round 3, 28 Oct 2026)
 
