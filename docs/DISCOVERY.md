@@ -124,7 +124,7 @@ result still passes `redactDeepAsync` on its way out. Hits whose path is denied 
 No `path` = the root. `limit` default 20, max 40; `nextOffset` is `null` at the end. An unknown path answers with the nearest valid paths; a canonical file path
 resolves to its node. A node without children (a file) returns `lines: []` and its own `open`.
 With `query`: the FTS search restricted to that subtree, one line per document (best chunk), same line format plus `snippet`; `open` then carries the chunk's
-line offset. (For DECISIONS entries and AGENTS sections the document is one file: a subtree filter below it searches the whole document.)
+line offset. Below a DECISIONS month/entry or an AGENTS.md section the scope is that file's line range (an entry opens with at most 200 lines, so the scope of a longer one ends there).
 
 **`map.search({query, source, path, limit, since, offset})`** → `{query, terms, total, ms, nextOffset, hits:[{path, line, title, heading, snippet, score, updated, class, open, node, source}]}`.
 `source` = a root name (`jobs`, `chats/laptop`, `board` …), `path` = a subtree, `since` = ISO date on the document time. `limit` default 10, max 40.

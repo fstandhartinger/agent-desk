@@ -133,13 +133,44 @@ const COVERAGE_WEIGHT = 6;
 const FRESH_WEIGHT = 3;
 const FRESH_HALF_LIFE_DAYS = 60;
 
-function filters({ source, subtree, since }) {
+function filters({ source, subtree, docPath, lines, since }) {
   const where = ['chunks MATCH ?'];
   const params = [];
   if (source) { where.push('d.source = ?'); params.push(source); }
-  if (subtree) { where.push('(d.node = ? OR substr(d.node, 1, ?) = ?)'); params.push(subtree, subtree.length + 1, `${subtree}/`); }
+  if (docPath) {
+    // below a document (a DECISIONS month or entry, an AGENTS section): that file, and its line range when the node has one
+    where.push('d.path = ?'); params.push(docPath);
+    if (lines) { where.push('chunks.line BETWEEN ? AND ?'); params.push(lines[0], lines[1]); }
+  } else if (subtree) { where.push('(d.node = ? OR substr(d.node, 1, ?) = ?)'); params.push(subtree, subtree.length + 1, `${subtree}/`); }
   if (since) { where.push('d.mtime >= ?'); params.push(since); }
   return { where: where.join(' AND '), params };
+}
+
+const READ_FILE = /^read_file\(("(?:[^"\\]|\\.)*")(?:, offset=(\d+))?(?:, limit=(\d+))?\)$/;
+/** {path, from, to} of a node whose open call is read_file(path, offset, limit); null otherwise. */
+function readRange(open) {
+  const m = READ_FILE.exec(String(open ?? ''));
+  if (!m) return null;
+  const from = Number(m[2] ?? 0);
+  return { path: JSON.parse(m[1]), from, to: m[3] ? from + Number(m[3]) - 1 : null };
+}
+
+/** The search scope of a node: a subtree by default; for entries, sections and months of one file, that file and its line range. */
+function scopeOf(h, p, node) {
+  if (!p) return { subtree: '' };
+  if (node.kind === 'entry' || node.kind === 'section') {
+    const r = readRange(node.open);
+    if (r) return { docPath: r.path, lines: [r.from, r.to ?? r.from] };
+  }
+  if (node.kind === 'month') {
+    const ranges = stmt(h, 'SELECT open FROM nodes WHERE parent = ?').all(p).map((k) => readRange(k.open)).filter(Boolean);
+    if (ranges.length) return { docPath: ranges[0].path, lines: [Math.min(...ranges.map((r) => r.from)), Math.max(...ranges.map((r) => r.to ?? r.from))] };
+  }
+  if (node.kind === 'document') {
+    const r = readRange(stmt(h, 'SELECT open FROM nodes WHERE parent = ? AND open LIKE ? LIMIT 1').get(p, 'read_file(%')?.open);
+    if (r) return { docPath: r.path };
+  }
+  return { subtree: p };
 }
 
 function fetchRows(h, match, f, limit) {
@@ -245,23 +276,24 @@ function parseSince(since) {
   return ms;
 }
 
-function searchArgs({ query, source, path: p, since }) {
+function searchArgs(h, { query, source, path: p, since }) {
   const q = String(query ?? '').trim();
   if (!q) throw new Error('query required');
   assertNoSecretFragment(q);
   const built = buildMatch(q);
   if (!built.groups.length) throw new Error('query has no searchable words');
   const subtree = normalizeMapPath(p);
-  return { q, built, f: { source: source ? normalizeMapPath(source) : '', subtree, since: parseSince(since) } };
+  const scope = subtree ? scopeOf(h, subtree, resolveNode(h, subtree)) : { subtree: '' };
+  return { q, built, f: { source: source ? normalizeMapPath(source) : '', ...scope, since: parseSince(since) } };
 }
 
 // ---- methods ----------------------------------------------------------------------------------------------------------------------
 /** Full-text search over the whole map: ranked hits with a snippet and the tool call that opens the place. */
 export async function search(params = {}) {
-  const { q, built, f } = searchArgs(params);
+  const h = await database();
+  const { q, built, f } = searchArgs(h, params);
   const limit = clampInt(params.limit, DEFAULT_SEARCH, 1, MAX_SEARCH);
   const offset = clampInt(params.offset, 0, 0, 500);
-  const h = await database();
   const t0 = Date.now();
   const ranked = perDoc(candidates(h, built, f, offset + limit)).filter((r) => !isDenied(r.path));
   const page = ranked.slice(offset, offset + limit);
@@ -306,7 +338,7 @@ export async function discover(params = {}) {
   const head = { path: node.path, title: node.title, summary: node.summary, ...(node.open ? { open: node.open } : {}), ...(node.class && node.class !== 'open' ? { class: node.class } : {}) };
   const query = String(params.query ?? '').trim();
   if (query) {
-    const { built, f } = searchArgs({ query, path: p, since: params.since });
+    const { built, f } = searchArgs(h, { query, path: p, since: params.since });
     const rows = candidates(h, built, f, offset + limit * 2).filter((r) => !isDenied(r.path));
     const docs = new Map();
     for (const r of rows) if (!docs.has(r.id)) docs.set(r.id, r); // best chunk per document

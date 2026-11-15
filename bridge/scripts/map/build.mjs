@@ -108,7 +108,15 @@ export function firstParagraph(text, max = 300) {
 const decodeEntities = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 
 // ---- analysis: what a text says about itself (title, summary, sections) -----------------------------------------------------
-const META_ONLY = /^\s*(resolved-keys:|[-*]?\s*\*{0,2}Key:)/i;
+/** "resolved-keys: …" and "Key: …" lines (also as "- Key:" / "**Key:**") are bookkeeping, not the entry's first sentence. String operations, not a regex: `^\s*…` is quadratic on a long whitespace run. */
+function isMetaLine(line) {
+  let t = line.trimStart();
+  if (t[0] === '-' || t[0] === '*') t = t.slice(1).trimStart();
+  let i = 0;
+  while (t[i] === '*') i += 1;
+  const head = t.slice(i, i + 14).toLowerCase();
+  return head.startsWith('resolved-keys:') || head.startsWith('key:');
+}
 
 export function parseDecisions(text) {
   const lines = String(text).split('\n');
@@ -118,7 +126,7 @@ export function parseDecisions(text) {
     const end = k + 1 < heads.length ? heads[k + 1] : lines.length;
     const heading = lines[start].slice(3).trim();
     const dm = /^(\d{4}-\d{2}-\d{2})(?:[ T]+(\d{2}:\d{2}))?/.exec(heading);
-    const body = lines.slice(start + 1, end).filter((l) => !META_ONLY.test(l)).join('\n');
+    const body = lines.slice(start + 1, end).filter((l) => !isMetaLine(l)).join('\n');
     const ms = dm ? Date.parse(`${dm[1]}T${dm[2] || '00:00'}:00Z`) : 0;
     return {
       line: start, limit: Math.min(Math.max(end - start, 1), 200), title: squash(heading, 160), summary: firstSentence(body),

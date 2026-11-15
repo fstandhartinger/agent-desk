@@ -124,6 +124,26 @@ test('discover with a query searches only inside that branch', { skip }, async (
   assert.equal(board.lines[0].open, 'board_entry("1")');
 });
 
+test('a query below a month, an entry or a section of one file searches just that range', { skip }, async () => {
+  const names = (r) => r.lines.map((l) => l.title);
+  const nov = await map.discover({ path: 'entscheidungen/2026-11', query: 'crypto' });
+  assert.equal(nov.lines.length, 1);
+  assert.match(nov.lines[0].title, /DECISIONS\.md|Acme crypto rule|Scoring phase/);
+  assert.match(nov.lines[0].snippet, /crypto/);
+  assert.equal((await map.discover({ path: 'entscheidungen/2026-10', query: 'crypto' })).lines.length, 0, 'the other month has no such entry');
+  assert.equal((await map.discover({ path: 'entscheidungen/2026-11', query: 'tax' })).lines.length, 0);
+  assert.equal((await map.discover({ path: 'entscheidungen/2026-10', query: 'tax' })).lines.length, 1);
+  const entry = await map.search({ query: 'scoring', path: 'entscheidungen/2026-11/2026-11-02-09-30z-scoring-phase-budget' });
+  assert.equal(entry.hits.length, 1);
+  assert.match(entry.hits[0].heading, /Scoring phase budget/);
+  assert.equal((await map.search({ query: 'crypto', path: 'entscheidungen/2026-11/2026-11-02-09-30z-scoring-phase-budget' })).hits.length, 0, 'a neighbouring entry is outside');
+  assert.equal((await map.discover({ path: 'regeln/AGENTS.md/1-money', query: 'spend' })).lines.length, 1);
+  assert.equal((await map.discover({ path: 'regeln/AGENTS.md/1-money', query: 'plane' })).lines.length, 0, 'text of another section');
+  assert.equal((await map.discover({ path: 'regeln/AGENTS.md', query: 'plane' })).lines.length, 1);
+  assert.equal(names(nov).length, 1);
+  await assert.rejects(() => map.search({ query: 'scoring', path: 'entscheidungen/1999-01' }), /unknown map path/);
+});
+
 test('search: a German query finds the English note (synonyms, compounds, umlauts)', { skip }, async () => {
   const r = await map.search({ query: 'Steuerrücklage' });
   assert.ok(r.hits.length >= 1);

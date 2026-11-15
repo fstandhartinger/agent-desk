@@ -199,6 +199,44 @@ test('a different schema version rebuilds fully; a failed start leaves the live 
   assert.equal(fs.statSync(path.join(fx.mapDir, 'index.sqlite')).size, sizeBefore, 'the live index is untouched');
 });
 
+test('an interrupted build resumes from its partial file; an older stale partial is thrown away', { skip }, () => {
+  const live = path.join(fx.mapDir, 'index.sqlite');
+  const work = `${live}.build`;
+  const partial = (mark) => {
+    fs.copyFileSync(live, work);
+    const d = new sqlite.DatabaseSync(work);
+    d.prepare("INSERT INTO meta(key, value) VALUES('partial_marker', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(mark);
+    return d;
+  };
+  // 1. the partial is newer than the live file and lacks one doc: the run continues from it (the marker survives) and adds the doc
+  const d = partial('resumed');
+  const gone = d.prepare("SELECT id FROM docs WHERE path LIKE '%beta-job-20261002/PROMPT.md'").get().id;
+  d.prepare('DELETE FROM chunks WHERE rowid BETWEEN ? AND ?').run(gone * 100_000, gone * 100_000 + 99_999);
+  d.prepare('DELETE FROM nodes WHERE owner = ?').run(gone);
+  d.prepare('DELETE FROM docs WHERE id = ?').run(gone);
+  d.close();
+  const future = new Date(Date.now() + 60_000);
+  fs.utimesSync(work, future, future);
+  const r = fx.run();
+  assert.equal(r.changes.added, 1, JSON.stringify(r.changes));
+  assert.equal(one("SELECT value FROM meta WHERE key = 'partial_marker'").value, 'resumed');
+  assert.ok(one("SELECT id FROM docs WHERE path LIKE '%beta-job-20261002/PROMPT.md'"));
+  assert.ok(!fs.existsSync(work), 'the work file became the live index');
+  // 2. a partial OLDER than the live file is stale: the run starts from a fresh copy of the live index
+  const stale = partial('stale');
+  stale.close();
+  const past = new Date(Date.now() - 3_600_000);
+  fs.utimesSync(work, past, past);
+  fx.run();
+  assert.equal(one("SELECT value FROM meta WHERE key = 'partial_marker'").value, 'resumed', 'the stale marker did not come through');
+  // 3. a partial that is not a database at all is replaced, not fatal
+  fs.writeFileSync(work, 'garbage');
+  fs.utimesSync(work, new Date(Date.now() + 120_000), new Date(Date.now() + 120_000));
+  const again = fx.run();
+  assert.equal(again.full, true);
+  assert.ok(one('SELECT count(*) AS n FROM docs').n > 15);
+});
+
 test('a source that cannot be listed keeps its rows (nothing is wiped because a mount is away)', { skip }, () => {
   const jobsBefore = one("SELECT count(*) AS n FROM docs WHERE source = 'jobs'").n;
   fs.rmSync(path.join(fx.mirror, '.synced'));
