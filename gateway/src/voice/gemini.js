@@ -47,6 +47,13 @@ export function translate(msg, model = MODELS.thinking) {
     if (sc.turnComplete) out.push({ t: 'turn_done' });
   }
   if (msg.voiceActivity?.type === 'ACTIVITY_START') out.push({ t: 'speech_started' });
+  // the connection ends after about 10 minutes (ai.google.dev live-api session-management): the session hands over to a new one
+  if (msg.goAway) out.push({ t: 'go_away', timeLeft: msg.goAway.timeLeft ?? null });
+  if (msg.usageMetadata) {
+    const u = msg.usageMetadata, n = (v) => (Number.isFinite(v) ? v : 0);
+    const by = (list, mod) => n((list ?? []).find((d) => d.modality === mod)?.tokenCount);
+    out.push({ t: 'usage', usage: { input: n(u.promptTokenCount), cached: n(u.cachedContentTokenCount), output: n(u.responseTokenCount ?? u.candidatesTokenCount), thinking: n(u.thoughtsTokenCount), total: n(u.totalTokenCount), audioIn: by(u.promptTokensDetails, 'AUDIO'), audioOut: by(u.responseTokensDetails ?? u.candidatesTokensDetails, 'AUDIO') } });
+  }
   if (msg.toolCallCancellation?.ids?.length) out.push({ t: 'tool_cancelled', ids: msg.toolCallCancellation.ids }); // the user interrupted: these calls are void
   for (const c of msg.toolCall?.functionCalls ?? []) out.push({ t: 'tool_call', id: c.id, name: c.name, args: parseArgs(c.args) });
   return out;

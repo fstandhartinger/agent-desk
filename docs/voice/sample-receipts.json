@@ -1,0 +1,1638 @@
+{
+  "sentence": "Hallo Florian, so klinge ich im Agent Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+  "budgetUsd": 2.9,
+  "calls": [
+    {
+      "at": "2026-11-15T19:10:16.300Z",
+      "kind": "gemini-tts",
+      "voice": "Sulafat",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 171,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 146,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 146
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:21.831Z",
+      "kind": "gemini-tts",
+      "voice": "Vindemiatrix",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 183,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 158,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 158
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:26.342Z",
+      "kind": "gemini-tts",
+      "voice": "Achernar",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 183,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 158,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 158
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:31.370Z",
+      "kind": "gemini-tts",
+      "voice": "Schedar",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 170,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 145,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 145
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:36.376Z",
+      "kind": "gemini-tts",
+      "voice": "Despina",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 189,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 164,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 164
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:41.017Z",
+      "kind": "gemini-tts",
+      "voice": "Algieba",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 171,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 146,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 146
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:46.019Z",
+      "kind": "gemini-tts",
+      "voice": "Charon",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 172,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 147,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 147
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:50.958Z",
+      "kind": "gemini-tts",
+      "voice": "Zephyr",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 165,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 140,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 140
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:10:56.317Z",
+      "kind": "gemini-tts",
+      "voice": "Puck",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 178,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 153,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 153
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:01.274Z",
+      "kind": "gemini-tts",
+      "voice": "Kore",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 174,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 149,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 149
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:05.783Z",
+      "kind": "gemini-tts",
+      "voice": "Fenrir",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 162,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 137,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 137
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:10.160Z",
+      "kind": "gemini-tts",
+      "voice": "Leda",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 183,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 158,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 158
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:15.638Z",
+      "kind": "gemini-tts",
+      "voice": "Orus",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 164,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 139,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 139
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:19.971Z",
+      "kind": "gemini-tts",
+      "voice": "Aoede",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 174,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 149,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 149
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:24.976Z",
+      "kind": "gemini-tts",
+      "voice": "Callirrhoe",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 178,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 153,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 153
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:29.808Z",
+      "kind": "gemini-tts",
+      "voice": "Autonoe",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 179,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 154,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 154
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:34.590Z",
+      "kind": "gemini-tts",
+      "voice": "Enceladus",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 183,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 158,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 158
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:39.263Z",
+      "kind": "gemini-tts",
+      "voice": "Iapetus",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 172,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 147,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 147
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:44.394Z",
+      "kind": "gemini-tts",
+      "voice": "Umbriel",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 165,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 140,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 140
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:49.233Z",
+      "kind": "gemini-tts",
+      "voice": "Erinome",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 171,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 146,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 146
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:54.106Z",
+      "kind": "gemini-tts",
+      "voice": "Algenib",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 172,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 147,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 147
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:11:59.569Z",
+      "kind": "gemini-tts",
+      "voice": "Rasalgethi",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 177,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 152,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 152
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:04.600Z",
+      "kind": "gemini-tts",
+      "voice": "Laomedeia",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 164,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 139,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 139
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:09.884Z",
+      "kind": "gemini-tts",
+      "voice": "Alnilam",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 171,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 146,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 146
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:15.025Z",
+      "kind": "gemini-tts",
+      "voice": "Gacrux",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 186,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 161,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 161
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:19.602Z",
+      "kind": "gemini-tts",
+      "voice": "Pulcherrima",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 178,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 153,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 153
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:24.638Z",
+      "kind": "gemini-tts",
+      "voice": "Achird",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 175,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 150,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 150
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:29.778Z",
+      "kind": "gemini-tts",
+      "voice": "Zubenelgenubi",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 170,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 145,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 145
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:34.860Z",
+      "kind": "gemini-tts",
+      "voice": "Sadachbia",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 179,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 154,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 154
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:39.500Z",
+      "kind": "gemini-tts",
+      "voice": "Sadaltager",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 168,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 143,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 143
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:43.759Z",
+      "kind": "gemini-tts",
+      "voice": "(no voice)",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "total_tokens": 161,
+        "total_input_tokens": 25,
+        "input_tokens_by_modality": [
+          {
+            "modality": "text",
+            "tokens": 25
+          }
+        ],
+        "total_cached_tokens": 0,
+        "total_output_tokens": 136,
+        "output_tokens_by_modality": [
+          {
+            "modality": "audio",
+            "tokens": 136
+          }
+        ],
+        "total_tool_use_tokens": 0,
+        "total_thought_tokens": 0,
+        "initial_input_tokens": 25
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:48.785Z",
+      "kind": "gemini-rating",
+      "voice": "Sulafat",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 188,
+        "candidatesTokenCount": 34,
+        "totalTokenCount": 222,
+        "promptTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 131
+          },
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:51.223Z",
+      "kind": "gemini-rating",
+      "voice": "Vindemiatrix",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 195,
+        "candidatesTokenCount": 40,
+        "totalTokenCount": 235,
+        "promptTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 138
+          },
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:53.614Z",
+      "kind": "gemini-rating",
+      "voice": "Achernar",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 198,
+        "candidatesTokenCount": 37,
+        "totalTokenCount": 391,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 141
+          }
+        ],
+        "thoughtsTokenCount": 156,
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:12:57.467Z",
+      "kind": "gemini-rating",
+      "voice": "Schedar",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 184,
+        "candidatesTokenCount": 34,
+        "totalTokenCount": 218,
+        "promptTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 127
+          },
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:13:00.028Z",
+      "kind": "gemini-rating",
+      "voice": "Despina",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 202,
+        "candidatesTokenCount": 33,
+        "totalTokenCount": 235,
+        "promptTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 145
+          },
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:13:02.806Z",
+      "kind": "gemini-rating",
+      "voice": "Algieba",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 187,
+        "candidatesTokenCount": 40,
+        "totalTokenCount": 227,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 130
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:13:05.416Z",
+      "kind": "gemini-rating",
+      "voice": "Charon",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 188,
+        "candidatesTokenCount": 36,
+        "totalTokenCount": 224,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 131
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:13:07.849Z",
+      "kind": "gemini-rating",
+      "voice": "(no voice)",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "http": 200,
+      "usage": {
+        "promptTokenCount": 177,
+        "candidatesTokenCount": 35,
+        "totalTokenCount": 212,
+        "promptTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 120
+          },
+          {
+            "modality": "TEXT",
+            "tokenCount": 57
+          }
+        ],
+        "serviceTier": "standard"
+      }
+    },
+    {
+      "at": "2026-11-15T19:13:28.964Z",
+      "kind": "xai-tts",
+      "voice": "altair",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:34.810Z",
+      "kind": "xai-tts",
+      "voice": "ara",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:36.181Z",
+      "kind": "xai-tts",
+      "voice": "atlas",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:37.021Z",
+      "kind": "xai-tts",
+      "voice": "aurora",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:37.813Z",
+      "kind": "xai-tts",
+      "voice": "carina",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:38.776Z",
+      "kind": "xai-tts",
+      "voice": "castor",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:39.624Z",
+      "kind": "xai-tts",
+      "voice": "celeste",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:40.449Z",
+      "kind": "xai-tts",
+      "voice": "cosmo",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:41.225Z",
+      "kind": "xai-tts",
+      "voice": "eve",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:42.020Z",
+      "kind": "xai-tts",
+      "voice": "helios",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:43.021Z",
+      "kind": "xai-tts",
+      "voice": "helix",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:44.111Z",
+      "kind": "xai-tts",
+      "voice": "iris",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:44.933Z",
+      "kind": "xai-tts",
+      "voice": "kepler",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:45.828Z",
+      "kind": "xai-tts",
+      "voice": "leo",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:46.598Z",
+      "kind": "xai-tts",
+      "voice": "liora",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:47.704Z",
+      "kind": "xai-tts",
+      "voice": "lumen",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:48.675Z",
+      "kind": "xai-tts",
+      "voice": "luna",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:49.401Z",
+      "kind": "xai-tts",
+      "voice": "lux",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:50.568Z",
+      "kind": "xai-tts",
+      "voice": "naksh",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:51.461Z",
+      "kind": "xai-tts",
+      "voice": "orion",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:52.233Z",
+      "kind": "xai-tts",
+      "voice": "perseus",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:53.180Z",
+      "kind": "xai-tts",
+      "voice": "rex",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:54.158Z",
+      "kind": "xai-tts",
+      "voice": "rigel",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:54.873Z",
+      "kind": "xai-tts",
+      "voice": "sal",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:55.608Z",
+      "kind": "xai-tts",
+      "voice": "sirius",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:56.545Z",
+      "kind": "xai-tts",
+      "voice": "ursa",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:57.450Z",
+      "kind": "xai-tts",
+      "voice": "zagan",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:13:58.229Z",
+      "kind": "xai-tts",
+      "voice": "zenith",
+      "reservedUsd": 0.00147,
+      "status": "ok",
+      "http": 200
+    },
+    {
+      "at": "2026-11-15T19:14:02.421Z",
+      "kind": "openai-live",
+      "voice": "nuri",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.502
+    },
+    {
+      "at": "2026-11-15T19:14:12.095Z",
+      "kind": "openai-transcription",
+      "voice": "nuri",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:14:13.589Z",
+      "kind": "openai-live",
+      "voice": "juni",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.376
+    },
+    {
+      "at": "2026-11-15T19:14:23.147Z",
+      "kind": "openai-transcription",
+      "voice": "juni",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:14:24.218Z",
+      "kind": "openai-live",
+      "voice": "flitz",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 25.502
+    },
+    {
+      "at": "2026-11-15T19:14:49.981Z",
+      "kind": "openai-transcription",
+      "voice": "flitz",
+      "reservedUsd": 0.005,
+      "status": "rejected",
+      "http": 200,
+      "transcript": "Hallo Susi, grüß dich. Du? Ja, ja, nee, dauert noch. Ich bin noch nicht so weit. Ich komme später. Aber pass auf, ich bin gerade beim Angeln. Stell dir vor, was ich da eben aus der See rausgeholt habe. Du glaubst es nicht? Mein altes Fahrrad. Wie, was für ein Fahrrad? Ja, das damals, vor 40 Jahren, auf dem ich Fahrrad fahren gelernt habe.",
+      "recall": 0.4117647058823529,
+      "precision": 0.125
+    },
+    {
+      "at": "2026-11-15T19:14:51.471Z",
+      "kind": "openai-live",
+      "voice": "flitz",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 30.001
+    },
+    {
+      "at": "2026-11-15T19:15:21.764Z",
+      "kind": "openai-live",
+      "voice": "alloy",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 8.383
+    },
+    {
+      "at": "2026-11-15T19:15:30.329Z",
+      "kind": "openai-transcription",
+      "voice": "alloy",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 0.9411764705882353,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:15:31.060Z",
+      "kind": "openai-live",
+      "voice": "ash",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.816
+    },
+    {
+      "at": "2026-11-15T19:15:41.056Z",
+      "kind": "openai-transcription",
+      "voice": "ash",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:15:42.502Z",
+      "kind": "openai-live",
+      "voice": "ballad",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.609
+    },
+    {
+      "at": "2026-11-15T19:15:52.281Z",
+      "kind": "openai-transcription",
+      "voice": "ballad",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:15:53.482Z",
+      "kind": "openai-live",
+      "voice": "cedar",
+      "reservedUsd": 0.03,
+      "status": "reserved"
+    },
+    {
+      "at": "2026-11-15T19:16:00.475Z",
+      "kind": "openai-live",
+      "voice": "cedar",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 8.078
+    },
+    {
+      "at": "2026-11-15T19:16:08.710Z",
+      "kind": "openai-transcription",
+      "voice": "cedar",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:16:09.587Z",
+      "kind": "openai-live",
+      "voice": "coral",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.398
+    },
+    {
+      "at": "2026-11-15T19:16:19.147Z",
+      "kind": "openai-transcription",
+      "voice": "coral",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:16:20.606Z",
+      "kind": "openai-live",
+      "voice": "echo",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 8.917
+    },
+    {
+      "at": "2026-11-15T19:16:29.692Z",
+      "kind": "openai-transcription",
+      "voice": "echo",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Florian. So klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 0.9411764705882353,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:16:30.356Z",
+      "kind": "openai-live",
+      "voice": "marin",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 8.942
+    },
+    {
+      "at": "2026-11-15T19:16:39.474Z",
+      "kind": "openai-transcription",
+      "voice": "marin",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:16:40.529Z",
+      "kind": "openai-live",
+      "voice": "sage",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.546
+    },
+    {
+      "at": "2026-11-15T19:16:50.243Z",
+      "kind": "openai-transcription",
+      "voice": "sage",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:16:51.151Z",
+      "kind": "openai-live",
+      "voice": "shimmer",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 8.955
+    },
+    {
+      "at": "2026-11-15T19:17:00.290Z",
+      "kind": "openai-transcription",
+      "voice": "shimmer",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 0.9411764705882353,
+      "precision": 1
+    },
+    {
+      "at": "2026-11-15T19:17:01.011Z",
+      "kind": "openai-live",
+      "voice": "verse",
+      "reservedUsd": 0.03,
+      "status": "ok",
+      "seconds": 9.783
+    },
+    {
+      "at": "2026-11-15T19:17:10.977Z",
+      "kind": "openai-transcription",
+      "voice": "verse",
+      "reservedUsd": 0.005,
+      "status": "verified",
+      "http": 200,
+      "transcript": "Hallo Florian, so klinge ich im Agent-Desk. Ich erkläre dir gern, was deine Agenten gerade machen.",
+      "recall": 1,
+      "precision": 1
+    }
+  ],
+  "ratings": [
+    {
+      "voice": "Sulafat",
+      "score": 9,
+      "reason": "The voice is warm, calm, pleasantly paced, and features clear, natural German pronunciation suitable for long listening sessions."
+    },
+    {
+      "voice": "Vindemiatrix",
+      "score": 9,
+      "reason": "The voice is warm, calm, and naturally spoken with clear German pronunciation that would be very pleasant for extended listening."
+    },
+    {
+      "voice": "Achernar",
+      "score": 9,
+      "reason": "The voice has a warm, friendly, and calm tone with flawless, natural German pronunciation that would be very pleasant for extended listening."
+    },
+    {
+      "voice": "Schedar",
+      "score": 9,
+      "reason": "The voice is warm, calm, and has flawless, natural German pronunciation that would be very pleasant for extended listening."
+    },
+    {
+      "voice": "Despina",
+      "score": 8,
+      "reason": "The voice is warm, friendly, and natural with clear German pronunciation, though slightly upbeat rather than purely calm."
+    },
+    {
+      "voice": "Algieba",
+      "score": 8,
+      "reason": "The voice is warm, calm, and has natural pronunciation, though it sounds slightly synthetic which could feel a bit monotonous over 30 minutes."
+    },
+    {
+      "voice": "Charon",
+      "score": 8,
+      "reason": "The voice is warm, calm, and has natural native German pronunciation, making it very pleasant to listen to for extended periods."
+    },
+    {
+      "voice": "(no voice)",
+      "score": 9,
+      "reason": "The voice is warm, calm, and pleasant with completely natural German pronunciation, making it well-suited for extended listening."
+    }
+  ],
+  "failures": [
+    {
+      "provider": "openai",
+      "voice": "flitz",
+      "reason": "German sample did not match the sentence"
+    },
+    {
+      "provider": "openai",
+      "voice": "flitz",
+      "reason": "Unusable sample duration"
+    }
+  ]
+}

@@ -3,7 +3,6 @@ import { ACTIVITY_LINGER_MS, isActivity, nextActivity, type ActivityLine } from 
 import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
 import { SpeechOnset } from './speechOnset';
-import { buildEntry, clientInfo } from './clientInfo';
 import { createStore } from './store';
 import { SpeechTracker } from './speechCursor';
 import { drainClientErrors } from './clientError';
@@ -23,7 +22,7 @@ export const VOICE_OPTIONS: VoiceOption[] = [
 export const optionByKey = (k: string) => VOICE_OPTIONS.find((o) => o.key === k) ?? VOICE_OPTIONS[0];
 
 export interface VoiceHandlers {
-  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean, replace?: boolean): void;
+  onTranscript(role: 'user' | 'assistant', text: string, final: boolean, isDelta: boolean, typed?: boolean, replace?: boolean, flags?: { quiet?: boolean; context?: boolean }): void;
   onTool(t: ToolEvent): void;
   onViz(spec: VizSpec): void;
   onHandoff(h: HandoffEvent): void;
@@ -37,6 +36,12 @@ export interface VoiceHandlers {
   /** The mic is still voiced. */
   onSpeechActive?(): void;
   onNotice?(message: string): void;
+  /** The conversation this session belongs to (voice memory): sent with `start`. */
+  conversation?(): { id: string; turns: { role: 'user' | 'assistant'; content: string; ts: number }[]; memory?: { summary: string; upto: number } };
+  /** The gateway's running summary of the conversation. */
+  onMemory?(conversationId: string, summary: string, upto: number): void;
+  /** The session reached its time cap and ends now; the controller starts the next one in the same conversation. */
+  onRollover?(message?: string, wasMuted?: boolean): void;
 }
 
 /** Last `usage` tick of the gateway (every 10 s): this session's cost (USD) and today's whole Desk spend. */
@@ -62,10 +67,13 @@ export class VoiceSession {
   private player: AudioWorkletNode | null = null;
   private mic: AudioWorkletNode | null = null;
   private ready = false;
+  private startMessage: (() => unknown) | null = null;
   private closed = false;
   private decay = 0;
   private onset = new SpeechOnset();
   private readyTimer = 0;
+  /** Set by the gateway's `rollover` (time cap): the close that follows is no error. */
+  private rollover: string | null = null;
   private unwatchFocus: (() => void) | null = null;
   /** Where the spoken answer is (canvas reveal, see speechCursor.ts). */
   private cursor = new SpeechTracker();
@@ -89,6 +97,10 @@ export class VoiceSession {
     this.gate.muted = this.startMuted;
     voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null }));
     this.set('connecting', '');
+    // Capture the selection at start; changes during connection also belong to the next session.
+    try { this.startMessage = await (await import('./voiceStart')).prepareVoiceStart(this.opt, this.page); }
+    catch { this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.'); return; }
+    if (this.closed) return;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
       this.gate.applyTracks();
@@ -148,8 +160,7 @@ export class VoiceSession {
     this.ws = ws;
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
     ws.onopen = () => {
-      const desktop = Boolean(globalThis.matchMedia?.('(min-width: 1024px)').matches);
-      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', client: clientInfo(desktop), entry: buildEntry(location, this.page?.pointId), focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}) }));
+      ws.send(JSON.stringify({ ...(this.startMessage!() as object), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
       this.event('ws.open', {});
       this.flushEvents();
@@ -189,6 +200,12 @@ export class VoiceSession {
       case 'session':
         voiceStore.set((s) => ({ ...s, aid: typeof m.aid === 'string' ? m.aid.replace(/^a#/i, '').toLowerCase() : null }));
         break;
+      case 'memory':
+        if (typeof m.summary === 'string' && typeof m.conversationId === 'string') this.h.onMemory?.(m.conversationId, m.summary, m.upto);
+        break;
+      case 'rollover':
+        this.rollover = m.message ?? 'Neue Sitzung im selben Gespräch …';
+        break;
       case 'notice':
         voiceStore.set((s) => ({ ...s, serverNotice: m.message }));
         this.h.onNotice?.(m.message);
@@ -197,7 +214,7 @@ export class VoiceSession {
         break;
       case 'transcript': {
         const text = m.delta ?? m.text ?? '';
-        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace);
+        this.h.onTranscript(m.role, text, m.final, m.delta !== undefined, m.typed, m.replace, { quiet: m.quiet, context: m.context });
         if (m.role === 'assistant') this.cursor.transcript(text, m.final, m.delta !== undefined);
         if (m.role === 'user' && m.final) { this.cursor.reset(); this.set('thinking'); } // a new user turn: the earlier answer is over
         break;
@@ -270,6 +287,12 @@ export class VoiceSession {
   /** The relay or vendor ended the session without an `error` message first. */
   private onGone() {
     if (this.closed) return;
+    if (this.rollover !== null) { // the time cap: no error, the controller continues in a new session of the same conversation
+      const message = this.rollover, wasMuted = this.gate.muted; // a new session must not open the mic he closed
+      this.stop(false);
+      this.h.onRollover?.(message, wasMuted);
+      return;
+    }
     if (!this.ready) this.fail(`${this.opt.label}: Verbindung beendet, bevor die Sitzung bereit war.`);
     else {
       this.h.onError('Sprachverbindung getrennt.');

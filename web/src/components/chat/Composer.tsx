@@ -1,5 +1,5 @@
 import { parseArtifactUrl } from '../../lib/artifactUrl';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, AudioLines, Check, ChevronDown, Clock, Loader2, MapPin, Mic, Square, X } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { chatState, sendChat, stopChat } from '../../lib/chat';
@@ -8,13 +8,12 @@ import { startRecording, type Recording } from '../../lib/dictation';
 import { transcribe, errorMessage } from '../../lib/api';
 import { toast } from '../../lib/toast';
 import { logActivity } from '../../lib/activity';
-import { VOICE_OPTIONS, optionByKey, voiceStore } from '../../lib/voice';
-import { sendVoiceText, setVoiceOption, toggleVoice } from '../../lib/voiceController';
-import { healthText, statusStore } from '../../lib/status';
-import { chooseVoice, voiceUnavailableNotice } from '../../lib/voiceChoice';
-import HealthDot from '../ui/HealthDot';
+import { optionByKey, voiceStore } from '../../lib/voice';
+import { sendVoiceText, toggleVoice } from '../../lib/voiceController';
+import { statusStore } from '../../lib/status';
+import { chooseVoice } from '../../lib/voiceChoice';
 import { fmtTime } from '../../lib/format';
-import Popover from '../ui/Popover';
+const ProviderMenu = lazy(() => import('../voice/ProviderMenu'));
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; since: number } | { phase: 'transcribing' };
 
@@ -210,7 +209,7 @@ export default function Composer() {
                   >
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
-                  <ProviderMenu open={pickerOpen} onClose={() => setPickerOpen(false)} />
+                  <Suspense fallback={null}>{pickerOpen && <ProviderMenu open onClose={() => setPickerOpen(false)} />}</Suspense>
                 </div>
                 <div className="flex-1" />
                 {streamingId ? (
@@ -254,41 +253,6 @@ function RecTimer({ since }: { since: number }) {
   return <span className="text-xs text-dim tabular">{fmtTime((Date.now() - since) / 1000)}</span>;
 }
 
-export function ProviderMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { option } = useStore(voiceStore);
-  const providers = useStore(statusStore, (s) => s.providers);
-  const effective = chooseVoice(optionByKey(option), providers);
-  return (
-    <Popover open={open} onClose={onClose} side="top" align="left" className="w-72">
-      <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-mute">Stimme</p>
-      <p className="px-3 pb-2 text-xs text-dim">Startet mit {effective.run.label}{effective.picked ? ` · ${voiceUnavailableNotice(effective.picked, effective.run)}` : ''}</p>
-      {VOICE_OPTIONS.map((o) => {
-        const health = providers[o.provider];
-        const hint = health?.state === 'failed' ? `Nicht verfügbar · ${healthText(health)}` : health?.state === 'off' ? 'Nicht eingerichtet' : o.hint;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            role="menuitemradio"
-            aria-checked={o.key === option}
-            onClick={() => {
-              setVoiceOption(o.key);
-              onClose();
-            }}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${o.key === option ? 'bg-violet/12' : 'hover:bg-white/[0.05]'}`}
-          >
-            <span title={healthText(health)} className="flex"><HealthDot health={health} className="h-2 w-2" /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-fg">{o.label}</span>
-              <span className={`block text-xs ${health?.state === 'failed' ? 'text-amber/90' : 'text-dim'}`}>{hint}</span>
-            </span>
-            {o.key === option && <Check className="h-4 w-4 shrink-0 text-violet-light" />}
-          </button>
-        );
-      })}
-    </Popover>
-  );
-}
 
 function ContextChips() {
   const { explainer, attached, pointId, sceneId } = useStore(pageStore);

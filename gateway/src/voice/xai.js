@@ -48,8 +48,12 @@ export function translate(msg, state = {}) {
       return [{ t: 'tool_call', id: msg.call_id, name: msg.name, args: parseArgs(msg.arguments), ...idOf('responseId', msg.response_id) }];
     case 'response.created':
       return [{ t: 'response_started', ...idOf('id', msg.response?.id) }];
-    case 'response.done':
-      return [{ t: 'turn_done', ...idOf('id', msg.response?.id) }];
+    case 'response.done': {
+      const u = msg.response?.usage;
+      const n = (v) => (Number.isFinite(v) ? v : 0);
+      const usage = u && typeof u === 'object' ? { t: 'usage', usage: { input: n(u.input_tokens), cached: n(u.input_token_details?.cached_tokens), output: n(u.output_tokens), audioIn: n(u.input_token_details?.audio_tokens), audioOut: n(u.output_token_details?.audio_tokens), textIn: n(u.input_token_details?.text_tokens) } } : null;
+      return [...(usage ? [usage] : []), { t: 'turn_done', ...idOf('id', msg.response?.id) }];
+    }
     case 'error':
       return [{ t: 'error', message: msg.error?.message ?? 'xAI-Fehler', code: msg.error?.code, soft: true }];
     default:

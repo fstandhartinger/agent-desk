@@ -73,7 +73,7 @@ export function openSocket(url, headers, { provider, emit: rawEmit, onOpen, onMe
   });
   ws.on('close', (code, reason) => {
     if (!failed && code !== 1000 && code !== 1005) emit(closeError(provider, code, reason.toString()));
-    emit({ t: 'closed' });
+    emit({ t: 'closed', code, ...(reason?.length ? { reason: reason.toString().slice(0, 120) } : {}) });
   });
   return ws;
 }
