@@ -846,7 +846,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     });
   }
 
-  const memoryPost = deps.memoryPost ?? ((messages, signal) => completeChat({ model: cfg.memoryModel(), messages, maxTokens: 1500, signal }).then((r) => ({ text: r.message.content, costUsd: r.costUsd })));
+  const memoryPost = deps.memoryPost ?? ((messages, signal) => completeChat({ model: cfg.memoryModel(), messages, maxTokens: 2500, signal, reasoning: { enabled: false } }) /* with reasoning the model spent the whole budget thinking: empty summaries (replay a#722727); without: 1.6 s for 30 minutes of talk */.then((r) => ({ text: r.message.content, costUsd: r.costUsd })));
 
   /** Updates the running summary with the turns it does not cover yet (one at a time); cached, sent to the browser, traced. */
   function refreshSummary(why, turns = convCtx.turns()) {

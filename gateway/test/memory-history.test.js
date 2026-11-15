@@ -320,3 +320,17 @@ test('session: a silent session is not carried over at the cap (it ends with a n
   t.mock.timers.tick(5 * 60_000 + 1000);
   assert.ok(live.ws.sent.some((m) => m.type === 'rollover' && m.reason === 'hard-cap'));
 });
+
+test('the summary call switches reasoning off (with it the model spent the whole budget thinking and returned an empty summary)', async () => {
+  const { completeChat } = await import('../src/llm.js');
+  const saved = globalThis.fetch, key = process.env.OPENROUTER_API_KEY;
+  let body = null;
+  process.env.OPENROUTER_API_KEY = 'test';
+  globalThis.fetch = async (url, init) => { body = JSON.parse(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 } }), { status: 200 }); };
+  try {
+    await completeChat({ model: 'm', messages: [{ role: 'user', content: 'x' }], reasoning: { enabled: false } });
+    assert.deepEqual(body.reasoning, { enabled: false });
+    await completeChat({ model: 'm', messages: [{ role: 'user', content: 'x' }] });
+    assert.ok(body.reasoning && 'effort' in body.reasoning); // other callers unchanged
+  } finally { globalThis.fetch = saved; if (key === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = key; }
+});
