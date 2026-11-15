@@ -100,6 +100,8 @@ test('usage ticks every 10 s add cost; 30 min hard cap warns 2 min before and ha
   assert.ok(h.costs[0] > 0);
   t.mock.timers.tick(HARD_CAP_MS - CAP_WARN_MS - USAGE_TICK_MS);
   assert.ok(h.ws.sent.some((m) => m.type === 'notice' && m.code === 'cap-soon' && /2 Minuten/.test(m.message))); // 15 Nov: warned before the cap
+  h.emit({ t: 'transcript', role: 'user', text: 'Und noch etwas.', final: true }); // a live conversation (a silent one just ends, memory-history.test.js)
+  h.emit({ t: 'turn_done' });
   t.mock.timers.tick(CAP_WARN_MS);
   assert.ok(h.ws.sent.some((m) => m.type === 'rollover' && m.reason === 'hard-cap' && /30 Minuten/.test(m.message))); // and carried over, no error
   assert.ok(!h.ws.sent.some((m) => m.type === 'error'));
