@@ -41,7 +41,7 @@ export function routeOf(method) {
 
 /** Request/response + pub/sub multiplexer over the bridge WebSockets (one connection per host). */
 // Slow bridge methods (bridge/src/bridge.js METHOD_TIMEOUT_MS + a margin): Discord drives the home Chrome, mail logs in over IMAP.
-const METHOD_TIMEOUT_MS = { 'discord.list': 90_000, 'discord.read': 90_000, 'mail.search': 45_000, 'mail.read': 45_000, 'ops.run': 35_000, 'job.start': 70_000 }; // job.start: the bridge allows itself 60 s
+const METHOD_TIMEOUT_MS = { 'discord.list': 90_000, 'discord.read': 90_000, 'mail.search': 45_000, 'mail.read': 45_000, 'ops.run': 35_000, 'job.start': 70_000, 'audio.finish': 125_000 }; // job.start: the bridge allows itself 60 s
 export const methodTimeout = (method) => METHOD_TIMEOUT_MS[method] ?? 30_000;
 
 export class BridgeHub extends EventEmitter {

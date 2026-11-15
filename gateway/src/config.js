@@ -14,7 +14,8 @@ export const cfg = {
   explainerContextToken: () => env('EXPLAINER_CONTEXT_TOKEN'), // bearer for the private context.json / deepdive.md (never sent to the browser)
   textModel: () => env('DESK_TEXT_MODEL', 'deepseek/deepseek-v4.1-flash-20261017:nitro'),
   vizModel: () => env('DESK_VIZ_MODEL') || cfg.textModel(),
-  memoryModel: () => env('DESK_MEMORY_MODEL') || cfg.textModel(), // the running summary of a conversation (voice/memory.js)
+  memoryModel: () => env('DESK_MEMORY_MODEL') || cfg.textModel(),
+  audioRecord: () => env('DESK_AUDIO_RECORD', 'on') !== 'off', // Florian 15 Nov (card 19712): the sound of voice sessions is kept 30 days on LeChonk // the running summary of a conversation (voice/memory.js)
   intentModel: () => env('DESK_INTENT_MODEL') || cfg.textModel(), // the intent fallback of the voice action triggers (intentTrigger.js)
   intentTrigger: () => env('DESK_INTENT_TRIGGER', 'on') !== 'off', // kill switch: off = only the hard trigger words open the two voice actions
   canvasModel: () => env('DESK_CANVAS_MODEL') || 'deepseek/deepseek-v4.1-flash-20261017:nitro',
