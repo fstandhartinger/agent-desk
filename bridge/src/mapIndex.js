@@ -13,7 +13,7 @@ export const STATUS_FILE = 'status.json';
 
 /** Top-level sources of the map, most useful first (the order of `discover()` at the root). */
 export const SOURCE_ORDER = [
-  'wissen', 'entscheidungen', 'chats/laptop', 'desk-sitzungen', 'jobs', 'board', 'chats/sandy', 'chats/lechonk', 'regeln',
+  'wissen', 'entscheidungen', 'chats/laptop', 'daten', 'desk-sitzungen', 'jobs', 'board', 'chats/sandy', 'chats/lechonk', 'regeln',
   'artefakte', 'skills', 'explainer', 'code', 'ledger', 'server', 'gpu', 'mail', 'discord', 'datenbanken', 'web',
 ];
 

@@ -9,6 +9,7 @@ export const SOURCE_GUIDE = [
   'Jobs: search source "jobs", job_status(name), list_jobs, read_file(/home/flori/jobs/<job>/STATE.md oder RESULT.md).',
   'Agent-Board: search mit source "board" (Volltext aller Einträge), board_read(thread), board_entry(nummer).',
   'Wissen und Regeln: knowledge_read(thema), read_core_doc (AGENTS, STATE, DECISIONS, MODEL_POLICY).',
+  'Kennzahlen (stündlich, Stand steht in der Datei): read_file("/home/flori/desk-knowledge/exports/cockpit.md") = Umsatz heute/Monat/gesamt, zahlende Kunden, aktive Konten, Traffic, Kapazität, SN92, Betrieb; read_file("/home/flori/desk-knowledge/exports/gpu-ledger.md") = GPU-Pod-Stunden und USD je Tag, Monat, Job, Anbieter, laufende Pods.',
   'Geld: ledger_spend (nie schätzen). Server, Quoten, Termine: run_readonly. Der Desk selbst: desk_status, session_trace.',
   'Artefakte (a#-IDs, Karten): artifact_search, artifact_resolve, artifact_ref_read. Skills: skills_list, skill_read. Code: code_outline, read_file.',
   'Mails (nur lesen, nur wenn die Frage Mails betrifft): mail_search, mail_read. Öffentliche Webseite mit bekannter Adresse: web_read.',
