@@ -1,3 +1,4 @@
+import { cleanHistory } from './voice/memory.js';
 import { artifactInstructions } from './artifacts.js';
 import { audit } from './audit.js';
 import { cfg } from './config.js';
@@ -135,6 +136,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
       artifacts, vision, briefing, canvas, hub, limits, sid, ip, research, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
       trace: () => trace, traces, turn,
+      conversation: { label: 'Chatfenster, letzte 40 Nachrichten; ältere und Sprachsitzungen über session', turns: () => cleanHistory(messages) }, // conversation_history in the text chat (critic: it was empty there)
       chatContext: formatChatContext(messages),
       // Round 10 (critic r9 F2): the deterministic money list replaces the model's money sentences only for a spending
       // question (the illustrator's classifier); ledger_spend as context (Florian's tax-reserve question) keeps the explanation.

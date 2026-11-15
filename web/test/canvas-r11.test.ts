@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { canvasBus, focusedCanvasId, watchFocusedCanvas } from '../src/canvas/bus.ts';
 import { sendChat } from '../src/lib/chat.ts';
 import { VoiceSession, VOICE_OPTIONS } from '../src/lib/voice.ts';
+import { voiceStartMessage } from '../src/lib/voiceStart.ts';
 import type { CanvasBusEvent, CanvasSpec } from '../src/canvas/types.ts';
 
 const spec = (id: string): CanvasSpec => ({ v: 2, id, kind: 'bar', title: id, sources: [{ label: 'x', ref: 'x' }], items: [{ label: 'a', value: 1 }] });
@@ -50,7 +51,8 @@ test('voice: start and typed text carry the focused canvas id, stage changes go 
   }
   Object.assign(globalThis, { WebSocket: FakeWs, location: { protocol: 'http:', host: 'desk.test' } });
   const handlers = { onTranscript() {}, onTool() {}, onViz() {}, onHandoff() {}, onClaudeProposal() {}, onFallback() {}, onError() {}, onUsage() {} };
-  const s = new VoiceSession(VOICE_OPTIONS[0], undefined, handlers) as unknown as { connect(): void; sendText(t: string): void; stop(n?: boolean): void };
+  const s = new VoiceSession(VOICE_OPTIONS[0], undefined, handlers) as unknown as { connect(): void; startMessage(): unknown; sendText(t: string): void; stop(n?: boolean): void };
+  s.startMessage = () => voiceStartMessage(VOICE_OPTIONS[0], undefined);
   s.connect();
   return new Promise<void>((resolve, reject) => queueMicrotask(() => { try {
     assert.equal(sent[0].type, 'start');

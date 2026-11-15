@@ -30,6 +30,7 @@ import { loadPageContext } from './page.js';
 import { handleTranscribe } from './transcribe.js';
 import { createActivityViz } from './viz.js';
 import { handleVoiceUpgrade } from './voice/index.js';
+import { voiceCatalog } from './voice/voices.js';
 import { createResearchManager, withResearchAttach } from './research/manager.js';
 import { completeChat } from './llm.js';
 
@@ -120,6 +121,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     const { sid } = session;
 
     if (pathname === '/api/auth/me') return sendJson(res, 200, { ok: true, sid });
+    if (pathname === '/api/voices' && req.method === 'GET') return sendJson(res, 200, voiceCatalog());
     if (await artifacts.route(req, res, url, sid)) return;
     if (pathname === '/api/status') {
       return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });

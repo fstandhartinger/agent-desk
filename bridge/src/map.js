@@ -31,7 +31,7 @@ let sqlite = null;
 let handle = null; // {file, mtimeMs, ino, db, stmts}
 
 function closeHandle() {
-  try { handle?.db.close(); } catch { /* already closed */ }
+  try { handle?.db.close(); } catch { /* close failed: the handle is gone (no handle to keep) */ }
   handle = null;
 }
 
@@ -355,7 +355,7 @@ export async function discover(params = {}) {
 }
 
 function readStatusFile() {
-  try { return JSON.parse(fs.readFileSync(path.join(dirNow(), STATUS_FILE), 'utf8')); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(path.join(dirNow(), STATUS_FILE), 'utf8')); } catch { return null; /* absent or malformed status file */ }
 }
 
 /** Size and freshness of the map, and what the last build said. */

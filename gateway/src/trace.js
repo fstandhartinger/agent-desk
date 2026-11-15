@@ -119,7 +119,7 @@ export function createTraceService({ env = process.env, fetchImpl = fetch, now =
     });
     if (!res.ok) throw Object.assign(new Error(`registry ${res.status}`), { status: res.status });
     const text = await res.text();
-    if (text.length > 1_000_000) throw new Error('registry answer too large');
+    if (text.length > 12_000_000) throw new Error('registry answer too large'); // full prompts and tool outputs are traced since 15 Nov
     return text ? JSON.parse(text) : {};
   }
 
@@ -405,7 +405,8 @@ function detail(e) {
 
 /** The last `n` events as readable lines: "+12.3s t3 gateway tool.done search_files 340ms". */
 export function timelineLines(events, n = 40) {
-  const list = events.filter((e) => e.type !== 'screen.context.gone').sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
+  // the detailed log (prompt texts, full tool outputs, usage, audio timing, memory) stays out of the 40-line timeline
+  const list = events.filter((e) => e.type !== 'screen.context.gone' && !/^(?:prompt\.|tool\.output$|usage$|audio\.|memory\.)/.test(e.type)).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
   const t0 = Date.parse(list[0]?.ts);
   return list.slice(-n).map((e) => {
     const dt = Number.isFinite(t0) && Number.isFinite(Date.parse(e.ts)) ? `+${((Date.parse(e.ts) - t0) / 1000).toFixed(1)}s` : '';
@@ -537,5 +538,8 @@ export async function describeSession({ which = 'current', service, current, now
   }
   if (!diagnosis) diagnosis = localDiagnosis(events);
   const lines = timelineLines(events, 40);
-  return `Sitzung ${id ?? '(ohne ID)'}${note}\nDiagnose: ${diagnosis}\nVerlauf (letzte ${lines.length} von ${events.length} Ereignissen):\n${lines.join('\n')}`;
+  // a#89f540 (15 Nov): the model gave a session's time in UTC as Berlin time; the times are now stated in Berlin time here
+  const times = events.map((e) => Date.parse(e.ts)).filter(Number.isFinite);
+  const span = times.length ? `\nZeit (Berliner Zeit): ${berlinClock(Math.min(...times))} bis ${berlinClock(Math.max(...times))}` : '';
+  return `Sitzung ${id ?? '(ohne ID)'}${note}${span}\nDiagnose: ${diagnosis}\nVerlauf (letzte ${lines.length} von ${events.length} Ereignissen):\n${lines.join('\n')}`;
 }

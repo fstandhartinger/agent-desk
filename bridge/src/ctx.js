@@ -342,7 +342,7 @@ export { claudeProjectDirs };
 export function findDecisionKey(text, key) {
   for (const section of text.split(/(?=^## )/m)) {
     const heading = section.split('\n')[0];
-    const keys = [...section.matchAll(/^\s*(?:\*\*)?Key:(?:\*\*)?\s*`?([\w.-]+)`?\s*$/gmi)].map(m => m[1]);
+    const keys = [...section.matchAll(/^[ \t]*(?:\*\*)?Key:(?:\*\*)?[ \t]*`?([\w.-]+)`?[ \t]*$/gmi)].map(m => m[1]);
     const headingKeys = heading.match(/`[\w.-]+`|\[[\w.-]+\]/g) ?? [];
     if (keys.includes(key) || headingKeys.some(v => v.slice(1, -1) === key) || (heading.slice(3).match(/[A-Za-z0-9_.-]+/g) ?? []).includes(key)) return { found: true, heading };
   }

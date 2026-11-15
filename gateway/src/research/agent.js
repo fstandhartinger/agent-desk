@@ -137,7 +137,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
   const ask = async (msgs, opts = {}) => {
     const timeout = AbortSignal.timeout(Math.max(3000, Math.min(left(), 45_000)));
     const m0 = now();
-    const r = await deps.complete({ model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(reasoning ? { reasoning } : {}), ...opts });
+    const r = await deps.complete({ model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(reasoning ? { reasoning: { effort: reasoning } } : {}), ...opts });
     timing.modelMs.push(now() - m0);
     cost += Number(r.costUsd) || 0;
     return r.message ?? { content: '', tool_calls: [] };

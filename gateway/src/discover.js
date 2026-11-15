@@ -123,7 +123,7 @@ async function researchTool({ question, focus }, ctx) {
   if (!ctx.research?.start) throw new Error('Die Recherche ist in diesem Kontext nicht verfügbar.');
   const voice = isVoice(ctx);
   const run = ctx.research.start({ sid: ctx.sid ?? 'desk', question, focus, context: voice ? spokenContext(ctx) : String(ctx.chatContext ?? '').slice(-1500), ctx });
-  const result = await run.wait(voice ? VOICE_RESEARCH_WAIT_MS : TEXT_RESEARCH_WAIT_MS);
+  const result = await run.wait(ctx.researchWaitMs ?? (voice ? VOICE_RESEARCH_WAIT_MS : TEXT_RESEARCH_WAIT_MS)); // researchWaitMs: tests only
   if (result) { ctx.research.claimed?.(run); return { result: formatResult(result, { voice }), host: 'gateway' }; }
   if (voice) run.detach();
   else run.detach?.();

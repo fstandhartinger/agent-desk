@@ -28,8 +28,13 @@ export interface Msg {
   statusText?: string;
   /** User bubble while he is talking and the transcript is not final yet (a#41d6d2, 14 Nov): empty = "Du sprichst …", with text = live partial. */
   speaking?: boolean;
+  /** Voice memory (15 Nov): words of a computer-control run (never sent to the next session) / a context turn that is not his own word. */
+  quiet?: boolean;
+  memoryContext?: boolean;
 }
-export interface Conversation { id: string; messages: Msg[] }
+/** Running summary of the conversation made by the gateway (voice memory, 15 Nov 2026): `upto` = time of the last turn it covers. */
+export interface ConversationMemory { summary: string; upto: number }
+export interface Conversation { id: string; messages: Msg[]; memory?: ConversationMemory }
 
 export const textOf = (m: Msg) => m.parts.map((p) => (p.kind === 'text' ? p.text : '')).join('');
 
@@ -309,4 +314,31 @@ export function history(): { role: 'user' | 'assistant'; content: string }[] {
     .messages.filter((m) => m.status !== 'error' && textOf(m).trim())
     .slice(-40)
     .map((m) => ({ role: m.role, content: textOf(m) }));
+}
+
+/**
+ * What a new voice session of this conversation gets (gateway voice/memory.js): the id, the turns the chat window shows (text only,
+ * oldest first, at most 200, each with its time) and the gateway's last running summary of it.
+ */
+export function voiceConversation(now = Date.now()): { id: string; now: number; turns: { role: 'user' | 'assistant'; content: string; ts: number; context?: boolean }[]; memory?: ConversationMemory } {
+  const c = convStore.get();
+  const all = c.messages
+    .filter((m) => m.status !== 'error' && !m.speaking && !m.quiet && textOf(m).trim())
+    .slice(-200)
+    .map((m) => ({ role: m.role, content: textOf(m).slice(0, 4000), ts: m.ts, ...(m.memoryContext ? { context: true } : {}) }));
+  // newest first up to ~100k characters: the start message must stay far below the socket's 1 MiB limit (critic M5)
+  let size = 0, from = all.length;
+  while (from > 0 && size + all[from - 1].content.length <= 100_000) { size += all[from - 1].content.length; from -= 1; }
+  return { id: c.id, now, turns: all.slice(from), ...(c.memory?.summary ? { memory: c.memory } : {}) };
+}
+
+/** A final voice transcript the gateway flagged: computer-run words (quiet) or a context turn that is not his own word. */
+export const markMemory = (id: string, flags: { quiet?: boolean; context?: boolean }) => patch(id, (m) => ({ ...m, ...(flags.quiet ? { quiet: true } : {}), ...(flags.context ? { memoryContext: true } : {}) }));
+
+/** The gateway's newer running summary for conversation `id` (ignored when another conversation is open now, or when it is older). */
+export function setConversationMemory(id: string, memory: ConversationMemory) {
+  if (!memory?.summary || !Number.isFinite(memory.upto)) return;
+  const c = convStore.get();
+  if (c.id !== id || (c.memory && c.memory.upto > memory.upto)) return;
+  convStore.set({ ...c, memory: { summary: memory.summary.slice(0, 4000), upto: memory.upto } });
 }
