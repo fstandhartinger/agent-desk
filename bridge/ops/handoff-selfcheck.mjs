@@ -4,7 +4,10 @@
 //
 //   1. the handoff thread exists, is not archived and is a pinned topic (`topic:desk-handoffs`) -> HEALS it (unarchive + topic)
 //   2. agent-desk-bridge.service is active
-//   3. the bridge journal (24 h) shows a live connection to the desk and no "board failed"
+//   3. the desk gateway lists this bridge as connected (public /healthz, no secrets); only when the gateway cannot be asked, the bridge
+//      journal decides. The user journal keeps only a few hours on Sandy (15 Nov 2026: oldest entry 02:05Z, the 14 Nov 15:34Z "connected
+//      to" line was gone and the check cried "never-seen" while the bridge was connected), so the journal alone cannot prove an outage.
+//   4. the bridge journal shows no "board failed" in the last 24 h (as far as the journal reaches; the status line says how far)
 //
 // Prints ONE status line. A problem it cannot heal becomes ONE `finding` entry in board thread 15 addressed to @cos-deputy-opus, as identity
 // agent-desk-selfcheck, at most once per 24 h (state file). Healed problems are only logged. `--dry-run` changes and posts nothing.
@@ -27,6 +30,8 @@ const CFG = {
   findingThread: env.SELFCHECK_FINDING_THREAD || '15', // Ops & security, by id
   addressee: env.SELFCHECK_TO || '@cos-deputy-opus',
   identity: 'agent-desk-selfcheck',
+  healthUrl: env.SELFCHECK_HEALTH_URL ?? 'https://desk.app.mintapis.com/healthz', // 'off' = journal only
+  bridgeHost: env.SELFCHECK_BRIDGE_HOST || 'sandy',
   stateFile: env.SELFCHECK_STATE_FILE || path.join(env.SELFCHECK_STATE_DIR || path.join(HOME, '.cache', 'agent-desk'), 'handoff-selfcheck.json'),
   now: () => (env.SELFCHECK_NOW ? new Date(env.SELFCHECK_NOW) : new Date()),
 };
@@ -77,6 +82,20 @@ export function boardFailures(journal) {
   return bridgeLines(journal).filter((l) => /board failed/.test(l.text));
 }
 
+/** The gateway's own view: {reachable:true, listed} from /healthz ({ok, bridges:[host…]}), or {reachable:false, why}. */
+export async function gatewayView(url, host, { timeoutMs = 10_000 } = {}) {
+  if (!url || url === 'off') return { reachable: false, why: 'off' };
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json' } });
+    if (!res.ok) return { reachable: false, why: `HTTP ${res.status}` };
+    const body = await res.json();
+    if (!Array.isArray(body?.bridges)) return { reachable: false, why: 'no bridges list' };
+    return { reachable: true, listed: body.bridges.includes(host) };
+  } catch (err) {
+    return { reachable: false, why: oneLine(err?.cause?.code ?? err?.name ?? err?.message ?? err, 60) };
+  }
+}
+
 function readState() {
   try { return JSON.parse(fs.readFileSync(CFG.stateFile, 'utf8')); } catch { return {}; /* first run or unreadable: nothing posted yet */ }
 }
@@ -124,22 +143,34 @@ export async function selfcheck({ dryRun = false } = {}) {
   facts.push(`bridge=${state}`);
   if (state !== 'active') problems.push(`${CFG.unit}.service is ${state}; the desk cannot reach the board or Sandy`);
 
-  // ---- 3. the bridge journal -------------------------------------------------------------------------------------------
+  // ---- 3. + 4. the desk connection (gateway first) and the bridge journal -----------------------------------------------------
+  const gw = await gatewayView(CFG.healthUrl, CFG.bridgeHost);
   const journal = await run(CFG.journalctl, ['--user', '-u', `${CFG.unit}.service`, '--since', '7 days ago', '-o', 'cat', '--no-pager'], { timeout: 30_000 });
-  if (!journal.ok && !journal.stdout) {
-    problems.push(`bridge journal unreadable (${oneLine(journal.stderr || journal.error, 100)})`);
-  } else {
-    let conn = connectionState(journal.stdout, now.getTime());
-    if (!conn) { // critic S6: a connection stable for more than 7 days has no line in the window; the newest connect/disconnect line counts then
-      const newest = await run(CFG.journalctl, ['--user', '-u', `${CFG.unit}.service`, '-o', 'cat', '--no-pager', '-r', '-n', '1', '-g', 'bridge (connected to|disconnected, retry in)'], { timeout: 30_000 });
-      if (newest.stdout) conn = connectionState(newest.stdout, now.getTime());
-    }
-    if (!conn) { facts.push('desk=never-seen'); problems.push('the bridge journal of the last 7 days shows no connection to the desk'); }
-    else { facts.push(`desk=${conn.connected ? 'connected' : 'reconnecting'} since ${new Date(conn.at).toISOString().slice(0, 16)}Z`); if (!conn.ok) problems.push(`the bridge lost its connection to the desk at ${new Date(conn.at).toISOString().slice(0, 16)}Z and has not come back`); }
+  const journalOk = journal.ok || Boolean(journal.stdout);
+  const lines = journalOk ? bridgeLines(journal.stdout) : [];
+  const reach = lines.length ? `journal_since=${new Date(lines[0].at).toISOString().slice(0, 16)}Z` : 'journal_since=none';
+  let conn = journalOk ? connectionState(journal.stdout, now.getTime()) : null;
+  if (journalOk && !conn) { // critic S6: a connection stable for more than 7 days has no line in the window; the newest connect/disconnect line counts then
+    const newest = await run(CFG.journalctl, ['--user', '-u', `${CFG.unit}.service`, '-o', 'cat', '--no-pager', '-r', '-n', '1', '-g', 'bridge (connected to|disconnected, retry in)'], { timeout: 30_000 });
+    if (newest.stdout) conn = connectionState(newest.stdout, now.getTime());
+  }
+  const since = (c) => new Date(c.at).toISOString().slice(0, 16);
+  if (gw.reachable && gw.listed) facts.push(`desk=connected (gateway lists ${CFG.bridgeHost})`);
+  else if (gw.reachable) { // the gateway answers but does not list this bridge: a reconnect in progress is fine, anything else is a break
+    if (conn && !conn.connected && conn.ok) facts.push(`desk=reconnecting since ${since(conn)}Z (gateway does not list ${CFG.bridgeHost} yet)`);
+    else { facts.push(`desk=NOT-LISTED by the gateway`); problems.push(`the desk gateway does not list the ${CFG.bridgeHost} bridge as connected${conn ? ` (journal: ${conn.connected ? 'connected' : 'disconnected'} ${since(conn)}Z)` : ''}`); }
+  } else { // gateway not reachable: the journal decides, as before
+    const gwNote = gw.why === 'off' ? '' : ` (gateway unreachable: ${gw.why})`;
+    if (!journalOk) problems.push(`bridge journal unreadable (${oneLine(journal.stderr || journal.error, 100)})${gwNote}`);
+    else if (!conn) { facts.push(`desk=never-seen${gwNote}`); problems.push(`the bridge journal (${reach}) shows no connection to the desk${gwNote}`); }
+    else { facts.push(`desk=${conn.connected ? 'connected' : 'reconnecting'} since ${since(conn)}Z${gwNote}`); if (!conn.ok) problems.push(`the bridge lost its connection to the desk at ${since(conn)}Z and has not come back${gwNote}`); }
+  }
+  if (journalOk) {
+    facts.push(reach);
     const recent = boardFailures(journal.stdout).filter((l) => Number.isFinite(l.at) && now.getTime() - l.at <= DAY_MS);
     facts.push(`board_failed_24h=${recent.length}`);
     if (recent.length) problems.push(`${recent.length} handoff post(s) failed in the last 24 h; last (${new Date(recent.at(-1).at).toISOString().slice(0, 16)}Z): ${oneLine(recent.at(-1).text, 200)}`);
-  }
+  } else if (gw.reachable) facts.push('journal=unreadable (board failures not checked)');
 
   // ---- the one status line, the healed log, the one finding --------------------------------------------------------------
   const verdict = problems.length ? 'PROBLEM' : healed.length ? 'HEALED' : would.length ? 'WOULD-HEAL' : 'OK';

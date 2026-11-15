@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { boardFailures, connectionState, findThread, parseThreadLine } from '../ops/handoff-selfcheck.mjs';
+import http from 'node:http';
+import { boardFailures, connectionState, findThread, gatewayView, parseThreadLine } from '../ops/handoff-selfcheck.mjs';
 
 // a#41d6d2 (14 Nov 2026): the daily handoff selfcheck, run as the real script against fake agent-board / systemctl / journalctl binaries.
 const exec = promisify(execFile);
@@ -48,7 +49,7 @@ esac
   const env = (extra = {}) => ({
     PATH: process.env.PATH, HOME: dir,
     SELFCHECK_BOARD_BIN: path.join(dir, 'agent-board'), SELFCHECK_SYSTEMCTL: path.join(dir, 'systemctl'), SELFCHECK_JOURNALCTL: path.join(dir, 'journalctl'),
-    SELFCHECK_STATE_DIR: path.join(dir, 'state'), SELFCHECK_NOW: NOW, ...extra,
+    SELFCHECK_STATE_DIR: path.join(dir, 'state'), SELFCHECK_NOW: NOW, SELFCHECK_HEALTH_URL: 'off', ...extra,
   });
   const run = async (args = [], extra = {}) => {
     try { const r = await exec('node', [script, ...args], { env: env(extra) }); return { code: 0, out: r.stdout.trim() }; }
@@ -90,7 +91,7 @@ test('healthy: one OK line, exit 0, no board writes', async () => {
   const s = sandbox('ok');
   const r = await s.run();
   assert.equal(r.code, 0);
-  assert.match(r.out, /^agent-desk handoff-selfcheck OK: thread=#31 active topic=desk-handoffs bridge=active desk=connected since 2026-11-12T08:00Z board_failed_24h=0$/);
+  assert.match(r.out, /^agent-desk handoff-selfcheck OK: thread=#31 active topic=desk-handoffs bridge=active desk=connected since 2026-11-12T08:00Z journal_since=2026-11-12T08:00Z board_failed_24h=0$/);
   assert.deepEqual(s.mutations(), []);
   assert.deepEqual(s.reads(), ['threads --archived'], 'the read has no --as (works through the LeChonk relay too)');
   assert.ok(!fs.existsSync(s.file('state/handoff-selfcheck.json')));
@@ -190,4 +191,54 @@ test('the check itself broke (no board binary): a PROBLEM line, never a crash wi
   const r = await s.run([], { SELFCHECK_BOARD_BIN: path.join(s.dir, 'does-not-exist') });
   assert.equal(r.code, 1);
   assert.match(r.out, /PROBLEM: .*problems: agent-board threads failed/);
+});
+
+/** A fake desk gateway: GET /healthz answers `body` with `status`; returns {url, close}. */
+async function fakeGateway(body, status = 200) {
+  const srv = http.createServer((req, res) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${srv.address().port}/healthz`, close: () => new Promise((r) => srv.close(r)) };
+}
+
+test('gateway first (15 Nov 2026: the journal had rotated, the bridge was connected): a listed bridge is connected whatever the journal says', async () => {
+  const gw = await fakeGateway({ ok: true, bridges: ['sandy', 'lechonk'] });
+  try {
+    const rotated = '2026-11-14T12:00:00.000Z bridge secret-windows.json rebuilt from the secret stores';
+    const r = await sandbox('gw-listed', { journal: rotated }).run([], { SELFCHECK_HEALTH_URL: gw.url });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /OK: .*desk=connected \(gateway lists sandy\) journal_since=2026-11-14T12:00Z board_failed_24h=0/);
+    const failed = '2026-11-14T11:00:00.000Z bridge handoff failed (nothing posted): not-posted: board failed: x';
+    const f = await sandbox('gw-listed-failed', { journal: `${rotated}\n${failed}` }).run([], { SELFCHECK_HEALTH_URL: gw.url });
+    assert.equal(f.code, 1, 'a failed post is still a problem when the gateway is fine');
+    assert.match(f.out, /board_failed_24h=1/);
+  } finally { await gw.close(); }
+});
+
+test('gateway answers without this bridge: a problem, unless the journal shows a reconnect in its grace minutes', async () => {
+  const gw = await fakeGateway({ ok: true, bridges: ['lechonk'] });
+  try {
+    const gone = await sandbox('gw-gone').run([], { SELFCHECK_HEALTH_URL: gw.url });
+    assert.equal(gone.code, 1);
+    assert.match(gone.out, /desk=NOT-LISTED .*problems: the desk gateway does not list the sandy bridge as connected \(journal: connected 2026-11-12T08:00Z\)/);
+    const fresh = await sandbox('gw-reconnect', { journal: `${CONNECTED}\n2026-11-14T12:58:00.000Z bridge disconnected, retry in 900 ms` }).run([], { SELFCHECK_HEALTH_URL: gw.url });
+    assert.equal(fresh.code, 0, fresh.out);
+    assert.match(fresh.out, /desk=reconnecting since 2026-11-14T12:58Z \(gateway does not list sandy yet\)/);
+  } finally { await gw.close(); }
+});
+
+test('gateway unreachable or odd: the journal decides and the line says why the gateway did not count', async () => {
+  const bad = await fakeGateway('oops', 502);
+  try {
+    const r = await sandbox('gw-502', { journal: '-- No entries --' }).run([], { SELFCHECK_HEALTH_URL: bad.url });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /desk=never-seen \(gateway unreachable: HTTP 502\).*problems: the bridge journal \(journal_since=none\) shows no connection to the desk \(gateway unreachable: HTTP 502\)/);
+    const ok = await sandbox('gw-502-journal').run([], { SELFCHECK_HEALTH_URL: bad.url });
+    assert.equal(ok.code, 0, ok.out);
+    assert.match(ok.out, /desk=connected since 2026-11-12T08:00Z \(gateway unreachable: HTTP 502\)/);
+  } finally { await bad.close(); }
+  assert.deepEqual(await gatewayView('off', 'sandy'), { reachable: false, why: 'off' });
+  const odd = await fakeGateway({ ok: true });
+  try { assert.deepEqual(await gatewayView(odd.url, 'sandy'), { reachable: false, why: 'no bridges list' }); } finally { await odd.close(); }
+  const closed = await gatewayView('http://127.0.0.1:9/healthz', 'sandy', { timeoutMs: 2000 });
+  assert.equal(closed.reachable, false);
 });
