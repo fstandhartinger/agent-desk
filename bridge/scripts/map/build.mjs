@@ -754,7 +754,7 @@ const ROOT_INFO = {
   gpu: { title: 'GPU', text: 'GPU-Ledger als stündlicher Export (Pod-Stunden, USD, laufende Pods): daten/gpu-ledger.', open: 'read_file("/home/flori/desk-knowledge/exports/gpu-ledger.md")', live: true },
   mail: { title: 'Mail', text: 'Florians Postfächer (nur lesen, live). mail_search.', open: 'mail_search(query="<Stichwort>")', live: true },
   discord: { title: 'Discord', text: 'Discord-DMs und Kanäle (nur lesen, live). discord_read.', open: 'discord_read()', live: true },
-  datenbanken: { title: 'Datenbanken', text: 'Umsatz, Kunden und Traffic als stündliche Kennzahlen: daten/cockpit. Direkte SQL-Abfragen: Phase 2, noch nicht angeschlossen.', open: 'read_file("/home/flori/desk-knowledge/exports/cockpit.md")', live: true },
+  datenbanken: { title: 'Datenbanken', text: 'Produktionsdatenbank als stündliche Kennzahlen (Konten, Zahler, Einzahlungen, Nutzung je Tag und Modell): daten/datenbank; Umsatz, Traffic, Kapazität: daten/cockpit. Freie SQL-Abfragen gibt es nicht (keine Rolle in Produktion).', open: 'read_file("/home/flori/desk-knowledge/exports/datenbank.md")', live: true },
   web: { title: 'Web', text: 'Websuche und HTTP-Abruf: Phase 2, noch nicht angeschlossen.', live: true },
 };
 

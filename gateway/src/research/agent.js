@@ -14,7 +14,9 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 export const BUDGET = Object.freeze({ rounds: 8, ms: 110_000, usd: 0.25, parallel: 4, subChunks: 12, subParallel: 4 });
 export const WARM_CHARS = 2800;
 // Questions about the internet keep the web tools: no warm start (it reads our own data, which closes the web; taint rule).
-const WEB_QUESTION = /\b(?:web|internet|online|webseite|website|homepage|im netz|googl\w*)\b/i;
+// Broader since the web tools exist (web-tools review): outside facts, prices, versions, news. An own-data question that matches only
+// loses the warm start (one round), never correctness.
+const WEB_QUESTION = /\b(?:web|internet|online|webseite|website|homepage|im netz|googl\w*|recherchier\w*|nachrichten|news|neueste[nrs]? version|release notes|changelog|dokumentation|docs?|github|wikipedia|hersteller|marktpreis\w*|listenpreis\w*|preisliste|was kostet .{0,40} bei)\b/i;
 // Search words of a spoken question: content words only (a whole sentence is no search query, and the bridge refuses long
 // tokens that look like key fragments).
 const STOP = new Set(('mit wie viel viele vielen habe hab hast hat haben hatte hatten ich du er sie es wir ihr man mir mich dir mein meine meinen meinem meiner '
