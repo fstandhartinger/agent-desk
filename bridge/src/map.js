@@ -129,7 +129,7 @@ export function buildMatch(query) {
 
 // ---- candidates, ranking, snippets ------------------------------------------------------------------------------------------------
 // curated pages first (the same idea as ctx.search: a knowledge page beats a job note that merely mentions the words)
-const SOURCE_BONUS = { wissen: 8, entscheidungen: 3, regeln: 3, 'chats/laptop': 1.5, code: 1, skills: 0.5 };
+const SOURCE_BONUS = { daten: 5, wissen: 8, entscheidungen: 3, regeln: 3, 'chats/laptop': 1.5, code: 1, skills: 0.5 };
 const COVERAGE_WEIGHT = 6;
 const FRESH_WEIGHT = 3;
 const FRESH_HALF_LIFE_DAYS = 60;

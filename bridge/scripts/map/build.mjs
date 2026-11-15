@@ -228,6 +228,20 @@ const CORE_DOCS = [
   { file: path.join(HOME, '.hermes', 'model-economy-policy.md'), node: 'regeln/model-economy-policy.md', hint: 'model-economy-policy.md (Modellwahl)', analyze: 'plain', sort: 3 },
 ];
 
+/** ~/desk-knowledge/exports/*.md: hourly exports of Sandy-only sources (GPU ledger, cockpit aggregates; exporter on Sandy). */
+function collectExports() {
+  const dir = path.join(KNOWLEDGE_DIR, 'exports');
+  const entries = readdirOrNull(dir);
+  if (!entries) return { sources: [], descs: [], ok: true }; // no exports on this host (tests, a fresh LeChonk): nothing to index, nothing removed
+  const descs = [];
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.md') || e.name.startsWith('.')) continue;
+    const d = allowedFile(path.join(dir, e.name), { source: 'daten', node: `daten/${slug(e.name.replace(/\.md$/, ''))}`, parent: 'daten', sort: 10, analyze: 'plain' });
+    if (d) descs.push(d);
+  }
+  return { sources: ['daten'], descs, ok: true };
+}
+
 function collectWissen() {
   const descs = [];
   const idx = allowedFile(path.join(KNOWLEDGE_DIR, 'INDEX.md'), { source: 'wissen', node: 'wissen/INDEX', parent: 'wissen', sort: 0, analyze: 'plain', titleHint: 'INDEX (Themenverzeichnis)' });
@@ -409,7 +423,7 @@ function collectExplainer() {
   return { sources: ['explainer'], descs, ok: true };
 }
 
-const COLLECTORS = [collectWissen, collectDecisions, collectRegeln, collectJobs, collectJobsData, collectLaptop, collectSkills, collectCode, collectExplainer];
+const COLLECTORS = [collectWissen, collectExports, collectDecisions, collectRegeln, collectJobs, collectJobsData, collectLaptop, collectSkills, collectCode, collectExplainer];
 
 // ---- board (sandy-read board-sql, incremental by entry id) ------------------------------------------------------------------
 function boardSql(o, sql) {
@@ -724,6 +738,7 @@ const ROOT_INFO = {
   wissen: { title: 'Wissen', text: 'Kuratierte Themenseiten (Steuer, Server, Engines, Kunden …): die verlässlichsten Zusammenfassungen, zuerst lesen.', live: false },
   entscheidungen: { title: 'Entscheidungen', text: 'DECISIONS.md: jede Entscheidung von Florian und den Agenten, neueste zuerst, nach Monat und Eintrag.', live: false },
   'chats/laptop': { title: 'Laptop-Chats', text: 'Florians eigene Worte und die Antworten des Laptop-Agenten: Projekt → Sitzung → Tag; dazu die Notizen des Laptop-Agenten (memory/).', live: false },
+  daten: { title: 'Daten (Kennzahlen)', text: 'Stündliche Exporte: GPU-Ledger (Pod-Stunden und USD je Tag, Job, Anbieter, laufende Pods, Spitzen) und Ops-Cockpit (Umsatz, zahlende Kunden, aktive Konten, Traffic, Kapazität, SN92, Betrieb; nur Summen, keine Namen).', live: false },
   'desk-sitzungen': { title: 'Desk-Sitzungen', text: 'Frühere Gespräche mit dem Agent Desk (Sprache und Text). Live: conversation_history, desk_sessions, session_trace.', open: 'desk_sessions()', live: true },
   jobs: { title: 'Jobs', text: 'Alle Job-Ordner der Agenten (Notizen STATE/RESULT/PROMPT), nach Monat; jeder Job mit Status und erster Zeile des Ergebnisses.', live: false },
   board: { title: 'Agent-Board', text: 'Das gemeinsame Board der Agenten: Threads und alle Einträge (volltextindiziert). Live: board_threads, board_read, board_search.', live: false },
@@ -736,10 +751,10 @@ const ROOT_INFO = {
   code: { title: 'Code', text: 'Die Code-Repos (agent-desk, explainer-pages): README und Doku indiziert, Ordner mit code_outline.', live: false },
   ledger: { title: 'Ledger', text: 'Geldbewegungen und Ausgaben (finanziell, nur lesen). Live: ledger_spend.', open: 'ledger_spend()', live: true },
   server: { title: 'Server', text: 'Zustand der Server über feste Lesebefehle: run_readonly quota_status, disk, jobs_running, sched_list, asks_open.', open: 'run_readonly(command="quota_status")', live: true },
-  gpu: { title: 'GPU', text: 'GPU-Ledger, kommt.', live: true },
+  gpu: { title: 'GPU', text: 'GPU-Ledger als stündlicher Export (Pod-Stunden, USD, laufende Pods): daten/gpu-ledger.', open: 'read_file("/home/flori/desk-knowledge/exports/gpu-ledger.md")', live: true },
   mail: { title: 'Mail', text: 'Florians Postfächer (nur lesen, live). mail_search.', open: 'mail_search(query="<Stichwort>")', live: true },
   discord: { title: 'Discord', text: 'Discord-DMs und Kanäle (nur lesen, live). discord_read.', open: 'discord_read()', live: true },
-  datenbanken: { title: 'Datenbanken', text: 'App-Datenbanken (Umsatz, Logs, Benchmark Heaven): Phase 2, noch nicht angeschlossen.', live: true },
+  datenbanken: { title: 'Datenbanken', text: 'Umsatz, Kunden und Traffic als stündliche Kennzahlen: daten/cockpit. Direkte SQL-Abfragen: Phase 2, noch nicht angeschlossen.', open: 'read_file("/home/flori/desk-knowledge/exports/cockpit.md")', live: true },
   web: { title: 'Web', text: 'Websuche und HTTP-Abruf: Phase 2, noch nicht angeschlossen.', live: true },
 };
 

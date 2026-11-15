@@ -124,7 +124,7 @@ test('sources land in the right nodes with canonical paths, summaries, statuses 
 
 test('root: every source, in order, every node carries an open hint', { skip }, () => {
   const root = all("SELECT path FROM nodes WHERE parent = '' ORDER BY sort").map((r) => r.path);
-  assert.deepEqual(root, ['wissen', 'entscheidungen', 'chats/laptop', 'desk-sitzungen', 'jobs', 'board', 'chats/sandy', 'chats/lechonk', 'regeln', 'artefakte', 'skills', 'explainer', 'code', 'ledger', 'server', 'gpu', 'mail', 'discord', 'datenbanken', 'web']);
+  assert.deepEqual(root, ['wissen', 'entscheidungen', 'chats/laptop', 'daten', 'desk-sitzungen', 'jobs', 'board', 'chats/sandy', 'chats/lechonk', 'regeln', 'artefakte', 'skills', 'explainer', 'code', 'ledger', 'server', 'gpu', 'mail', 'discord', 'datenbanken', 'web']);
   assert.equal(all("SELECT path FROM nodes WHERE open IS NULL OR open = ''").length, 0);
 });
 

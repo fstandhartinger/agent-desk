@@ -40,12 +40,12 @@ test('status before the first build: not built, never a crash', { skip }, async 
   map.setMapDirForTests(fx.mapDir);
 });
 
-test('discover root: 20 sources in order, each line has path/title/summary/class/open', { skip }, async () => {
+test('discover root: 21 sources in order, each line has path/title/summary/class/open', { skip }, async () => {
   const r = await map.discover({ limit: 40 });
   assert.equal(r.path, '');
-  assert.equal(r.total, 20);
+  assert.equal(r.total, 21);
   assert.equal(r.nextOffset, null);
-  assert.deepEqual(r.lines.slice(0, 5).map((l) => l.path), ['wissen', 'entscheidungen', 'chats/laptop', 'desk-sitzungen', 'jobs']);
+  assert.deepEqual(r.lines.slice(0, 5).map((l) => l.path), ['wissen', 'entscheidungen', 'chats/laptop', 'daten', 'desk-sitzungen']);
   for (const l of r.lines) {
     assert.ok(l.title && l.summary && l.open, `line ${l.path} has title, summary and open`);
     assert.ok(['open', 'personal', 'finance'].includes(l.class));
@@ -65,11 +65,11 @@ test('discover paging: limit, offset, total, nextOffset; default 20, max 40', { 
   assert.equal(a.nextOffset, 8);
   const b = await map.discover({ limit: 8, offset: a.nextOffset });
   const c = await map.discover({ limit: 8, offset: b.nextOffset });
-  assert.equal(c.lines.length, 4);
+  assert.equal(c.lines.length, 5);
   assert.equal(c.nextOffset, null);
   assert.deepEqual([...a.lines, ...b.lines, ...c.lines].map((l) => l.path), (await map.discover({ limit: 40 })).lines.map((l) => l.path));
   assert.equal((await map.discover({})).lines.length, 20);
-  assert.equal((await map.discover({ limit: 9999 })).lines.length, 20, 'the limit is capped at 40');
+  assert.equal((await map.discover({ limit: 9999 })).lines.length, 21, 'the limit is capped at 40');
   assert.equal((await map.discover({ limit: 0 })).lines.length, 1, 'and floored at 1');
   const decisions = await map.discover({ path: 'entscheidungen/2026-11', limit: 1 });
   assert.equal(decisions.total, 2);
