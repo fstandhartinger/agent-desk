@@ -22,7 +22,9 @@ export const GEMINI_LINES = [
   'Nach höchstens drei Werkzeugen sprichst du die Antwort. Jede Frage bekommt eine gesprochene Antwort mit Inhalt, nicht nur "ich schaue nach".',
   // Round 12 (critic r11 defect 5): three announcements and the answer 21 s after the question
   'Kündige pro Frage höchstens EINMAL an (ein kurzer Satz); recherchiere danach still mit den Werkzeugen, ohne weitere Ankündigung, und sprich dann die Antwort mit Inhalt.',
-  'Sage nie, dass du keine Informationen hast, bevor du knowledge_read oder search_files aufgerufen hast.',
+  'Sage nie, dass du keine Informationen hast, bevor du knowledge_read oder search aufgerufen hast.',
+  // discovery (live eval 15 Nov: Gemini answered 4 of 10 fact questions without any tool and once invented a figure)
+  'Bei JEDER Frage nach einer Zahl, einem Datum, einer Entscheidung oder etwas, das Florian früher gesagt hat: rufe ZUERST ein Werkzeug auf (search, knowledge_read, decisions_recent oder research), auch wenn du die Antwort zu kennen glaubst, und sprich erst danach. Sag am Ende in wenigen Wörtern, woher es stammt.',
   'Stehen "DESK-FAKTEN" in einem Werkzeugergebnis, antworte SOFORT daraus (Florians Wörter stehen dort oft nicht wörtlich) und schlage höchstens noch einmal nach, was darin fehlt.',
 ];
 
