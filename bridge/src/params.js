@@ -55,6 +55,11 @@ export const METHOD_PARAMS = {
   'notify.loginLink': { url: 'string' },
   // voice computer runs (server_read): one named unit or job unit, 200 lines at most, both hosts
   'journal.tail': { unit: 'string', job: 'string', lines: 'integer' },
+  // the map (LeChonk bridge only): table of contents, full-text search, state of the index (docs/DISCOVERY.md)
+  'map.discover': { path: 'string', query: 'string', offset: 'integer', limit: 'integer', since: 'string' },
+  'map.search': { query: 'string', source: 'string', path: 'string', limit: 'integer', since: 'string', offset: 'integer' },
+  'map.status': {},
+  'laptop.recent': { limit: 'integer' },
   'audit.append': { ts: 'string', actor: 'string', ip_hash: 'string', action: 'string', detail: 'string', cost_usd: 'number' },
   'audio.append': { aid: 'string', chunks: 'array' },
   'audio.finish': { aid: 'string' },

@@ -30,6 +30,10 @@ export const cfg = {
   // GPT-Live delegation backend (round 10, measured live: see the r10 RESULT); Astra is never run at high/xhigh
   openaiDelegateModel: () => env('DESK_OPENAI_DELEGATE_MODEL', 'gpt-6-astra'), // Florian 14 Nov: Astra "weil es besonders intelligent ist"; astra/low measured as fast as sol/low (agent-desk-fixes-20261114)
   openaiDelegateEffort: () => env('DESK_OPENAI_DELEGATE_EFFORT', 'low'),
+  // background research agent (gateway/src/research): measured on the discovery test set; zero-data-retention routing is required for it
+  researchModel: () => env('DESK_RESEARCH_MODEL', 'deepseek/deepseek-v4.1-flash'), // eval r5: 75 % correct with source, median 8 s, USD 0.004 (Gemini 3.8 Flash 70 %, 12 s, USD 0.023)
+  researchSubModel: () => env('DESK_RESEARCH_SUB_MODEL') || cfg.researchModel(),
+  research: () => env('DESK_RESEARCH', 'on') !== 'off', // kill switch: off = the research tool says it is unavailable
   voiceWatchdogMs: () => Number(env('DESK_VOICE_WATCHDOG_MS', '6000')), // no assistant audio this long after a tool result -> ask again
   voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '10000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)
   visionCapUsdHour: () => Number(env('DESK_VISION_CAP_USD_HOUR', '0.6')), // screen vision cost per session hour (sliding window)

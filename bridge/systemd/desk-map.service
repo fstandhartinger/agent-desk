@@ -1,0 +1,10 @@
+[Unit]
+Description=Agent Desk map and full-text index refresh (writes only ~/desk-knowledge/map)
+
+[Service]
+Type=oneshot
+ExecStart=%h/apps/agent-desk-bridge/scripts/map/refresh.sh
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=20min

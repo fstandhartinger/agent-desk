@@ -47,6 +47,8 @@ export const MAX_RESEARCH_TOOLS = { gemini: 3, openai: 6 }; // a#a54cbb t9 (15 N
 const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 // Action tools wait for him to finish and are no research: they never count against the research cap
 const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job', 'computer_task']);
+// Discovery (job agent-desk-context-discovery-20261115): the background research is the way out of the cap, never counted against it
+const UNCAPPED = new Set(['research', 'research_result']);
 const SPOKEN_KEEP = 12;
 const ECHO_MS = 20_000;
 const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
@@ -511,9 +513,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     // round 12: once the early facts went out with a tool result, Gemini may research once more, then it answers
     if (factsAt === null && adapter?.factsDelivered?.()) factsAt = researchTools;
     const cap = MAX_RESEARCH_TOOLS[provider] && factsAt !== null ? Math.min(MAX_RESEARCH_TOOLS[provider], factsAt + 1) : MAX_RESEARCH_TOOLS[provider];
-    if (cap && !DRAW_TOOLS.has(name) && !ACTION_TOOLS.has(name) && (researchTools += 1) > cap) {
+    if (cap && !DRAW_TOOLS.has(name) && !ACTION_TOOLS.has(name) && !UNCAPPED.has(name) && (researchTools += 1) > cap) {
       audit({ action: 'voice.tool.capped', detail: `${provider}:${name}` });
-      if (!closed) adapter.sendToolResult(id, requestedName, JSON.stringify({ error: `Recherche-Limit erreicht (${cap} Werkzeuge pro Frage): keine weiteren Werkzeuge. Antworte Florian jetzt auf Deutsch mit dem, was du bisher gefunden hast.` }));
+      if (!closed) adapter.sendToolResult(id, requestedName, JSON.stringify({ error: `Recherche-Limit erreicht (${cap} Werkzeuge pro Frage): keine weiteren Werkzeuge. Antworte Florian jetzt auf Deutsch mit dem, was du bisher gefunden hast; fehlt noch etwas, rufe research mit seiner Frage auf (läuft im Hintergrund).` }));
       return;
     }
     const pseudo = pseudoPathRefusal(name, args); // r6 P2-7
@@ -586,7 +588,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       adapter.sendToolResult(id, requestedName, output, { stale: true }); // OpenAI/xAI: keep the call/output pairing, no new response
       return;
     }
-    if (pending.active && DRAW_TOOLS.has(name) && asksForDrawing(pending.text) && /"status":\s*"zeichne"/.test(output)) {
+    if (pending.active && output.trimStart().startsWith('{"status":"recherchiere"')) { // only the research tool / its escalation start with it (review P2-6)
+      // the research runs in the background (research/manager.js): its one sentence now, the result later as a desk note; no recovery meanwhile
+      pending.active = false; pending.settled = turnId; clearTimeout(pending.timer);
+      trace.event('watchdog.settled', { turn: turnId, reason: 'research', name });
+    } else if (pending.active && DRAW_TOOLS.has(name) && asksForDrawing(pending.text) && /"status":\s*"zeichne"/.test(output)) {
       // "zeichne das": the running drawing is the answer; a recovery would add chatter next to it (a question that needs words is not settled here)
       pending.active = false; pending.settled = turnId; clearTimeout(pending.timer);
       trace.event('watchdog.settled', { turn: turnId, reason: 'drawing', name });
@@ -782,7 +788,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       return adapter?.setBriefing?.(out) ?? 'unsupported';
     } });
     // Computer runs (item F): the manager hears his finals, partials and the assistant's finals through the hooks above and speaks through say().
-    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj) });
+    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj), idle: () => !closed && !responding && runningTools === 0 && !pending.active && !speechOpen && now() - speechAt > 3000 });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.

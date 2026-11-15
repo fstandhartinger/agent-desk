@@ -1,0 +1,11 @@
+[Unit]
+Description=Agent Desk map refresh, every 15 minutes
+
+[Timer]
+# 15 minutes after the previous run FINISHED (a first full build may take a few minutes; no overlap)
+OnBootSec=2min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

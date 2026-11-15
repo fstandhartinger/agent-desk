@@ -19,6 +19,7 @@ const SAY = {
 export async function computerTask({ goal }, ctx, clock = ctx.clock ?? defaultClock) {
   const g = await gate('computer_task', ctx, clock, checkComputerTrigger, SAY, unrestricted() ? { settleMs: QUICK_SETTLE_MS } : {});
   if (g.refused) return g.refused;
+  if (ctx.research?.guarded?.(ctx.sid ?? 'desk')) { release(g, 'computer_task'); return out(false, 'Nichts passiert: eine Recherche hat eben Mails oder Webseiten gelesen; fünf Minuten lang ist die Computer-Steuerung deshalb gesperrt (Schutz gegen eingeschleuste Anweisungen). Sag Florian das in einem Satz.'); } // discovery review P1-2
   if (!ctx.computer?.begin) return release(g, 'computer_task'), out(false, 'Die Computer-Steuerung ist in diesem Kontext nicht verfügbar. Nichts passiert.');
   // unrestricted: his sentence may only be "ja, mach", so the loop also gets the task as the voice model understood it
   const text = unrestricted() && goal ? `${goal}${g.text ? ` (Florians Worte: ${g.text})` : ''}`.replace(/\s+/g, ' ') : g.text;

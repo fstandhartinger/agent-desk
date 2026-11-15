@@ -31,6 +31,8 @@ import { handleTranscribe } from './transcribe.js';
 import { createActivityViz } from './viz.js';
 import { handleVoiceUpgrade } from './voice/index.js';
 import { voiceCatalog } from './voice/voices.js';
+import { createResearchManager, withResearchAttach } from './research/manager.js';
+import { completeChat } from './llm.js';
 
 const EXPLAINER_ROUTE = /^\/api\/explainer\/([^/]+)\/([^/]+|end-frames\/\d{3}\.png)$/;
 
@@ -81,6 +83,8 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const artifacts = createArtifactService({ hub });
   const traces = createTraceService(traceOptions);
   const devices = createDeviceService({ artifacts, traces, hub, ...deviceOptions });
+  // background research agent (discovery job): one manager per gateway; voice sessions reach it through the computer attach (no session.js change)
+  const research = cfg.research() ? createResearchManager({ runTool, toolDefs: TOOL_DEFS, complete: (args) => completeChat({ ...args, zdrOnly: true }), model: cfg.researchModel(), subModel: cfg.researchSubModel(), log: (m) => console.log(`${new Date().toISOString()} ${short(m, 200)}`) }) : null;
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => /* ignored */ {}));
   const canvasBus = createCanvasBus();
@@ -125,7 +129,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
     if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
-    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, briefing: devices.briefing, traces });
+    if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, briefing: devices.briefing, traces, research });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
     if (pathname === '/api/claude/proposal/discard') return handleClaudeProposalDiscard(req, res, { sid, ip });
@@ -201,12 +205,12 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
       vision: devices.vision,
       briefing: devices.briefing,
-      computer: devices.computer,
+      computer: withResearchAttach(devices.computer, research),
       registerText: (send) => artifacts.registerVoice(sid, send),
       // the sound of the session, 30 days on LeChonk (Florian 15 Nov, card 19712); only when the LeChonk bridge has the method
       audioSink: { available: () => hub.hostsFor('audio.append').includes('lechonk'), append: (p) => hub.call('audio.append', p, { host: 'lechonk' }), finish: (p) => hub.call('audio.finish', p, { host: 'lechonk' }) },
       openTrace: ({ provider }) => (currentTrace = traces.open({ provider, kind: 'voice', sid })),
-      makeCtx: (page) => ({ artifacts, vision: devices.vision, briefing: devices.briefing, computer: devices.computer, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
+      makeCtx: (page) => ({ artifacts, vision: devices.vision, briefing: devices.briefing, computer: devices.computer, research, hub, page, limits, sid, ip, maxChars: 2500, trace: () => currentTrace, traces, audit: (entry) => audit({ ip, ...entry }) }),
       limits,
       audit: (entry) => audit({ ip, ...entry }),
       createViz: (emit) => createActivityViz({ emit, model: cfg.vizModel() }),

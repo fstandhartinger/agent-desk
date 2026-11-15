@@ -88,7 +88,7 @@ it('collect: three bridge calls in parallel, 2.5 s budget; a slow or failing sou
   assert.equal(r.sources.board.ok, true); assert.ok(r.sources.board.chars > 0);
   assert.equal(r.sources.karten.ok, false); assert.equal(r.sources.stand.ok, false);
   assert.ok(!JSON.stringify(r.sources).includes('abcdefghijklmnop'));
-  assert.deepEqual(hub.calls.map((c) => [c.method, c.o.timeoutMs]), [['board.recent', 120], ['notify.cardsRecent', 120], ['state.current', 120]]);
+  assert.deepEqual(hub.calls.map((c) => [c.method, c.o.timeoutMs]), [['board.recent', 120], ['notify.cardsRecent', 120], ['state.current', 120], ['laptop.recent', 120]]);
   assert.deepEqual(hub.calls[0].params, { hours: 6, limit: 40 }); assert.deepEqual(hub.calls[1].params, { hours: 12, limit: 20 });
   assert.match(r.text, /Fehlt: karten, stand, geraet/);
 });
@@ -117,7 +117,7 @@ it('attach: one briefing at start; the device part arriving later gives exactly 
   assert.equal(asked.length, 1); assert.match(asked[0][1], /^[0-9a-f]{8}$/);
   assert.match(sent[0], /Fehlt: geraet/, 'the start text is the index (a#41d6d2); the full briefing stays behind current_state');
   const start = traces.find(([t]) => t === 'briefing.start')[1];
-  assert.deepEqual(Object.keys(start.sources).sort(), ['board', 'geraet', 'karten', 'stand']);
+  assert.deepEqual(Object.keys(start.sources).sort(), ['board', 'geraet', 'karten', 'laptop', 'stand']);
   assert.ok(start.tocTokens > 0 && start.tocTokens <= 400, 'the index is within the 400-token budget');
   assert.ok(start.chars > sent[0].length, 'chars = the full briefing (current_state), more than the index that was sent');
   b.deviceIn('s4', { windows: [{ process: 'code', title: 'Fake' }], mainSession: { source: 'vscode', messages: [{ role: 'user', at: '2026-11-03T10:00:00Z', text: 'Fake topic of earlier' }] } }, asked[0][1]);

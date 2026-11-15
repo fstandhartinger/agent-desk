@@ -9,6 +9,7 @@ import { HOME, isDenied, jobsRoot } from './paths.js';
 export const MIRROR_DIR = process.env.BRIDGE_NOTES_MIRROR || path.join(HOME, '.cache', 'agent-desk', 'job-notes');
 const MARKER = '.synced';
 const NOTE = /\.(md|txt)$/i;
+const WORKER_NOTES = new Set(['RESULT.md', 'STATE.md', 'BRIEF.md']);
 const SKIP_DIRS = new Set(['node_modules', 'wt', 'work', '.git', 'venv', '.venv', '__pycache__']);
 const MAX_BYTES = 2 * 1024 * 1024;
 const REFRESH_MS = 5 * 60_000;
@@ -43,6 +44,10 @@ async function listNotes(root) {
         else if (e.isDirectory() && !SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) {
           for (const f of await entries(path.join(root, job.name, e.name))) {
             if (f.isFile() && NOTE.test(f.name) && !isDenied(f.name)) found.push(`${job.name}/${e.name}/${f.name}`);
+            // workers/<slice>/RESULT.md etc.: the detailed results of Fusion workers (discovery job, 15 Nov 2026)
+            else if (e.name === 'workers' && f.isDirectory() && !f.name.startsWith('.') && !isDenied(f.name)) {
+              for (const w of await entries(path.join(root, job.name, e.name, f.name))) if (w.isFile() && WORKER_NOTES.has(w.name)) found.push(`${job.name}/workers/${f.name}/${w.name}`);
+            }
           }
         }
       }

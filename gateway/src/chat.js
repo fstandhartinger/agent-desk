@@ -76,7 +76,7 @@ function parseArgs(raw) {
 }
 
 /** POST /api/chat → SSE. `session` = {sid, ip, hub, limits}. */
-export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, briefing, traces, canvasRegistry = conversationCanvases }) {
+export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision, briefing, traces, research = null, canvasRegistry = conversationCanvases }) {
   const body = await readJson(req);
   const messages = cleanMessages(body.messages);
   if (!messages) return sendJson(res, 400, { error: TEXT.badMessages });
@@ -133,7 +133,7 @@ export async function handleChat(req, res, { sid, ip, hub, limits, canvasBus, il
     canvas?.startTurn();
     canvas?.userTurn(lastUser);
     const ctx = {
-      artifacts, vision, briefing, canvas, hub, limits, sid, ip, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
+      artifacts, vision, briefing, canvas, hub, limits, sid, ip, research, page: page && { slug: page.slug, t: page.t, sceneId: page.sceneId, pointId: page.pointId, title: page.title, point: page.point, transcriptNear: page.transcriptNear },
       audit: (entry) => audit({ ip, ...entry }),
       trace: () => trace, traces, turn,
       conversation: { label: 'Chatfenster, letzte 40 Nachrichten; ältere und Sprachsitzungen über session', turns: () => cleanHistory(messages) }, // conversation_history in the text chat (critic: it was empty there)

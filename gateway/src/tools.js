@@ -13,6 +13,7 @@ import { describeSession } from './trace.js';
 import { conversationHistory, deskSessions } from './history.js';
 import { runVoiceAction } from './voiceActions.js';
 import { computerTask } from './computer/tool.js';
+import { DISCOVERY_HANDLERS, DISCOVERY_TOOL_DEFS, escalate } from './discover.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -120,6 +121,8 @@ export const TOOL_DEFS = [
     parameters: obj({ path: str('Absolute directory path') }, ['path']) },
   // --- 28 Oct read tools (docs/UPGRADES-1028.md §4). All READ-ONLY; handoff_propose only shows a button to Florian.
   ...READ_TOOL_DEFS(),
+  // --- discovery (job agent-desk-context-discovery-20261115, gateway/src/discover.js): map, full-text search, background research
+  ...DISCOVERY_TOOL_DEFS(),
 ];
 
 function READ_TOOL_DEFS() {
@@ -261,6 +264,10 @@ const STATUS = {
   look_at_screen: () => 'Ich sehe kurz hin …',
   current_state: () => 'Ich hole den aktuellen Überblick …',
   explainer_context: () => 'Ich schaue ins Hintergrunddokument …',
+  discover: () => 'Ich schaue ins Inhaltsverzeichnis …',
+  search: () => 'Ich suche überall …',
+  research: () => 'Ich lasse das recherchieren …',
+  research_result: () => 'Ich schaue, was die Recherche hat …',
 };
 
 /** Short German "I'm looking at …" line shown before a tool runs; null for tools that answer instantly. */
@@ -317,6 +324,10 @@ const ACTIVITY = {
   skill_read: ({ name }) => `Lese Skill ${snip(name, 30)}`,
   run_readonly: () => 'Prüfe den Status auf Sandy',
   handoff_propose: () => 'Bereite eine Übergabe an einen Agenten vor',
+  discover: ({ path }) => (path ? `Inhaltsverzeichnis: ${snip(path, 40)}` : 'Lese das Inhaltsverzeichnis'),
+  search: ({ query }) => `Suche überall: ${snip(query, 40)}`,
+  research: ({ question }) => `Recherche: ${snip(question, 45)}`,
+  research_result: () => 'Prüfe die Recherche',
 };
 /** The live-activity label of a tool call (German, <= ~70 characters, redacted); an unknown tool is shown by its name. */
 export function activityLabel(name, args = {}) {
@@ -560,16 +571,21 @@ export async function runTool(name, args, ctx) {
       const msg = 'Nichts passiert: während einer Computer-Steuerung und fünf Minuten danach ist web_read gesperrt. Sag Florian in einem Satz, dass er es danach noch einmal sagen kann.';
       return { ok: false, summary: short(msg, 200), content: msg };
     }
+    if (name === 'web_read' && ctx.research?.guarded?.(ctx.sid ?? 'desk')) { // discovery (critic A4): a research that read mails or web pages was just told; no web_read for 5 minutes
+      const msg = 'Nichts passiert: eine Recherche hat eben Mails oder Webseiten gelesen; fünf Minuten lang ist web_read deshalb gesperrt (Schutz gegen eingeschleuste Anweisungen). Sag Florian das in einem Satz.';
+      return { ok: false, summary: short(msg, 200), content: msg };
+    }
     if (def.voiceOnly) return await runVoiceAction(name, clean, ctx); // gate, audit, trace and redaction live there
     const started = Date.now();
     let host = 'gateway';
     let result;
+    let empty;
     try {
       if (BRIDGE_TOOLS[name]) {
         const [method, mapArgs] = BRIDGE_TOOLS[name];
         host = ctx.hub.pick?.(method) ?? 'bridge';
         result = await ctx.hub.call(method, mapArgs(clean, max));
-      } else if (READ_HANDLERS[name]) ({ result, host = host } = await READ_HANDLERS[name](clean, ctx, max));
+      } else if (READ_HANDLERS[name]) ({ result, host = host, empty } = await READ_HANDLERS[name](clean, ctx, max));
       else result = await gatewayTool(name, clean, ctx, max);
     } catch (err) {
       auditTool(ctx, name, clean, host, started, false);
@@ -593,6 +609,8 @@ export async function runTool(name, args, ctx) {
     const compact = { list_jobs: compactJobs, ledger_spend: compactLedger, code_outline: compactOutline, web_read: formatWebRead }[name];
     const text = compact ? compact(result, max) : toText(result);
     let content = truncate(text.length > OFFLOAD_FROM ? await redactAsync(text) : redact(text), max); // big results: off the event loop (critic r7)
+    const escalated = escalate(name, empty === undefined ? result : { empty }, ctx); // discovery: an empty quick search in voice starts research (discover.js)
+    if (escalated) content = `${escalated.trim()}\n---\n${content}`.slice(0, Math.max(max, 1200));
     if (name.startsWith('artifact_') || name === 'screen_context' || name === 'look_at_screen') content = artifactData(content.slice(0, Math.max(0, max - 100)));
     return { ok: true, summary: short(content, 200), content };
   } catch (err) {
@@ -713,4 +731,4 @@ async function handoffPropose({ title, task, why }, ctx) {
   return { result: { id: proposal.id, [HANDOFF_EVENT]: { type: 'handoff', id: proposal.id, title: proposal.title, task: proposal.task, why: proposal.why } }, host: 'gateway' };
 }
 
-const READ_HANDLERS = { web_read: webReadTool, chats_search: chatsSearch, chat_read: chatRead, discord_read: discordRead, handoff_propose: handoffPropose, claude_task: (args, ctx) => claudeTask(args, ctx).then((r) => ({ ...r, host: 'gateway' })) };
+const READ_HANDLERS = { web_read: webReadTool, chats_search: chatsSearch, chat_read: chatRead, discord_read: discordRead, handoff_propose: handoffPropose, claude_task: (args, ctx) => claudeTask(args, ctx).then((r) => ({ ...r, host: 'gateway' })), ...DISCOVERY_HANDLERS };
