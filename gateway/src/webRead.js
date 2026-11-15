@@ -14,9 +14,13 @@ export const WEB_LIMITS = { timeoutMs: 10_000, maxBytes: 3 * 1024 * 1024, maxRed
 const v4 = (cidr) => { const [ip, bits] = cidr.split('/'); return [ip, Number(bits)]; };
 // Not reachable from the public internet, or reserved; 10.89.0.0/24 (the PaaS network) is inside 10/8.
 const BLOCKED_V4 = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24',
-  '192.88.99.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4'].map(v4);
+  '192.88.99.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4',
+  // our own servers' PUBLIC addresses (web tools must never reach them, even through a public host name or a redirect): 65.109.49.103, 37.27.102.32, 65.108.15.165
+  '65.109.49.103/32', '37.27.102.32/32', '65.108.15.165/32'].map(v4);
 // 64:ff9b:1::/48 = local-use NAT64 (RFC 8215; the IPv4 sits at prefix-dependent bits, so the whole range is refused)
-const BLOCKED_V6 = [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['2001::', 32], ['100::', 64], ['64:ff9b:1::', 48]];
+// The last three /64s are our own servers' public IPv6 networks (see the IPv4 note above).
+const BLOCKED_V6 = [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['2001::', 32], ['100::', 64], ['64:ff9b:1::', 48],
+  ['2a01:4f9:5a:26c0::', 64], ['2a01:4f9:3070:1882::', 64], ['2a01:4f9:6a:4b62::', 64]];
 
 const list = new net.BlockList();
 for (const [ip, bits] of BLOCKED_V4) list.addSubnet(ip, bits, 'ipv4');
@@ -62,7 +66,7 @@ export function isPublicAddress(address) {
   return inner ? isPublicAddress(inner) : true;
 }
 
-const fail = (message, code = 'blocked') => Object.assign(new Error(message), { code });
+export const fail = (message, code = 'blocked') => Object.assign(new Error(message), { code });
 
 /** Parses and checks the URL itself (scheme, port, credentials). Returns the URL object. */
 export function checkUrl(raw) {
@@ -97,8 +101,10 @@ export function pinnedLookup({ address, family }) {
   };
 }
 
-/** Default transport: one GET to the pinned address. Resolves {status, headers, body: Readable}. */
-function nodeTransport({ url, address, signal }) {
+const WEB_READ_HEADERS = { 'user-agent': 'AgentDesk-WebRead/1.0 (+read-only)', accept: 'text/html,text/plain,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5', 'accept-encoding': 'gzip, deflate, br', 'accept-language': 'de,en;q=0.8' };
+
+/** Default transport: one GET to the pinned address (fixed headers, no cookies, no auth, no body). Resolves {status, headers, body: Readable}. */
+export function nodeTransport({ url, address, signal, headers = WEB_READ_HEADERS }) {
   const mod = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
     const req = mod.request(url, {
@@ -106,14 +112,14 @@ function nodeTransport({ url, address, signal }) {
       agent: false,
       lookup: pinnedLookup(address),
       signal,
-      headers: { 'user-agent': 'AgentDesk-WebRead/1.0 (+read-only)', accept: 'text/html,text/plain,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5', 'accept-encoding': 'gzip, deflate, br', 'accept-language': 'de,en;q=0.8' },
+      headers,
     }, (res) => resolve({ status: res.statusCode, headers: res.headers, body: res }));
     req.on('error', reject);
     req.end();
   });
 }
 
-async function readCapped(body, headers, maxBytes) {
+export async function readCapped(body, headers, maxBytes) {
   const enc = String(headers['content-encoding'] ?? '').toLowerCase().trim();
   const stream = enc === 'gzip' || enc === 'x-gzip' ? body.pipe(zlib.createGunzip()) : enc === 'deflate' ? body.pipe(zlib.createInflate()) : enc === 'br' ? body.pipe(zlib.createBrotliDecompress()) : body;
   const chunks = [];
@@ -129,7 +135,7 @@ async function readCapped(body, headers, maxBytes) {
   return { buffer: Buffer.concat(chunks), truncated };
 }
 
-function decode(buffer, contentType) {
+export function decode(buffer, contentType) {
   const charset = /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ?? /<meta[^>]{1,300}charset=["']?([\w-]+)/i.exec(buffer.subarray(0, 2048).toString('latin1'))?.[1] ?? 'utf-8';
   try { return new TextDecoder(charset.toLowerCase()).decode(buffer); } catch { return new TextDecoder('utf-8').decode(buffer); /* unknown charset: utf-8 is the fallback */ }
 }
@@ -303,60 +309,72 @@ export function createRateLimit({ max = WEB_LIMITS.perWindow, windowMs = WEB_LIM
 const defaultLimit = createRateLimit();
 
 /**
+ * The ONE fetch path of the web tools (web_read, http_get): follows redirects by hand, and every hop goes through checkUrl,
+ * resolveChecked (all addresses public) and the pinned transport. `gate(url)` (optional) runs before each hop (http_get: robots.txt).
+ * Returns {res, current} of the first non-redirect answer; the caller reads and must destroy res.body.
+ */
+export async function fetchChecked(startUrl, { lookup, transport = nodeTransport, signal, timeoutMs = WEB_LIMITS.timeoutMs, maxRedirects = WEB_LIMITS.maxRedirects, headers, gate } = {}) {
+  const timedOut = () => fail(`timeout after ${Math.round(timeoutMs / 1000)} s`, 'timeout');
+  let current = checkUrl(startUrl);
+  for (let hop = 0; ; hop++) {
+    await gate?.(current);
+    const address = await resolveChecked(current, lookup);
+    if (signal.aborted) throw timedOut();
+    let res;
+    try {
+      res = await transport({ url: current, address, signal, ...(headers ? { headers } : {}) });
+    } catch (err) {
+      throw signal.aborted ? timedOut() : fail(`fetch failed: ${String(err?.code ?? err?.message ?? err).slice(0, 80)}`, 'fetch');
+    }
+    if (res.status >= 300 && res.status < 400 && res.headers.location) {
+      res.body?.destroy?.();
+      if (hop >= maxRedirects) throw fail(`too many redirects (max ${maxRedirects})`);
+      let next;
+      try { next = new URL(String(res.headers.location), current); } catch { throw fail('invalid redirect target', 'invalid'); }
+      current = checkUrl(next.href);
+      continue;
+    }
+    return { res, current };
+  }
+}
+
+/**
  * web_read. opts (tests only inject these): lookup (dns.promises.lookup shape), transport, rateLimit, key.
  * Returns {url, finalUrl, status, contentType, title, text, links, truncated}.
  */
 export async function webRead({ url, maxChars = 6000 }, { lookup, transport = nodeTransport, rateLimit = defaultLimit, key = 'desk', timeoutMs = WEB_LIMITS.timeoutMs, maxBytes = WEB_LIMITS.maxBytes } = {}) {
   if (!rateLimit(key)) throw fail(`web_read rate limit reached (${WEB_LIMITS.perWindow} pages per 10 minutes)`, 'rate');
   const signal = AbortSignal.timeout(timeoutMs);
-  let current = checkUrl(url);
-  for (let hop = 0; ; hop++) {
-    const address = await resolveChecked(current, lookup);
-    if (signal.aborted) throw fail('timeout after 10 s', 'timeout');
-    let res;
-    try {
-      res = await transport({ url: current, address, signal });
-    } catch (err) {
-      throw fail(signal.aborted ? 'timeout after 10 s' : `fetch failed: ${String(err?.code ?? err?.message ?? err).slice(0, 80)}`, 'fetch');
-    }
-    if (res.status >= 300 && res.status < 400 && res.headers.location) {
-      res.body?.destroy?.();
-      if (hop >= WEB_LIMITS.maxRedirects) throw fail('too many redirects (max 5)');
-      let next;
-      try { next = new URL(String(res.headers.location), current); } catch { throw fail('invalid redirect target', 'invalid'); }
-      current = checkUrl(next.href);
-      continue;
-    }
-    const contentType = String(res.headers['content-type'] ?? '').toLowerCase();
-    if (/application\/pdf/.test(contentType) || /\.pdf$/i.test(current.pathname)) {
-      res.body?.destroy?.();
-      throw fail('PDF wird nicht unterstützt (nur HTML- und Textseiten)', 'type');
-    }
-    if (contentType && !/^(?:text\/|application\/(?:xhtml\+xml|json|xml|ld\+json|rss\+xml|atom\+xml))/.test(contentType)) {
-      res.body?.destroy?.();
-      throw fail(`content type not supported: ${contentType.slice(0, 60)}`, 'type');
-    }
-    let read;
-    try {
-      read = await readCapped(res.body, res.headers, maxBytes);
-    } catch (err) {
-      throw fail(signal.aborted ? 'timeout after 10 s' : `read failed: ${String(err?.code ?? err?.message ?? err).slice(0, 80)}`, 'fetch');
-    }
-    const raw = decode(read.buffer, contentType);
-    const isHtml = /html/.test(contentType) || (!contentType && /<html|<body|<p\b/i.test(raw.slice(0, 4000)));
-    const page = isHtml ? await htmlToTextBudgeted(raw, current) : { title: '', text: raw.replace(/\r/g, ''), links: [] };
-    const room = Math.max(500, maxChars);
-    return {
-      url: String(url).slice(0, 500),
-      finalUrl: current.href,
-      status: res.status,
-      contentType: contentType.split(';')[0] || 'unknown',
-      title: page.title,
-      text: page.text.length > room ? `${page.text.slice(0, room)}\n…[gekürzt]` : page.text,
-      links: page.links,
-      truncated: read.truncated || page.text.length > room,
-    };
+  const { res, current } = await fetchChecked(url, { lookup, transport, signal, timeoutMs });
+  const contentType = String(res.headers['content-type'] ?? '').toLowerCase();
+  if (/application\/pdf/.test(contentType) || /\.pdf$/i.test(current.pathname)) {
+    res.body?.destroy?.();
+    throw fail('PDF wird nicht unterstützt (nur HTML- und Textseiten)', 'type');
   }
+  if (contentType && !/^(?:text\/|application\/(?:xhtml\+xml|json|xml|ld\+json|rss\+xml|atom\+xml))/.test(contentType)) {
+    res.body?.destroy?.();
+    throw fail(`content type not supported: ${contentType.slice(0, 60)}`, 'type');
+  }
+  let read;
+  try {
+    read = await readCapped(res.body, res.headers, maxBytes);
+  } catch (err) {
+    throw fail(signal.aborted ? `timeout after ${Math.round(timeoutMs / 1000)} s` : `read failed: ${String(err?.code ?? err?.message ?? err).slice(0, 80)}`, 'fetch');
+  }
+  const raw = decode(read.buffer, contentType);
+  const isHtml = /html/.test(contentType) || (!contentType && /<html|<body|<p\b/i.test(raw.slice(0, 4000)));
+  const page = isHtml ? await htmlToTextBudgeted(raw, current) : { title: '', text: raw.replace(/\r/g, ''), links: [] };
+  const room = Math.max(500, maxChars);
+  return {
+    url: String(url).slice(0, 500),
+    finalUrl: current.href,
+    status: res.status,
+    contentType: contentType.split(';')[0] || 'unknown',
+    title: page.title,
+    text: page.text.length > room ? `${page.text.slice(0, room)}\n…[gekürzt]` : page.text,
+    links: page.links,
+    truncated: read.truncated || page.text.length > room,
+  };
 }
 
 /** Compact text for the model: header, text, then as many links as fit. */

@@ -2,6 +2,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // Environment access. Read lazily so tests can set process.env before starting a server.
 const env = (name, fallback = '') => process.env[name] ?? fallback;
+// counts: a positive integer, else the default (a typo never removes a cap)
+const capCount = (name, fallback) => { const n = Number(env(name, '').trim()); return Number.isInteger(n) && n > 0 ? n : fallback; };
 const capUsd = (name, fallback) => { const raw = env(name, '').trim(); if (!raw) return fallback; const n = Number(raw); return Number.isFinite(n) && n >= 0 ? n : fallback; };
 
 export const cfg = {
@@ -34,6 +36,10 @@ export const cfg = {
   researchModel: () => env('DESK_RESEARCH_MODEL', 'deepseek/deepseek-v4.1-flash'), // eval r5: 75 % correct with source, median 8 s, USD 0.004 (Gemini 3.8 Flash 70 %, 12 s, USD 0.023)
   researchSubModel: () => env('DESK_RESEARCH_SUB_MODEL') || cfg.researchModel(),
   research: () => env('DESK_RESEARCH', 'on') !== 'off', // kill switch: off = the research tool says it is unavailable
+  // web tools of the research agent (webSearch.js, httpGet.js): the Brave key is shared with other agents (free plan: 1 request/s, 2,000/month)
+  braveKey: () => env('BRAVE_API_KEY').trim(),
+  webSearchDay: () => capCount('DESK_WEB_SEARCH_DAY', 40), // searches per UTC day (the hourly cap is 15, fixed)
+  httpGetHour: () => capCount('DESK_HTTP_GET_HOUR', 60),
   voiceWatchdogMs: () => Number(env('DESK_VOICE_WATCHDOG_MS', '6000')), // no assistant audio this long after a tool result -> ask again
   voiceNoAnswerMs: () => Number(env('DESK_VOICE_NO_ANSWER_MS', '10000')), // a question with no answer and no running tool this long -> recovery (later than the adapter nudge above)
   visionCapUsdHour: () => Number(env('DESK_VISION_CAP_USD_HOUR', '0.6')), // screen vision cost per session hour (sliding window)

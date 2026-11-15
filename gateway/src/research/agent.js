@@ -37,7 +37,7 @@ export const RESEARCH_TOOLS = [
   'knowledge_read', 'read_core_doc', 'decisions_recent', 'read_file', 'list_jobs', 'job_status',
   'board_threads', 'board_read', 'board_entry', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
   'ledger_spend', 'run_readonly', 'desk_status', 'session_trace', 'code_outline', 'artifact_search', 'artifact_resolve',
-  'artifact_ref_read', 'web_read', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
+  'artifact_ref_read', 'web_read', 'web_search', 'http_get', 'mail_search', 'mail_read', 'explainer_context', 'explainer_point',
 ];
 // discord_read is left out on purpose: reading a channel moves Florian's read marker (tools.js description).
 // search_files and board_search are left out: `search` (full-text index, ~40 ms) covers both; they took 2-8 s each in the eval.
@@ -189,7 +189,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
         if (!WEB_TOOLS.has(call.name)) tainted = true; // set before the call: parallel calls of this round already count
         touched.push({ tool: call.name, args: short(JSON.stringify(args), 160) });
         // research: only the lock is visible inside a run (no start, so no recursion); the web_read lock applies here too (review P1-1)
-        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: { guarded: (s) => Boolean(ctx.research?.guarded?.(s)) }, voiceTurn: undefined });
+        const res = await deps.runTool(call.name, args, { ...ctx, maxChars: RESULT_CHARS, research: { guarded: (s) => Boolean(ctx.research?.guarded?.(s)) }, voiceTurn: undefined, researchRun: true }); // researchRun: web_search / http_get exist only here (tools.js)
         ok = res.ok !== false;
         content = String(res.content ?? '');
         if (store && content.length > STORE_FROM) content = ws.stub(ws.put(content, `${call.name} ${short(JSON.stringify(args), 120)}`));
