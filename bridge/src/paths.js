@@ -74,6 +74,8 @@ function dirAllow() {
     { dir: path.join(HOME, 'desk-sessions') },
     { dir: KNOWLEDGE_DIR },
     { dir: LAPTOP_MIRROR },
+    // LeChonk job data (Fusion workers of LeChonk jobs keep their RESULT/STATE here): Markdown notes only (discovery job, 15 Nov 2026)
+    { dir: path.join(HOME, 'jobs-data'), ext: '.md' },
     ...claudeProjectDirs().map((d) => ({ dir: d, ext: '.jsonl' })),
   ];
 }

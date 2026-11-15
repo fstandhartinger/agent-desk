@@ -43,7 +43,7 @@ const nul = (v) => (v === undefined ? null : v);
 // ---- arguments -----------------------------------------------------------------------------------------------------------
 function parseArgs(argv) {
   const o = {
-    dir: MAP_DIR, mirror: MIRROR_DIR, laptop: LAPTOP_MIRROR, board: true, boardCmd: path.join(HOME, 'bin', 'sandy-read'),
+    dir: MAP_DIR, mirror: MIRROR_DIR, jobsData: path.join(HOME, 'jobs-data'), laptop: LAPTOP_MIRROR, board: true, boardCmd: path.join(HOME, 'bin', 'sandy-read'),
     full: false, quiet: false, maxBoard: Infinity, shrinkMin: SHRINK_GUARD_MIN,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -283,7 +283,10 @@ function collectJobs(o) {
     for (const e of readdirOrNull(path.join(o.mirror, job.name)) ?? []) {
       if (e.isFile() && NOTE.test(e.name)) consider(e.name);
       else if (e.isDirectory() && !SKIP_DIRS.has(e.name) && !e.name.startsWith('.') && !isDenied(e.name)) {
-        for (const f of readdirOrNull(path.join(o.mirror, job.name, e.name)) ?? []) if (f.isFile() && NOTE.test(f.name)) consider(`${e.name}/${f.name}`);
+        for (const f of readdirOrNull(path.join(o.mirror, job.name, e.name)) ?? []) {
+          if (f.isFile() && NOTE.test(f.name)) consider(`${e.name}/${f.name}`);
+          else if (e.name === 'workers' && f.isDirectory() && !isDenied(f.name)) for (const w of ['RESULT.md', 'STATE.md', 'BRIEF.md']) consider(`workers/${f.name}/${w}`);
+        }
       }
     }
     if (!files.length) continue;
@@ -297,6 +300,25 @@ function collectJobs(o) {
     }
   }
   return { sources: ['jobs'], descs, ok: true };
+}
+
+/** LeChonk ~/jobs-data/<job>/: every .md down to depth 5, the notes and worker results of jobs whose data lives on LeChonk. */
+function collectJobsData(o) {
+  const root = o.jobsData;
+  const jobs = readdirOrNull(root);
+  if (!jobs) return { sources: [], descs: [], ok: true };
+  const descs = [];
+  for (const job of jobs) {
+    if (!job.isDirectory() || job.name.startsWith('.') || isDenied(job.name)) continue;
+    const rels = walkFiles(path.join(root, job.name), { maxDepth: 5, accept: (name) => /\.md$/i.test(name) });
+    if (!rels.length) continue;
+    const month = jobMonth(job.name, Date.now());
+    for (const rel of rels.slice(0, 400)) {
+      const d = allowedFile(path.join(root, job.name, rel), { source: 'jobs', node: `jobs/${month}/${job.name}/data/${rel}`, parent: `jobs/${month}/${job.name}`, sort: 200, analyze: 'plain', titleHint: `data/${rel}` });
+      if (d) descs.push(d);
+    }
+  }
+  return { sources: [], descs, ok: true };
 }
 
 const LAPTOP_DAY = /^(.+)__([0-9a-f]{8})__(\d{4}-\d{2}-\d{2})\.md$/;
@@ -387,7 +409,7 @@ function collectExplainer() {
   return { sources: ['explainer'], descs, ok: true };
 }
 
-const COLLECTORS = [collectWissen, collectDecisions, collectRegeln, collectJobs, collectLaptop, collectSkills, collectCode, collectExplainer];
+const COLLECTORS = [collectWissen, collectDecisions, collectRegeln, collectJobs, collectJobsData, collectLaptop, collectSkills, collectCode, collectExplainer];
 
 // ---- board (sandy-read board-sql, incremental by entry id) ------------------------------------------------------------------
 function boardSql(o, sql) {
