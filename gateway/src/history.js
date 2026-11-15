@@ -26,10 +26,11 @@ const arr = (r) => (Array.isArray(r) ? r : Array.isArray(r?.items) ? r.items : A
  * extends; screen markings and computer-control texts (marker / computer / chars-only) are not his words and stay out.
  */
 export function transcriptOf(events) {
-  const list = arr(events).filter((e) => /^transcript\.(?:user|assistant)\.final$/.test(e?.type ?? '')).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
+  const list = arr(events).filter((e) => /^transcript\.(?:user|assistant)\.final$/.test(e?.type ?? '') || (e?.type === 'research.done' && typeof e.data?.answer === 'string')).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts) || (a.seq ?? 0) - (b.seq ?? 0));
   const out = [];
   for (const e of list) {
     const d = e.data ?? {};
+    if (e.type === 'research.done') { out.push({ role: 'assistant', text: `[Recherche-Ergebnis] ${d.answer.trim()}`, at: Date.parse(e.ts), turn: e.turn ?? null }); continue; } // the background research's answer (agent-desk-context-discovery)
     if (d.marker || d.computer || typeof d.text !== 'string' || !d.text.trim()) continue;
     const role = e.type.includes('.user.') ? 'user' : 'assistant';
     const turn = { role, text: d.text.trim(), at: Date.parse(e.ts), turn: e.turn ?? null, ...(d.typed ? { typed: true } : {}) };

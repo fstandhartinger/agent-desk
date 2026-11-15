@@ -52,7 +52,13 @@ const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long w
 // Topic files of the desk knowledge are dense and ordered by importance; voice models need most of one at once.
 /** Round 11: {focusedId} from a client message (`focusedCanvasId`: string or null); {} when the client did not say. */
 const focusOf = (msg) => (Object.hasOwn(msg ?? {}, 'focusedCanvasId') ? { focusedId: typeof msg.focusedCanvasId === 'string' ? msg.focusedCanvasId.slice(0, 64) : null } : {});
-const voiceCap = (name) => (name === 'artifact_ref_read' || name === 'artifact_resolve' ? 6000 : name === 'knowledge_read' ? 6000 : name === 'explainer_context' ? 4000 : VOICE_TOOL_CHARS);
+// Part 6 (Florian, 15 Nov): the 2,500 characters were our own limit, not a vendor's. No provider documents a limit for one tool result
+// (OpenAI gpt-live-1 128k context, Gemini 3.8 Live 131,072 input tokens, xAI none documented). What a big result costs: Gemini bills the
+// whole context again on every later turn ($0.75/M text); OpenAI's delegate re-reads every result on each later backend response
+// (gpt-6-astra $10/M input, cached cheaper); xAI documents nothing. So: generous for what the model asked for on purpose, moderate for the rest.
+const ON_PURPOSE = new Set(['conversation_history', 'desk_sessions', 'knowledge_read', 'read_file', 'artifact_ref_read', 'artifact_resolve', 'explainer_context', 'chat_read', 'mail_read', 'board_read', 'board_entry', 'job_status', 'skill_read', 'web_read', 'research']);
+export const TOOL_CAPS = { openai: { purpose: 8000, other: 3000 }, gemini: { purpose: 12000, other: 4000 }, xai: { purpose: 10000, other: 4000 } };
+export const voiceCapFor = (provider, name) => { const c = TOOL_CAPS[provider] ?? TOOL_CAPS.xai; return Math.max(ON_PURPOSE.has(name) ? c.purpose : c.other, VOICE_TOOL_CHARS); };
 const PAGE_LOAD_MS = 4000; // the server-side page context may delay the vendor connect at most this long
 
 /** Vendors also stream silent frames while Florian speaks: those say nothing about an answer. */
@@ -526,11 +532,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     let output;
     try {
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
-      const running = runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote, conversation: convCtx });
+      const running = runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCapFor(provider, name), voiceTurn, contextNote, conversation: convCtx });
       let limitTimer = null;
       const res = LONG_TOOLS.has(name) || DRAW_TOOLS.has(name) ? await running : await Promise.race([running, new Promise((_, reject) => { limitTimer = setTimeout(() => { trace.event('tool.timeout', { turn: turnId, id, name, ms: toolTimeoutMs }); reject(new Error(`Zeitüberschreitung: ${name} hat nach ${Math.round(toolTimeoutMs / 1000)} s nicht geantwortet. Sag Florian, dass dieses Ergebnis fehlt, statt so zu tun, als hättest du es.`)); }, toolTimeoutMs); })]).finally(() => clearTimeout(limitTimer));
       const full = String(res.content ?? '');
-      output = full.slice(0, voiceCap(name));
+      output = full.slice(0, voiceCapFor(provider, name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length, fullChars: full.length, cut: full.length > output.length });
       logToolOutput(id, name, output, full.length);
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
