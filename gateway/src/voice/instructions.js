@@ -1,5 +1,5 @@
 // System prompt for the voice agents: same persona and tools as the text agent, tuned for speech.
-import { actionLines, canvasLines, briefingLines, groundingLines, limitLines, readToolLines, screenAgentLines, screenLines } from '../prompt.js';
+import { actionLines, canvasLines, briefingLines, discoveryLines, groundingLines, limitLines, readToolLines, screenAgentLines, screenLines } from '../prompt.js';
 import { knowledgeLines } from '../knowledge.js';
 import { pagePackLines } from '../pack.js';
 import { wortlisteLines } from './vocabulary.js';
@@ -48,6 +48,7 @@ export function buildInstructions(page, now, { provider, screen = false, screenA
     ...groundingLines(now),
     'Lies niemals Geheimnisse, Schlüssel oder lange Dateipfade vor; nenne nur den Dateinamen oder den Jobnamen.',
     ...readToolLines(),
+    ...discoveryLines({ spoken: true }),
     ...limitLines({ spoken: true }),
     ...SPEECH_LINES,
     ...actionLines(screen || screenAgent),

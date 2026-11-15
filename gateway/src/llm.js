@@ -39,11 +39,11 @@ const noZdrUntil = new Map(); // model -> epoch ms
 export const privacyProvider = (model, now = Date.now()) => ((noZdrUntil.get(model) ?? 0) > now ? { ...PRIVACY } : { ...PRIVACY, zdr: true });
 
 /** POST a chat body with the privacy routing; one fallback without zdr when no ZDR endpoint serves the model. */
-export async function postOpenRouter(url, headers, body, signal) {
+export async function postOpenRouter(url, headers, body, signal, { zdrOnly = false } = {}) {
   const send = (provider) => fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, provider: { ...body.provider, ...provider } }), signal });
-  const first = privacyProvider(body.model);
+  const first = zdrOnly ? { ...PRIVACY, zdr: true } : privacyProvider(body.model);
   const response = await send(first);
-  if (response.status !== 404 || !first.zdr) return response;
+  if (response.status !== 404 || !first.zdr || zdrOnly) return response; // zdrOnly (research over private sources): no route that may retain data
   await response.body?.cancel().catch(() => /* ignored */ {});
   noZdrUntil.set(body.model, Date.now() + NO_ZDR_MS);
   console.warn(`${new Date().toISOString()} llm: no zero-data-retention endpoint for ${short(body.model, 80)}; retrying with data_collection=deny only`);
@@ -121,12 +121,12 @@ export async function completeJSON({ model, messages, maxTokens = 800, timeoutMs
  * One non-streaming chat turn with optional tools (the illustrator's loop). Returns {message, usage, costUsd};
  * `message.tool_calls` is [{id, name, args}] (args = raw JSON string). Cost goes into the daily spend like every other call.
  */
-export async function completeChat({ model, messages, tools, json = false, maxTokens = 4000, signal }) {
+export async function completeChat({ model, messages, tools, json = false, maxTokens = 4000, signal, zdrOnly = false }) {
   if (!cfg.openrouterKey()) throw new Error(TEXT.textModelMissing);
   const body = { model, messages, max_tokens: maxTokens, usage: { include: true }, reasoning: { effort: cfg.reasoningEffort() } };
   if (tools?.length) Object.assign(body, { tools: toolSpecs(tools), tool_choice: 'auto' });
   if (json) body.response_format = { type: 'json_object' };
-  const response = await postOpenRouter(`${cfg.openrouterBase()}/chat/completions`, HEADERS(), body, signal);
+  const response = await postOpenRouter(`${cfg.openrouterBase()}/chat/completions`, HEADERS(), body, signal, { zdrOnly });
   if (!response.ok) throw await failure(response);
   markOk('openrouter');
   const data = await response.json();
