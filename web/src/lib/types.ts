@@ -56,6 +56,8 @@ export type VoiceServerMsg =
   | { type: 'error'; message: string; fallback?: string }
   | { type: 'session'; aid: string }
   | { type: 'notice'; code?: string; message: string }
+  | { type: 'memory'; conversationId: string; summary: string; upto: number }
+  | { type: 'rollover'; reason: string; message?: string }
   | { type: 'mute'; muted: boolean }
   | { type: 'closed' };
 

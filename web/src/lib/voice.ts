@@ -37,6 +37,12 @@ export interface VoiceHandlers {
   /** The mic is still voiced. */
   onSpeechActive?(): void;
   onNotice?(message: string): void;
+  /** The conversation this session belongs to (voice memory): sent with `start`. */
+  conversation?(): { id: string; turns: { role: 'user' | 'assistant'; content: string; ts: number }[]; memory?: { summary: string; upto: number } };
+  /** The gateway's running summary of the conversation. */
+  onMemory?(conversationId: string, summary: string, upto: number): void;
+  /** The session reached its time cap and ends now; the controller starts the next one in the same conversation. */
+  onRollover?(message?: string, wasMuted?: boolean): void;
 }
 
 /** Last `usage` tick of the gateway (every 10 s): this session's cost (USD) and today's whole Desk spend. */
@@ -66,6 +72,8 @@ export class VoiceSession {
   private decay = 0;
   private onset = new SpeechOnset();
   private readyTimer = 0;
+  /** Set by the gateway's `rollover` (time cap): the close that follows is no error. */
+  private rollover: string | null = null;
   private unwatchFocus: (() => void) | null = null;
   /** Where the spoken answer is (canvas reveal, see speechCursor.ts). */
   private cursor = new SpeechTracker();
@@ -149,7 +157,7 @@ export class VoiceSession {
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
     ws.onopen = () => {
       const desktop = Boolean(globalThis.matchMedia?.('(min-width: 1024px)').matches);
-      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', client: clientInfo(desktop), entry: buildEntry(location, this.page?.pointId), focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}) }));
+      ws.send(JSON.stringify({ type: 'start', page: this.page, lang: 'de', client: clientInfo(desktop), entry: buildEntry(location, this.page?.pointId), focusedCanvasId: focusedCanvasId(), ...(this.opt.variant ? { variant: this.opt.variant } : {}), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
       this.event('ws.open', {});
       this.flushEvents();
@@ -188,6 +196,12 @@ export class VoiceSession {
         break;
       case 'session':
         voiceStore.set((s) => ({ ...s, aid: typeof m.aid === 'string' ? m.aid.replace(/^a#/i, '').toLowerCase() : null }));
+        break;
+      case 'memory':
+        if (typeof m.summary === 'string' && typeof m.conversationId === 'string') this.h.onMemory?.(m.conversationId, m.summary, m.upto);
+        break;
+      case 'rollover':
+        this.rollover = m.message ?? 'Neue Sitzung im selben Gespräch …';
         break;
       case 'notice':
         voiceStore.set((s) => ({ ...s, serverNotice: m.message }));
@@ -270,6 +284,12 @@ export class VoiceSession {
   /** The relay or vendor ended the session without an `error` message first. */
   private onGone() {
     if (this.closed) return;
+    if (this.rollover !== null) { // the time cap: no error, the controller continues in a new session of the same conversation
+      const message = this.rollover, wasMuted = this.gate.muted; // a new session must not open the mic he closed
+      this.stop(false);
+      this.h.onRollover?.(message, wasMuted);
+      return;
+    }
     if (!this.ready) this.fail(`${this.opt.label}: Verbindung beendet, bevor die Sitzung bereit war.`);
     else {
       this.h.onError('Sprachverbindung getrennt.');

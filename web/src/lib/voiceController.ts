@@ -1,6 +1,6 @@
 import { setClientErrorSink } from './clientError';
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
-import { addMessage, appendText, convStore, finish, removeMessage, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool } from './conversation';
+import { addMessage, appendText, convStore, finish, removeMessage, setConversationMemory, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool, voiceConversation } from './conversation';
 import { logActivity, noteTool, noteViz } from './activity';
 import { currentContext, pageStore } from './page';
 import { toast } from './toast';
@@ -175,6 +175,18 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
     },
     onViz: noteViz,
     onNotice: (message) => toast(message, 'info', 8000),
+    conversation: voiceConversation,
+    onMemory: (conversationId, summary, upto) => setConversationMemory(conversationId, { summary, upto }),
+    onRollover(message, wasMuted) {
+      // a#a54cbb (15 Nov): the 30-minute cap ended the session without a word; now it says so and goes on in a new session that knows the conversation
+      if (session !== s) return;
+      session = null;
+      closeTurn('user');
+      closeTurn('assistant');
+      toast(message ?? 'Neue Sprachsitzung im selben Gespräch …', 'info', 6000);
+      logActivity('voice', 'Sitzung erneuert', '30-Minuten-Grenze', 'violet');
+      begin(opt, viaFallback, Boolean(wasMuted));
+    },
     onUsage(seconds, cost) {
       logActivity('voice', 'Sprachnutzung', `${Math.round(seconds)} s · ${fmtUsd(cost)}`);
     },

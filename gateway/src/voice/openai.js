@@ -18,14 +18,16 @@ export function delegateConfig(model = cfg.openaiDelegateModel(), effort = cfg.o
 }
 
 // No input-transcription hint here: gpt-live-1's session.start has none (developers.openai.com live docs, read 14 Nov 2026); the vocabulary reaches it as the "Wortliste" in the instructions only.
-export function sessionStart({ instructions, tools, voice = 'marin', delegate = delegateConfig() }) {
+export function sessionStart({ instructions, tools, voice = 'marin', delegate = delegateConfig(), history = [] }) {
   return {
     type: 'session.start',
     event_id: 'start',
     session: {
       model: MODEL,
       instructions,
-      audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice } },
+      // earlier turns of the same conversation (memory.js openaiInput): documented `input`, at most 128 messages / 8,192 tokens
+      ...(history?.length ? { input: history.slice(0, 128) } : {}),
+      audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice: voice || 'marin' } },
       delegation: {
         type: 'responses',
         responses: { ...delegate, tools: toolsOf(tools).map((t) => ({ type: 'function', ...t })), tool_choice: 'auto' },
@@ -73,7 +75,7 @@ export function translate(msg, state = {}) {
       return [unavailableError('openai', { code }) ?? { t: 'error', message: msg.error?.message ?? 'OpenAI-Fehler', code, soft: true }];
     }
     case 'session.closed':
-      return [{ t: 'closed' }];
+      return [{ t: 'closed', ...(msg.reason ? { reason: String(msg.reason).slice(0, 120) } : {}) }];
     default:
       // the Live docs name no speech-start event; accept any `*speech_started` the service may add
       return /speech_started$/.test(msg.type ?? '') ? [{ t: 'speech_started' }] : [];
@@ -81,6 +83,13 @@ export function translate(msg, state = {}) {
 }
 
 const idOf = (key, value) => (value == null ? {} : { [key]: value });
+
+/** Responses-API usage -> {input, cached, output, reasoning} (null when the event carries none). */
+export function usageOf(u) {
+  if (!u || typeof u !== 'object') return null;
+  const n = (v) => (Number.isFinite(v) ? v : 0);
+  return { input: n(u.input_tokens), cached: n(u.input_tokens_details?.cached_tokens), output: n(u.output_tokens), reasoning: n(u.output_tokens_details?.reasoning_tokens) };
+}
 
 function translateBackend(ev, state) {
   if (ev.type === 'response.output_text.done') {
@@ -95,6 +104,8 @@ function translateBackend(ev, state) {
   if (ev.type === 'response.created') { state.called = false; state.lastResponseId = ev.response?.id ?? null; return [{ t: 'response_started', ...idOf('id', ev.response?.id) }]; }
   if (ev.type === 'response.completed' || ev.type === 'response.failed' || ev.type === 'response.cancelled') {
     const out = [];
+    const usage = usageOf(ev.response?.usage);
+    if (usage) out.push({ t: 'usage', usage: { ...usage, model: ev.response?.model ?? null, responseId: ev.response?.id ?? null, status: ev.type.slice(9) } });
     // a response without a function call ends the backend's work on this typed turn
     if (state.typed && !state.called && !state.shown && !state.spoken) {
       const text = String(state.text ?? '').trim();
@@ -107,7 +118,7 @@ function translateBackend(ev, state) {
       state.text = '';
       return [...out, { t: 'turn_done', ...idOf('id', ev.response?.id) }, ...held];
     }
-    return [{ t: 'turn_done', ...idOf('id', ev.response?.id) }];
+    return [...out, { t: 'turn_done', ...idOf('id', ev.response?.id) }];
   }
   return [];
 }

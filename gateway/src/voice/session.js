@@ -14,8 +14,20 @@ import { unavailableError } from './adapter.js';
 import { deskStamp, SETTLE_MS } from '../voiceActions.js';
 import { hearingHint } from '../screenText.js';
 import { belongsToOldQuestion, fitsQuestion, isPromiseOnly, needsAnswer, RECOVERY_LEAD, routingHint } from './noAnswer.js';
+import { bestSummary, cleanHistory, conversationIdOf, memoryCache, memoryInstructions, openaiInput, planSeed, summarize, turnLine, uncoveredTurns } from './memory.js';
+import { completeChat } from '../llm.js';
+import { createHash } from 'node:crypto';
 
 export const HARD_CAP_MS = 30 * 60_000;
+// 15 Nov 2026 (a#a54cbb ended at the cap mid-sentence, no warning): a visible warning before the cap, then the session hands over to a
+// new one in the same conversation (the browser restarts it; the conversation memory carries the words over). The cap stays: a forgotten
+// open session must not run and cost for hours.
+export const CAP_WARN_MS = 2 * 60_000;
+export const CAP_GRACE_MS = 60_000; // at the cap an answer or tool still running may finish, at most this long
+export const MEMORY_REFRESH_MS = 5 * 60_000; // the running summary while a session goes on
+const START_SUMMARY_MS = 3500; // a start waits at most this long for a summary of older turns that did not fit verbatim
+const PROMPT_PART = 3800; // trace text per event (the registry keeps `text` up to 4096 characters)
+const OUTPUT_PARTS = 8; // a tool result is logged in full up to 8 x 3800 characters
 export const USAGE_TICK_MS = 10_000;
 const START_TIMEOUT_MS = 10_000;
 const VOICE_TOOL_CHARS = 2500;
@@ -153,6 +165,27 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let framesWhileMuted = 0;
   let turnId = 0;
   const trace = deps.openTrace?.({ provider }) ?? { event() {}, close() {} };
+  // conversation memory (memory.js): the browser's turns before this session, this session's own finals, the running summary
+  const conv = { id: null, history: [], live: [], best: null, summarizing: null, summarizedLive: 0 };
+  const convCtx = { label: 'Chatfenster und laufende Sitzung', turns: () => [...conv.history, ...conv.live] };
+  let memoryTimer = null;
+  let warnTimer = null;
+  let capDue = 0; // when the time cap was reached (0 = not yet)
+  let rolledOver = false;
+  // per-turn timing (Part 4 of 15 Nov): when his turn was complete, first audio, first useful words, tool time
+  let timing = null;
+  const promptHashes = new Set();
+  /** Everything the model is given goes into the trace in full (hash + text in parts); the same text twice in one session only by hash. */
+  function logPrompt(kind, text, extra = {}) {
+    const body = String(text ?? '');
+    if (!body) return;
+    const hash = createHash('sha256').update(body).digest('hex').slice(0, 16);
+    if (promptHashes.has(`${kind}:${hash}`)) { trace.event('prompt.repeat', { kind, hash, chars: body.length, ...extra }); return; }
+    promptHashes.add(`${kind}:${hash}`);
+    const parts = Math.ceil(body.length / PROMPT_PART);
+    for (let i = 0; i < parts; i += 1) trace.event('prompt.text', { kind, hash, part: i + 1, of: parts, chars: body.length, ...extra, text: body.slice(i * PROMPT_PART, (i + 1) * PROMPT_PART) });
+  }
+  const maskDigits = (t) => String(t ?? '').replace(/\d/g, '#'); // screen data: numbers stay out of the durable trace (as for markings)
 
   const startTimer = setTimeout(() => finish('start-timeout'), START_TIMEOUT_MS);
 
@@ -186,7 +219,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (!turn.role || !turn.text.trim()) { turn.role = null; turn.text = ''; return; }
     const role = turn.role;
     let text = provider === 'gemini' ? repairGlued(turn.text, known) : turn.text; // Gemini glues German compounds ("KryptoEmissionen")
-    trace.event(`transcript.${role}.final`, deps.computer?.quiet?.(sid, role) ? { turn: turnId, chars: text.length, computer: true } : { turn: turnId, text }); // the app's R2 text and his answer to an ask: length only
+    const quietTurn = deps.computer?.quiet?.(sid, role);
+    trace.event(`transcript.${role}.final`, quietTurn ? { turn: turnId, chars: text.length, computer: true } : { turn: turnId, text }); // the app's R2 text and his answer to an ask: length only
+    if (!quietTurn) noteLive(role, text);
+    if (role === 'assistant' && timing && timing.turn === turnId && !timing.usefulAt && !isPromiseOnly(text) && !isFiller(text)) { timing.usefulAt = now(); timing.firstWords = text.slice(0, 80); }
     if (role === 'assistant') {
       deps.computer?.assistantFinal(sid, text);
       heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
@@ -284,6 +320,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     contentOpen = false;
     interrupted = false;
     if (!text || closed) return;
+    startTiming('voice');
     armNoAnswer(text);
     if (!tracksResponses) thinking();
     viz?.noteTurn({ role: 'user', text });
@@ -473,9 +510,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     let output;
     try {
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
-      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote });
-      output = String(res.content ?? '').slice(0, voiceCap(name));
-      trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length });
+      const res = await runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCap(name), voiceTurn, contextNote, conversation: convCtx });
+      const full = String(res.content ?? '');
+      output = full.slice(0, voiceCap(name));
+      trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length, fullChars: full.length, cut: full.length > output.length });
+      logToolOutput(id, name, output, full.length);
       canvas?.noteTool({ name, args, ok: res.ok !== false, content: res.content });
       for (const w of knownWords(res.content)) known.add(w);
       for (const r of cjkRuns(res.content)) if (cjkKnown.size < 500) cjkKnown.add(r);
@@ -494,7 +533,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       viz?.noteEvent(failed);
     }
     runningTools = Math.max(0, runningTools - 1);
+    if (timing && timing.turn === callTurn) { timing.tools += 1; timing.toolMs += now() - t0; if (!timing.firstToolAt) timing.firstToolAt = t0; }
     if (closed) return;
+    if (capDue && runningTools === 0 && !responding) setTimeout(() => maybeRollover(), 0);
     // the user asked something new meanwhile: the result belongs to a question that is no longer being answered
     if (cancelledCalls.delete(id)) {
       audit({ action: 'voice.tool.cancelled', detail: `${provider}:${name}` });
@@ -553,6 +594,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         break;
       case 'audio':
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
+        if (timing && !timing.audioAt && !isSilent(e.pcm)) { timing.audioAt = now(); trace.event('audio.first', { turn: timing.turn, msAfterQuestion: timing.audioAt - timing.at }); }
         if (!dropAudio && ws.readyState === ws.OPEN) ws.send(e.pcm, { binary: true });
         if (pending.active && !isSilent(e.pcm)) restartNoAnswer(); // still speaking (its transcript may lag): the clock starts when the sound stops
         break;
@@ -579,9 +621,18 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         if (e.id != null) { openResponses.delete(e.id); overtaken.delete(e.id); fragmentResponses.delete(e.id); } else { openResponses = new Set(); overtaken.clear(); }
         if (pending.overlap) { pending.overlap = false; pending.answer = ''; } // the overtaken response is over: what follows is the answer
         responseOpen = openResponses.size > 0;
-        trace.event('response.done', { turn: turnId, id: e.id });
+        trace.event('response.done', { turn: turnId, id: e.id, ...(e.usage ? { usage: e.usage } : {}) });
         flushTranscript();
         if (!userOpen) canvas?.turnDone();
+        if (capDue && !responseOpen && runningTools === 0) maybeRollover();
+        break;
+      case 'usage': // tokens of one vendor response (OpenAI delegate, Gemini usageMetadata, xAI response.done)
+        trace.event('usage', { turn: turnId, ...e.usage });
+        break;
+      case 'go_away': // Gemini ends every connection after about 10 minutes and says so first
+        trace.event('provider.go_away', { turn: turnId, timeLeft: e.timeLeft ?? null });
+        capDue = capDue || now();
+        maybeRollover('go-away');
         break;
       case 'response_started':
         tracksResponses = true;
@@ -612,11 +663,14 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('provider.error', { turn: turnId, message: String(e.message ?? '').slice(0, 300), code: e.code, soft: Boolean(e.soft), status: e.status });
         if (e.soft && /cancel|no active response|not active/i.test(`${e.code ?? ''} ${e.message ?? ''}`)) break; // response.cancel with nothing to cancel
         if (e.soft) { sendJson({ type: 'error', message: e.message }); break; }
+        if (capDue && readyAt !== null && !rolledOver && !e.fallback) { rollover('go-away', 'Das Sprachmodell erneuert seine Verbindung: weiter in einer neuen Sitzung im selben Gespräch …'); break; } // the announced end of a connection
         sendJson({ type: 'error', message: e.message, fallback: e.fallback });
         finish(e.fallback ? 'unavailable' : 'vendor-error');
         break;
       case 'closed':
-        finish('vendor-closed');
+        // a vendor that drops a session that ran a while (connection lifetime, an outage): carry the conversation into a new session
+        if (readyAt !== null && now() - readyAt > 60_000 && !rolledOver) { trace.event('provider.closed', { turn: turnId, afterS: Math.round((now() - readyAt) / 1000), code: e.code ?? null, reason: e.reason ?? null }); rollover('vendor-closed', 'Die Verbindung zum Sprachmodell wurde beendet: neue Sitzung im selben Gespräch …'); }
+        else finish('vendor-closed');
         break;
     }
   }
@@ -650,6 +704,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       return;
     }
     page = msg.page ?? null;
+    const memoryReady = prepareMemory(msg); // in parallel with the page load below
     // Server-side page context (points/timeline/context.json/deepdive): nothing the browser sent except slug, t, sceneId and pointId is
     // trusted once it loads; without a loader or on failure the browser's own page object is used as before.
     if (deps.loadPage && page?.slug) {
@@ -659,6 +714,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       else audit({ action: 'voice.page.fallback', detail: `${provider} slug=${page.slug}` });
     }
     artifactBlock = deps.artifactInstructions?.() ?? '';
+    const seed = await memoryReady;
+    if (closed) return;
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
@@ -667,9 +724,16 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const sessionTools = inScreenAgent ? toolDefs.filter(t => t.name !== 'handoff_propose' && (page || t.name !== 'explainer_context')) : toolDefs;
     const vocab = collectVocabulary({ page, dictionary: speechDictionary });
     trace?.event('voice.vocabulary', { provider, terms: vocab.hints.length, wordlist: vocab.wordlist.length });
-    adapter = create({ apiKey, instructions: buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints }, onEvent);
+    const instructions = buildInstructions(page, undefined, { provider, screen: deps.vision?.attached(sid) ?? false, screenAgent: inScreenAgent, vocabulary: vocab.wordlist }) + artifactBlock + (provider === 'openai' ? '' : memoryInstructions(seed));
+    const history = provider === 'openai' ? openaiInput(seed) : [];
+    logPrompt('instructions', instructions, { provider });
+    if (history.length) logPrompt('history', history.map((m) => `${m.role}: ${m.content[0].text}`).join('\n'), { provider, items: history.length });
+    logPrompt('vocabulary', [...vocab.wordlist, '--', ...vocab.hints].join('\n'));
+    logPrompt('tools', sessionTools.map((t) => t.name).join(', '));
+    adapter = create({ apiKey, instructions, tools: sessionTools, voice: msg.voice, lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
+      logPrompt('screen', maskDigits(text));
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
       return adapter?.setScreenContext?.(text) ?? 'unsupported';
     } });
@@ -677,6 +741,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     detachBriefing = deps.briefing?.attach(sid, { trace: (type, data) => trace.event(type, data), setContext: (text) => {
       briefingText = text;
       const out = withNotes(text); // = text while no handoff click failed
+      logPrompt('briefing', out);
       if (readyAt === null) { briefingHeld = out; return 'held-until-ready'; }
       return adapter?.setBriefing?.(out) ?? 'unsupported';
     } });
@@ -687,13 +752,21 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
     if (deps.prewarm === true) Promise.resolve().then(() => runTool('ledger_spend', { groupBy: 'category' }, { ...makeCtx(page), maxChars: 200 })).catch(() => {}); // prewarm only: the first real call reports its own failure
     tickTimer = setInterval(tick, USAGE_TICK_MS);
+    warnTimer = setTimeout(() => {
+      trace.event('session.cap_warning', { inMs: CAP_WARN_MS });
+      sendJson({ type: 'notice', code: 'cap-soon', message: 'Diese Sprachsitzung erreicht in 2 Minuten ihre Grenze von 30 Minuten (damit eine vergessene Sitzung nicht weiterläuft und kostet). Danach geht es von selbst in einer neuen Sitzung weiter, die das Gespräch kennt.' });
+      void refreshSummary('cap-warning');
+    }, HARD_CAP_MS - CAP_WARN_MS);
     capTimer = setTimeout(() => {
       trace?.event('session.hard_cap', { ms: HARD_CAP_MS });
-      sendJson({ type: 'error', message: 'Voice-Sitzung nach 30 Minuten beendet' });
-      finish('hard-cap');
+      capDue = now();
+      maybeRollover();
     }, HARD_CAP_MS);
+    memoryTimer = setInterval(() => { if (conv.live.length - conv.summarizedLive >= 4) void refreshSummary('interval'); }, MEMORY_REFRESH_MS);
+    memoryTimer.unref?.();
     audit({ action: 'voice.start', detail: `${provider} slug=${page?.slug ?? '-'}` });
-    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de' });
+    trace.event('session.start', { provider, slug: page?.slug ?? null, title: page?.title ?? null, client: msg.client ?? null, entry: msg.entry ?? null, voice: msg.voice ?? null, lang: msg.lang ?? 'de', conversation: conv.id, delegate: provider === 'openai' ? { model: cfg.openaiDelegateModel(), effort: cfg.openaiDelegateEffort() } : null });
+    trace.event('memory.seed', { conversation: conv.id, turns: conv.history.length, seeded: seed.turns.length, older: seed.older, tokens: seed.tokens, summary: conv.best?.source ?? 'none', summaryChars: conv.best?.summary?.length ?? 0, ...(conv.best?.summary ? { text: conv.best.summary } : {}) });
     Promise.resolve(trace.ready).then((info) => { if (info?.aid) { sendJson({ type: 'session', aid: info.aid }); void deskStamp(makeCtx(page)).catch(() => /* lookup failed: the first prompt looks it up */ null); } }).catch(() => {}); // ready never rejects; the id is a courtesy
   }
 
@@ -715,6 +788,88 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     audit({ action: 'voice.page.update', detail: `${provider} ${how ?? 'unsupported'} point=${loaded.pointId}` });
   }
 
+  // ---- conversation memory, timing, rollover ---------------------------------------------------------------------------------
+
+  function noteLive(role, text) {
+    const t = String(text ?? '').trim();
+    if (t) conv.live.push({ role, text: t, at: now() });
+  }
+
+  /** The start's memory: the browser's turns + the best summary; a fresh summary when older turns would otherwise be missing (bounded wait). */
+  async function prepareMemory(msg) {
+    conv.id = conversationIdOf(msg.conversation?.id);
+    conv.history = cleanHistory(msg.conversation?.turns);
+    conv.best = bestSummary(msg.conversation?.memory, (deps.memoryCache ?? memoryCache).get(conv.id));
+    let seed = planSeed(provider, { summary: conv.best?.summary, history: conv.history });
+    const older = conv.history.slice(0, seed.older);
+    if (older.length && uncoveredTurns(older, conv.best).length) {
+      const fresh = refreshSummary('start', conv.history);
+      const done = await Promise.race([fresh, new Promise((resolve) => { const t = setTimeout(resolve, START_SUMMARY_MS, null); t.unref?.(); })]);
+      if (done) seed = planSeed(provider, { summary: conv.best?.summary, history: conv.history });
+      else trace.event('memory.summary_late', { waitedMs: START_SUMMARY_MS, older: older.length });
+    }
+    return seed;
+  }
+
+  const memoryPost = deps.memoryPost ?? ((messages, signal) => completeChat({ model: cfg.memoryModel(), messages, maxTokens: 1500, signal }).then((r) => ({ text: r.message.content, costUsd: r.costUsd })));
+
+  /** Updates the running summary with the turns it does not cover yet (one at a time); cached, sent to the browser, traced. */
+  function refreshSummary(why, turns = convCtx.turns()) {
+    if (!conv.id) return Promise.resolve(null);
+    if (conv.summarizing) return conv.summarizing;
+    const newer = uncoveredTurns(turns, conv.best);
+    if (!newer.length) return Promise.resolve(null);
+    const liveCount = conv.live.length;
+    const upto = Math.max(...turns.map((t) => (Number.isFinite(t.at) ? t.at : 0)), now() - 1);
+    conv.summarizing = summarize({ previous: conv.best?.summary ?? '', turns: newer, post: memoryPost }).then((r) => {
+      conv.summarizing = null;
+      if (!r) { trace.event('memory.summary_failed', { why, turns: newer.length }); return null; }
+      conv.best = { summary: r.summary, upto, source: 'fresh' };
+      conv.summarizedLive = liveCount;
+      (deps.memoryCache ?? memoryCache).set(conv.id, { summary: r.summary, upto });
+      sendJson({ type: 'memory', conversationId: conv.id, summary: r.summary, upto });
+      trace.event('memory.summary', { why, turns: newer.length, upto: new Date(upto).toISOString(), costUsd: r.costUsd ?? null, text: r.summary });
+      return conv.best;
+    });
+    return conv.summarizing;
+  }
+
+  function startTiming(kind) {
+    flushTiming();
+    timing = { turn: turnId, kind, at: now(), audioAt: 0, usefulAt: 0, firstToolAt: 0, tools: 0, toolMs: 0, firstWords: '' };
+  }
+  /** One line per answered turn: time to first audio, to the first words that are no filler, tools and their time. */
+  function flushTiming() {
+    if (!timing) return;
+    const t = timing;
+    timing = null;
+    trace.event('turn.timing', { turn: t.turn, kind: t.kind, firstAudioMs: t.audioAt ? t.audioAt - t.at : null, firstUsefulMs: t.usefulAt ? t.usefulAt - t.at : null, firstToolMs: t.firstToolAt ? t.firstToolAt - t.at : null, tools: t.tools, toolMs: t.toolMs, firstWords: t.firstWords || null });
+  }
+
+  /** A tool result as the model got it, in full (parts); screen tools without digits, computer runs only by size. */
+  function logToolOutput(id, name, output, fullChars) {
+    if (name === 'computer_task' || deps.computer?.quiet?.(sid, 'assistant')) { trace.event('tool.output', { id, name, chars: output.length, fullChars, withheld: 'computer' }); return; }
+    const body = /^(?:look_at_screen|screen_context)$/.test(name) ? maskDigits(output) : output;
+    const parts = Math.min(OUTPUT_PARTS, Math.ceil(body.length / PROMPT_PART));
+    for (let i = 0; i < parts; i += 1) trace.event('tool.output', { id, name, part: i + 1, of: parts, chars: output.length, fullChars, text: body.slice(i * PROMPT_PART, (i + 1) * PROMPT_PART) });
+  }
+
+  /** At the cap (or a vendor's go-away): hand over once nothing is running, at the latest after CAP_GRACE_MS. */
+  function maybeRollover(reason = 'hard-cap') {
+    if (closed || rolledOver || !capDue) return;
+    const busy = responding || responseOpen || runningTools > 0 || (turn.role === 'assistant' && turn.text.trim());
+    if (busy && now() - capDue < CAP_GRACE_MS) { setTimeout(() => maybeRollover(reason), 1000).unref?.(); return; }
+    rollover(reason, reason === 'go-away' ? 'Das Sprachmodell erneuert seine Verbindung: weiter in einer neuen Sitzung im selben Gespräch …' : '30 Minuten erreicht: weiter in einer neuen Sitzung im selben Gespräch …');
+  }
+
+  function rollover(reason, message) {
+    if (closed || rolledOver) return;
+    rolledOver = true;
+    trace.event('session.rollover', { reason, turn: turnId });
+    sendJson({ type: 'rollover', reason, message });
+    finish(reason);
+  }
+
   function finish(reason) {
     if (closed) return;
     flushTranscript();
@@ -723,6 +878,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(startTimer);
     clearInterval(tickTimer);
     clearTimeout(capTimer);
+    clearTimeout(warnTimer);
+    clearInterval(memoryTimer);
+    flushTiming();
+    if (conv.live.length > conv.summarizedLive) void refreshSummary('end'); // the next session of this conversation finds it in the cache
     clearTimeout(pending.timer);
     if (muted) { mutedMs += now() - mutedAt; muted = false; }
     if (startedAt) {
@@ -775,6 +934,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (typedByHim) { speechAt = now(); noteSpoken(text, now(), turnId, { typed: true }); } // typed in the Desk composer: his words; a context turn is not
     armNoAnswer(text);
     trace.event('transcript.user.final', { turn: turnId, text, typed: true });
+    noteLive('user', text);
+    startTiming('typed');
     adapter.sendText(text);
     return true;
   }
