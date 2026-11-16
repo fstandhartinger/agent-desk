@@ -89,6 +89,8 @@ Das Ende ist offen, er spricht weiter: am Ende kein Satzzeichen, nichts abschlie
 context.gespraech sind die letzten Sätze seines Gesprächs mit dem Assistenten, context.bildschirmNamen Namen auf seinem Bildschirm: beides nur, um Wörter richtig zu verstehen, nie um Inhalt zu ergänzen.
 Du antwortest nie auf das Gesagte, übersetzt nie und fügst nichts hinzu.
 ${RULES}`;
+/** The same for a piece that ends at a speech pause (the app confirms it): the sentence may go on after the pause. */
+export const REVISE_PAUSE_PROMPT = REVISE_PROMPT.replace(/Das Ende ist offen, er spricht weiter: [^\n]*/, 'Das Stück endet an einer Sprechpause, danach spricht er weiter: setz am Ende nur dann ein Satzzeichen, wenn der Satz dort wirklich zu Ende ist (sonst keins). Nichts ergänzen, keinen Satz zu Ende denken. Nur was gesagt wurde.');
 
 const FILLER = /^(äh+m?|ähm+|öh+m?|hm+|mhm|ehm+|uh+m?)$/i; // not "um": that is a German word ("um zu")
 /** Words in a text without fillers: the yardstick for "the clean-up kept his words". */

@@ -1,7 +1,7 @@
 import { limits } from './limits.js';
-import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
+import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT, REVISE_PAUSE_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
 import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark, properNames, dropStutters } from './dictationGuard.js';
-export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT };
+export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT, REVISE_PAUSE_PROMPT };
 // Screen Agent media is processed in memory. Never include payloads or upstream errors in logs.
 export const deviceError = (message, status = 400) => Object.assign(new Error(message), { status });
 export function deviceIds(ids) {
@@ -270,9 +270,9 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
   /**
    * Which model writes the dictation text (16 Nov 2026). Measured on 8 of his dictations against a careful reference (merge of the same three
    * recogniser answers, word guard after it): gpt-oss-120b 4.8 % wrong words (3.4 % with RULES 11), gemini-3.8-flash 1.4-2.6 % (median ~2.0 s per call,
-   * gpt-oss ~1.8 s). DESK_DICTATE_CLEAN_MODEL names another; an OpenRouter id (with a "/") goes there. No Google key: the OpenRouter model.
+   * gpt-oss ~1.8 s). DESK_DICTATE_CLEAN_MODEL (else DESK_DICTATE_MERGE_MODEL) names another; an OpenRouter id (with a "/") goes there. No Google key: the OpenRouter model.
    */
-  const cleanModel = () => (env.DESK_DICTATE_CLEAN_MODEL || (googleKey() ? 'gemini-3.8-flash' : '')).trim();
+  const cleanModel = () => (env.DESK_DICTATE_CLEAN_MODEL || env.DESK_DICTATE_MERGE_MODEL || (googleKey() ? 'gemini-3.8-flash' : '')).trim(); // an explicitly configured merge model stays in charge
   async function fastMerge(prompt, signal, o = {}) {
     if (!o.free && !limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
     if (!o.free) limits.addCost(0.001);
@@ -396,7 +396,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     const data = JSON.stringify({ glossar, woerterbuch: terms, davor: before, angezeigt: shown, varianten: sources, ...(screenNames.length || turns.length ? { context: { ...(screenNames.length ? { bildschirmNamen: screenNames } : {}), ...(turns.length ? { gespraech: turns } : {}) } } : {}) }).replaceAll('<', '\\u003c');
     const t0 = Date.now();
     let out = '';
-    try { out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(modelMs), { system: REVISE_PROMPT, maxTokens: 900, free: true, model: env.DESK_CAPTION_REVISE_MODEL || undefined })); providers.model = { ok: true, ms: Date.now() - t0 }; limits.captionAdd(deviceId, 0.0005); cost += 0.0005; }
+    try { out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(modelMs), { system: open ? REVISE_PROMPT : REVISE_PAUSE_PROMPT, maxTokens: 900, free: true, model: env.DESK_CAPTION_REVISE_MODEL || undefined })); providers.model = { ok: true, ms: Date.now() - t0 }; limits.captionAdd(deviceId, 0.0005); cost += 0.0005; }
     catch (err) { providers.model = failure(err, Date.now() - t0); }
     const finish = (text, merged, undone = 0) => ({ text: openEnd(properNames(applyCorrections(dropStutters(text).text, dictionary), knownNames(dictionary, env))), ms: Date.now() - started, seconds, providers, merged, cost: Number(cost.toFixed(6)), undone });
     if (!out || !keptWords(ref, out, 1.5)) { if (out) providers.model = { ...providers.model, ok: false, reason: 'different' }; return finish(ref, false); }
