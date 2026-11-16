@@ -116,6 +116,17 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return () => { S.handles.delete(h); if (!active(sid)) drop(sid, S); };
   }
   function touchChat(sid) { state(sid).chatUntil = now() + CHAT_ACTIVE_MS; }
+  /** Correction hints only from the voice session this device actually joined. Never guess between sessions. */
+  function captionTurns(deviceId) {
+    const voices = [...states.values()].filter(S => S.devices.has(deviceId) && attached(S.sid))
+      .flatMap(S => [...S.handles].filter(h => h.kind === 'voice' && typeof h.conversation === 'function'));
+    if (voices.length !== 1) return [];
+    try {
+      const turns = voices[0].conversation();
+      return Array.isArray(turns) ? turns.filter(t => ['user', 'assistant'].includes(t?.role) && typeof t.text === 'string' && t.text.trim())
+        .slice(-6).map(t => `${t.role === 'user' ? 'Florian' : 'Desk'}: ${t.text.slice(-290)}`) : [];
+    } catch { return []; } // context must never interrupt the fast caption
+  }
   /**
    * No frame now (locked screen, secure desktop, paused, stopped): the old description is dropped. Only a lock/pause is worth telling the
    * model; stop/error just end the picture without a claim. The next frame ends this state, look() always asks for a fresh one.
@@ -477,5 +488,5 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
     return { ids: base.ids.map(id => `a#${id}`), hintergrund: background(sid), ...(mark ? { letzteMarkierung: { beschreibung: mark.summary, ids: (mark.ids ?? []).map(id => `a#${id}`) } } : {}), prozess: base.window?.process, highlights: base.highlights, items: base.items };
   }
 
-  return { attach, touchChat, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, computerReady, computerSend, computerResult, computerCommand, computerDevice, requestBriefing, look, chatBlock, snapshot, names, textArrived, refresh, _states: states };
+  return { attach, touchChat, captionTurns, screenInfo, background, active, attached, ownedBy, status: sid => ({ attached: attached(sid) }), seen, clear, frame, poll, command, commandResult, computerReady, computerSend, computerResult, computerCommand, computerDevice, requestBriefing, look, chatBlock, snapshot, names, textArrived, refresh, _states: states };
 }

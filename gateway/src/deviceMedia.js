@@ -613,7 +613,9 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       return { text: out, ms: Date.now() - started, windows: 0, changed: 0, failed: 0, undone: 0, breaks: countBreaks(out) };
     }
     const windows = polishWindows(input), budget = Math.round(timeoutMs ?? Math.min(9000, 3500 + 2 * input.length / windows.length));
-    const guardWith = { terms: guardTerms(dictionary, env) };
+    const screenNames = (Array.isArray(context.screenNames) ? context.screenNames : []).filter(n => typeof n === 'string' && n.trim() && n.length <= 100).slice(0, 40);
+    const turns = (Array.isArray(context.turns) ? context.turns : []).filter(t => typeof t === 'string').slice(-6).map(t => t.slice(0, 300));
+    const guardWith = { terms: guardTerms(dictionary, env, screenNames) };
     let changed = 0, failed = 0, undone = 0;
     // the structure is chosen on the text as it came in, while the windows are cleaned: no extra wait
     const breaksJob = format ? breaksFor(input, Math.min(budget, 3000)) : null;
@@ -623,7 +625,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     const outs = await Promise.all(sources.map(async (w, i) => {
       const before = i ? windows[i - 1].split(' ').slice(-LAP - 25, -LAP).join(' ') : clean(context.fieldBefore).slice(-300);
       const after = i + 1 < windows.length ? windows[i + 1].split(' ').slice(0, 12).join(' ') : '';
-      const data = JSON.stringify({ glossar, woerterbuch: terms, kontext: { process: process_ }, davor: before, diktat: w, danach: after }).replaceAll('<', '\\u003c');
+      const data = JSON.stringify({ glossar, woerterbuch: terms, kontext: { process: process_, ...(screenNames.length ? { bildschirmNamen: screenNames } : {}), ...(turns.length ? { gespraech: turns } : {}) }, davor: before, diktat: w, danach: after }).replaceAll('<', '\\u003c');
       try {
         const out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(budget), { system: FINAL_PROMPT, maxTokens: 2500, model: cleanFastModel() || cleanModel() }));
         if (!keptWords(w, out)) { failed += 1; return w; }

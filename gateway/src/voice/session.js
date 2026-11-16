@@ -830,7 +830,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     trace.event('audio.recorder', { on: recorder.on });
     adapter = create({ apiKey, instructions, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
-    detachVision = deps.vision?.attach(sid, { kind: 'voice', slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
+    detachVision = deps.vision?.attach(sid, { kind: 'voice', conversation: convCtx.turns, slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (now() - screenLoggedAt >= 30_000) { screenLoggedAt = now(); logPrompt('screen', maskDigits(text)); } // at most one screen text per 30 s (trace size, critic H3)
       if (readyAt === null) { screenHeld = text; return 'held-until-ready'; }
       return adapter?.setScreenContext?.(text) ?? 'unsupported';
