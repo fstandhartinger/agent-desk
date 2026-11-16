@@ -1,3 +1,4 @@
+import { micPreference, setMicPreference } from './micChoice';
 import { setClientErrorSink } from './clientError';
 import { VoiceSession, optionByKey, voiceStore, type VoiceOption } from './voice';
 import { addMessage, appendText, convStore, finish, markMemory, removeMessage, setConversationMemory, setSpeaking, setText, textOf, upsertClaudeProposal, upsertHandoff, upsertMainAgentPrompt, upsertTool, voiceConversation } from './conversation';
@@ -251,4 +252,15 @@ export function setVoiceMuted(on: boolean, source: 'dock' | 'hotkey' = 'dock') {
 export const toggleVoiceMuted = (source: 'dock' | 'hotkey' = 'dock') => setVoiceMuted(!voiceMuted(), source);
 
 // Screen Agent's global hotkey reaches the page through WebView2 (companion 'mute' message); this is the same switch for anything that can run script.
-(window as Window & { __deskVoice?: unknown }).__deskVoice = { setMuted: (on: boolean) => setVoiceMuted(Boolean(on), 'hotkey'), toggleMuted: () => toggleVoiceMuted('hotkey'), muted: voiceMuted };
+/** The microphone he picked (Screen Agent overlay/tray, by Windows name; null = system default). Stored for every later session and switched live in a running one. */
+export function setVoiceMic(label: string | null) {
+  setMicPreference(label);
+  if (session && voiceActive()) void session.switchMic();
+  return true;
+}
+export const voiceMicLabel = () => (session && voiceActive() ? session.micLabel : null);
+
+(window as Window & { __deskVoice?: unknown }).__deskVoice = {
+  setMuted: (on: boolean) => setVoiceMuted(Boolean(on), 'hotkey'), toggleMuted: () => toggleVoiceMuted('hotkey'), muted: voiceMuted,
+  setMicLabel: (label: unknown) => setVoiceMic(typeof label === 'string' ? label : null), micLabel: voiceMicLabel, micPreference,
+};
