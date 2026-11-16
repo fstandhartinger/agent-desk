@@ -2,6 +2,7 @@ import { companionMuted, nativeHost } from './companion';
 import { ACTIVITY_LINGER_MS, isActivity, nextActivity, type ActivityLine } from './liveActivity';
 import { forwardActivity } from '../canvas/nativeNotify';
 import { MuteGate } from './muteGate';
+import { matchMic, micPreference, sameMic } from './micChoice';
 import { SpeechOnset } from './speechOnset';
 import { createStore } from './store';
 import { SpeechTracker } from './speechCursor';
@@ -66,6 +67,10 @@ export class VoiceSession {
   private stream: MediaStream | null = null;
   private player: AudioWorkletNode | null = null;
   private mic: AudioWorkletNode | null = null;
+  private src: MediaStreamAudioSourceNode | null = null;
+  /** A mic switch asked for while the session was still opening its microphone: done once the audio graph stands. */
+  private micDirty = false;
+  private switching: Promise<boolean> | null = null;
   private ready = false;
   private startMessage: (() => unknown) | null = null;
   private closed = false;
@@ -102,7 +107,7 @@ export class VoiceSession {
     catch { this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.'); return; }
     if (this.closed) return;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
+      this.stream = await this.openMic();
       this.gate.applyTracks();
       this.event('mic.permission', { state: 'granted' });
     } catch (err) {
@@ -129,6 +134,7 @@ export class VoiceSession {
     this.watchDevices();
     await Promise.all([ctx.audioWorklet.addModule('/worklets/mic-capture.js'), ctx.audioWorklet.addModule('/worklets/pcm-player.js')]);
     const src = ctx.createMediaStreamSource(this.stream!);
+    this.src = src;
     this.mic = new AudioWorkletNode(ctx, 'mic-capture', { processorOptions: { targetRate: 24000 } });
     this.mic.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
       levels.mic = this.gate.muted ? 0 : Math.min(1, e.data.rms * 4);
@@ -137,6 +143,7 @@ export class VoiceSession {
       this.gate.frame(e.data.pcm, !companionMuted() && this.ready && ws?.readyState === WebSocket.OPEN, (pcm) => ws!.send(pcm));
     };
     src.connect(this.mic);
+    if (this.micDirty) { this.micDirty = false; void this.switchMic(); }
     this.player = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [1], processorOptions: { sourceRate: 24000 } });
     this.player.port.onmessage = (e: MessageEvent<{ rms: number; buffered: number }>) => {
       levels.speaker = Math.min(1, e.data.rms * 3.5);
@@ -311,6 +318,55 @@ export class VoiceSession {
     this.ws?.send(JSON.stringify({ type: 'text', text, focusedCanvasId: focusedCanvasId(), ...(suggestion ? { source: 'suggestion' } : {}) }));
   }
 
+  /**
+   * The chosen microphone (micChoice.ts), else the system default. A chosen device that is gone or busy falls back to
+   * the default: a session never fails because of the picker.
+   */
+  private async openMic(): Promise<MediaStream> {
+    const pref = micPreference();
+    if (pref) {
+      try {
+        const id = matchMic(await navigator.mediaDevices.enumerateDevices(), pref);
+        if (id) return await navigator.mediaDevices.getUserMedia({ audio: { ...MIC, deviceId: { exact: id } } });
+        this.event('mic.device', { found: false });
+      } catch (err) {
+        this.event('mic.device', { found: true, error: (err as Error)?.name ?? 'Error' });
+      }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: MIC });
+  }
+
+  /** Label of the microphone the session hears right now (null: none open). */
+  get micLabel(): string | null { return this.stream?.getAudioTracks()[0]?.label ?? null; }
+
+  /**
+   * Re-open the microphone after the choice changed, in the running session: same socket, same context, same mute
+   * state. The new source is wired in before the old tracks stop, so no frame is lost beyond the switch itself.
+   */
+  switchMic(): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
+    if (!this.ctx || !this.mic || !this.stream) { this.micDirty = true; return Promise.resolve(true); }
+    if (sameMic(this.micLabel, micPreference()) && micPreference()) return Promise.resolve(true);
+    const run = async () => {
+      let next: MediaStream;
+      try { next = await this.openMic(); } catch (err) { this.event('mic.switch', { ok: false, error: (err as Error)?.name ?? 'Error' }); return false; }
+      if (this.closed || !this.ctx || !this.mic) { next.getTracks().forEach((t) => t.stop()); return false; }
+      const old = this.stream, oldSrc = this.src;
+      this.stream = next;
+      this.gate.applyTracks(); // a muted session stays muted on the new device
+      const src = this.ctx.createMediaStreamSource(next);
+      src.connect(this.mic);
+      this.src = src;
+      try { oldSrc?.disconnect(); } catch { /* already gone */ }
+      old?.getTracks().forEach((t) => t.stop());
+      this.event('mic.switch', { ok: true, chosen: Boolean(micPreference()) });
+      return true;
+    };
+    const p = (this.switching ?? Promise.resolve(true)).then(run, run).finally(() => { if (this.switching === p) this.switching = null; });
+    this.switching = p;
+    return p;
+  }
+
   get muted() { return this.gate.muted; }
   setMuted(on: boolean, source: 'dock' | 'hotkey' = 'dock') { return this.gate.set(on, source); }
 
@@ -388,6 +444,9 @@ export class VoiceSession {
     this.mic?.port.close();
     this.player?.port.close();
     this.mic = this.player = null;
+    try { this.src?.disconnect(); } catch { /* already gone */ }
+    this.src = null;
+    this.micDirty = false;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     void this.ctx?.close().catch(() => /* ignored */ {});
