@@ -175,7 +175,7 @@ describe('start_agent_job', () => {
     const c = ctx([entry('ältere Worte'), ...say]);
     const r = await job(c, { host: 'lechonk' });
     assert.equal(r.ok, true);
-    assert.equal(r.content, 'Job voice-x-20261102 läuft. Karte: unterwegs. Sag nur einen kurzen Satz.');
+    assert.equal(r.content, 'Job voice-x-20261102 läuft. Karte: unterwegs. Sag nur einen kurzen Satz in Alltagssprache, ohne den Jobnamen vorzulesen (etwa "Der Job läuft, die Karte ist unterwegs.").');
     const [call] = c.log.hub;
     assert.equal(call.method, 'job.start');
     assert.deepEqual(call.opts, { host: 'sandy' });

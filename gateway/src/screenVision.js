@@ -102,7 +102,7 @@ export function createScreenVision({ media, artifacts, limits = defaultLimits, n
       if (h.announced === now_) continue;
       h.announced = now_;
       const how = h.setContext(now_
-        ? `[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] Ab jetzt ist ein Screen Agent verbunden. ${screenLines(true).join(' ')}`
+        ? `[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] Ab jetzt ist ein Screen Agent verbunden. ${screenLines(true, { spoken: true }).join(' ')}`
         : '[Hinweis vom Desk, nicht von Florian, keine Frage: nicht darauf antworten.] Der Screen Agent ist nicht mehr verbunden: du siehst den Bildschirm nicht mehr. Sag das ehrlich, wenn Florian danach fragt, und beschreibe nichts mehr von früheren Bildschirm-Updates als aktuell.');
       h.trace('screen.attach', { attached: now_, how });
     }
