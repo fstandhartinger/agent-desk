@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expandQuery, groupsIn } from './searchTerms.js';
 import { assertNoSecretFragment } from './secretQuery.js';
-import { isDenied } from './paths.js';
+import { isDenied, isHidden } from './paths.js';
 import { DB_FILE, MAP_DIR, SCHEMA_VERSION, STATUS_FILE, isoMinute, openHint, squash } from './mapIndex.js';
 
 const DEFAULT_DISCOVER = 20;
@@ -320,6 +320,7 @@ function rootNode(h) {
 
 function resolveNode(h, p) {
   if (!p) return rootNode(h);
+  if (isHidden(p)) throw new Error(`unknown map path "${squash(p, 80)}"`); // evaluation material (paths.js DESK_HIDE), also in an old index
   const n = stmt(h, `SELECT ${NODE_COLS} FROM nodes WHERE path = ?`).get(p);
   if (n) return n;
   // a canonical file path (e.g. /home/flori/jobs/x/STATE.md) or a board entry path leads to its node
@@ -355,9 +356,10 @@ export async function discover(params = {}) {
     }));
     return { ...head, query, lines, total: all.length, nextOffset: offset + limit < all.length ? offset + limit : null };
   }
-  const total = stmt(h, 'SELECT count(*) AS n FROM nodes WHERE parent = ?').get(node.path).n;
-  const kids = stmt(h, `SELECT ${NODE_COLS} FROM nodes WHERE parent = ? ORDER BY sort, path LIMIT ? OFFSET ?`).all(node.path, limit, offset);
-  return { ...head, lines: kids.map(lineOf), total, nextOffset: offset + kids.length < total ? offset + kids.length : null };
+  // hidden nodes (paths.js DESK_HIDE) are dropped before paging, so total and nextOffset stay exact (review of PR #49)
+  const all = stmt(h, `SELECT ${NODE_COLS} FROM nodes WHERE parent = ? ORDER BY sort, path`).all(node.path).filter((k) => !isHidden(k.path));
+  const kids = all.slice(offset, offset + limit);
+  return { ...head, lines: kids.map(lineOf), total: all.length, nextOffset: offset + kids.length < all.length ? offset + kids.length : null };
 }
 
 function readStatusFile() {
