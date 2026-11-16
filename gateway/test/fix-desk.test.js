@@ -32,23 +32,23 @@ it('M1: a six-digit card number is a card first and an id only when no such card
 const { limits, CAPTION_DAY_USD, CAPTION_HOUR_USD, Limits } = await import('../src/limits.js');
 const { createDeviceMedia } = await import('../src/deviceMedia.js');
 const wavOf = (s) => { const pcm = Buffer.alloc(s * 32000); const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(16000, 24); h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40); return Buffer.concat([h, pcm]); };
-it('M4: captions stop at USD 1/hour and 2/day per device with code caption-budget, and never touch the shared cap', async () => {
-  const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async () => Response.json({ text: 'x', usage: { seconds: 1, cost: 0.4 } }) });
+it('M4: captions stop at USD 2/hour and 4/day per device with code caption-budget, and never touch the shared cap', async () => {
+  const media = createDeviceMedia({ env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: async () => Response.json({ text: 'x', usage: { seconds: 1, cost: 0.8 } }) });
   const shared = limits.costToday();
   const ok = await media.caption(wavOf(1), [], 'dev-ledger');
-  assert.equal(ok.cost, 0.4);
-  await media.caption(wavOf(1), [], 'dev-ledger'); await media.caption(wavOf(1), [], 'dev-ledger'); // 1.2 > hour cap
+  assert.equal(ok.cost, 0.8);
+  await media.caption(wavOf(1), [], 'dev-ledger'); await media.caption(wavOf(1), [], 'dev-ledger'); // 2.4 > hour cap
   await assert.rejects(media.caption(wavOf(1), [], 'dev-ledger'), e => e.status === 429 && e.code === 'caption-budget' && e.body.scope === 'hour' && e.retryAfter >= 1);
   await media.caption(wavOf(1), [], 'dev-other'); // another device is unaffected
   assert.equal(limits.costToday(), shared, 'shared Desk cap untouched, so dictation keeps working');
-  assert.ok(limits.snapshot().captionTodayUsd >= 1.6, 'caption spend stays visible next to spendTodayUsd');
+  assert.ok(limits.snapshot().captionTodayUsd >= 3.2, 'caption spend stays visible next to spendTodayUsd');
 });
 it('M4: the day cap bites after the hour window moves on', () => {
   const l = new Limits(), t0 = Date.parse('2026-11-03T10:00:00Z');
   for (let h = 0; h < 2; h++) { l.captionAdd('d', CAPTION_HOUR_USD, t0 + h * 3_600_000); }
   assert.equal(l.captionCheck('d', t0 + 2 * 3_600_000).ok, false);
   assert.equal(l.captionCheck('d', t0 + 2 * 3_600_000).scope, 'day');
-  assert.equal(CAPTION_DAY_USD, 2);
+  assert.equal(CAPTION_DAY_USD, 4);
 });
 
 // ---- M5 / M6 / S7 / S8: the device day log ----

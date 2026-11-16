@@ -330,7 +330,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
   /** Live caption: MAI only, 3 s, no retry of the audio. 503 + code when the key is missing or MAI is down (the app then hides captions). Returns {text, ms, seconds, cost, retried}. */
   async function caption(audio, phrases, deviceId = 'device') {
     if (!maiKey()) throw Object.assign(deviceError('Untertitel sind nicht eingerichtet.', 503), { code: 'no-key', reason: 'no-key', ms: 0 });
-    // own ledger per device (USD 2/day, 1/hour): captions never draw on the shared cap, so a stuck loop cannot starve dictation or drawings
+    // own ledger per device (USD 4/day, 2/hour since 16 Nov 2026): captions never draw on the shared cap, so a stuck loop cannot starve dictation or drawings
     const gate = limits.captionCheck(deviceId);
     if (!gate.ok) throw Object.assign(deviceError('Untertitel-Budget erreicht.', 429), { code: 'caption-budget', reason: 'caption-budget', ms: 0, retryAfter: gate.retryAfter, scope: gate.scope, body: { error: 'Untertitel-Budget erreicht.', code: 'caption-budget', scope: gate.scope } });
     const started = Date.now();

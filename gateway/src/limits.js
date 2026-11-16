@@ -11,7 +11,7 @@ const RATES = {
 };
 const VOICE_MAX_CONCURRENT = 2;
 const VOICE_MAX_SECONDS_PER_DAY = 90 * 60;
-export const CAPTION_DAY_USD = 2.00, CAPTION_HOUR_USD = 1.00; // per device, separate from the shared daily cap
+export const CAPTION_DAY_USD = 4.00, CAPTION_HOUR_USD = 2.00; // per device, separate from the shared daily cap (16 Nov 2026: doubled for the subtitle re-read, measured ~USD 2.1 per hour of continuous speech)
 
 const dayKey = () => new Date().toISOString().slice(0, 10);
 
