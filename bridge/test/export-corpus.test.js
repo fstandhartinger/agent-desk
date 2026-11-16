@@ -35,8 +35,8 @@ test('layout: <source>/<canonical path>.txt, board entries board/<thread>/<id>.t
   assert.match(t, /landing pages went live and the scoring phase budget was confirmed/);
   assert.equal(text('board/22/1.txt'), '# board/22/1 | updated 2026-11-13T10:00:00Z\n\nDecision: the scoring phase takes 36 hours and costs USD 370, approved.\n');
   for (const src of ['wissen', 'entscheidungen', 'regeln', 'chats/laptop', 'skills', 'code', 'jobs']) assert.ok(names.some((n) => n.startsWith(`${src}/`)), `source ${src}`);
-  // every doc of the index is there (26 docs, none denied, none empty) plus the meta file
-  assert.equal(names.length, 26 + 1);
+  // every doc of the index is there (28 docs incl. the two server-chat docs, none denied, none empty) plus the meta file
+  assert.equal(names.length, 28 + 1);
 });
 
 test('the chunks of a document come back in line order; DECISIONS keeps its entries apart', { skip }, () => {
@@ -99,9 +99,9 @@ test('private: directories 0700, files 0600, no stray work files after the swap'
   const parent = fs.readdirSync(path.dirname(out));
   assert.deepEqual(parent.filter((n) => /^corpus\.(new|old|lock)/.test(n)), [], parent.join(' '));
   const meta = JSON.parse(text('.corpus-meta.json'));
-  assert.equal(meta.docs, 26);
-  assert.equal(meta.files, 26);
-  assert.equal(meta.written, 26);
+  assert.equal(meta.docs, 28);
+  assert.equal(meta.files, 28);
+  assert.equal(meta.written, 28);
   assert.equal(meta.redact, true);
 });
 
@@ -110,7 +110,7 @@ test('incremental: unchanged documents are hard links of the old files, a change
   const before = fs.statSync(path.join(out, rel));
   const second = exportRun();
   assert.equal(second.status, 0, second.stderr);
-  assert.match(second.stdout, /written 0, reused 26;/);
+  assert.match(second.stdout, /written 0, reused 28;/);
   assert.equal(fs.statSync(path.join(out, rel)).ino, before.ino, 'same inode: the file was linked, not copied');
   // a changed note and a removed one, then a new index build
   fx.write(path.join(fx.mirror, 'alpha-job-20261101', 'STATE.md'), '# STATE — alpha\n\nLead: opus.\n- step one done\n- step two: marmalade shipped\n- FINAL DONE\n', '2026-11-05T10:00:00Z');
@@ -118,14 +118,14 @@ test('incremental: unchanged documents are hard links of the old files, a change
   fx.run();
   const third = exportRun();
   assert.equal(third.status, 0, third.stderr);
-  assert.match(third.stdout, /written 1, reused 24;/);
+  assert.match(third.stdout, /written 1, reused 26;/);
   const stateRel = `jobs/${homeRel(path.join(fx.home, 'jobs', 'alpha-job-20261101', 'STATE.md'))}.txt`;
   assert.match(text(stateRel), /updated 2026-11-05T10:00:00Z[\s\S]*marmalade shipped/);
   assert.ok(!files().some((f) => f.endsWith('beta-job-20261002/PROMPT.md.txt')), 'the removed note is gone');
   assert.equal(fs.statSync(path.join(out, rel)).ino, before.ino);
   // --full re-reads everything
   const full = exportRun('--full');
-  assert.match(full.stdout, /written 25, reused 0;/);
+  assert.match(full.stdout, /written 27, reused 0;/);
   assert.notEqual(fs.statSync(path.join(out, rel)).ino, before.ino);
 });
 
