@@ -39,12 +39,14 @@ it('the guard undoes what nobody heard: an invented negation or digit never reac
   assert.equal((await m2.revise(speech(5), {}, { deviceId: 'rev-4' })).text, 'wir haben drei Modelle getestet');
 });
 it('a late or failing model leaves the recogniser reading; no recogniser is an error the app ignores', async () => {
+  const keep = setInterval(() => {}, 1000); // AbortSignal.timeout does not hold the event loop by itself
   const media = createDeviceMedia({ env, fetchImpl: fake({ model: null }) });
   const r = await media.revise(speech(5), { shown: 'x' }, { deviceId: 'rev-5', modelMs: 50 });
   assert.equal(r.merged, false); assert.equal(r.text, 'wir haben das Jeff Bench Ergebnis gestern'); assert.equal(r.providers.model.ok, false);
   const down = createDeviceMedia({ env, fetchImpl: fake({ mai: Object.assign(Error('down'), { upstream: 503 }) }) });
   await assert.rejects(down.revise(speech(5), {}, { deviceId: 'rev-6' }), e => e.status === 503 && e.code === 'revise-down');
   await assert.rejects(createDeviceMedia({ env: {} }).revise(speech(5), {}, {}), e => e.code === 'no-key');
+  clearInterval(keep);
 });
 it('an answer that lost his words is not taken', async () => {
   const media = createDeviceMedia({ env, fetchImpl: fake({ mai: 'eins zwei drei vier fünf sechs sieben acht neun zehn', model: 'ja' }) });
@@ -54,4 +56,21 @@ it('an answer that lost his words is not taken', async () => {
 it('closed end (open:false) keeps the sentence end', async () => {
   const media = createDeviceMedia({ env, fetchImpl: fake({ mai: 'das ist fertig', model: 'Das ist fertig.' }) });
   assert.equal((await media.revise(speech(3), { open: false }, { deviceId: 'rev-8' })).text, 'Das ist fertig.');
+});
+it('DESK_DICTATE_CLEAN_MODEL=gemini-3.8-flash: the dictation merge goes to Gemini with the merge prompt; unset it stays on OpenRouter', async () => {
+  const urls = [];
+  const fetchImpl = async (url, opts) => {
+    const u = String(url); urls.push(u);
+    if (u.includes('generateContent')) { const b = JSON.parse(opts.body); assert.match(b.systemInstruction.parts[0].text, /bereinigst ein Diktat/); assert.match(u, /gemini-3\.8-flash/); return Response.json({ candidates: [{ content: { parts: [{ text: 'Wir haben das JevBench-Ergebnis.' }] } }] }); }
+    if (u.includes('/chat/completions')) return Response.json({ choices: [{ message: { content: 'Wir haben das JevBench-Ergebnis.' } }] });
+    if (u.includes('openrouter')) return Response.json({ text: 'Wir haben das Jeff Bench Ergebnis.', usage: { seconds: 2 } });
+    return Response.json({ text: 'Wir haben das Jeff Bench Ergebnis.' });
+  };
+  const ctx = { process: 'x', fieldBefore: '', visibleIds: [], recentTerms: [] };
+  const base = { OPENROUTER_API_KEY: 'k', OPENAI_API_KEY: 'o', GOOGLE_API_KEY: 'g', DESK_DICTATE_SOURCES: 'mai,openai' };
+  const g = await createDeviceMedia({ env: { ...base, DESK_DICTATE_CLEAN_MODEL: 'gemini-3.8-flash' }, fetchImpl }).dictate(speech(2), ctx, {});
+  assert.ok(urls.some(u => u.includes('generateContent'))); assert.ok(!urls.some(u => u.includes('/chat/completions'))); assert.equal(g.merged, true);
+  urls.length = 0;
+  await createDeviceMedia({ env: base, fetchImpl }).dictate(speech(2), ctx, {});
+  assert.ok(urls.some(u => u.includes('/chat/completions'))); assert.ok(!urls.some(u => u.includes('generateContent')));
 });

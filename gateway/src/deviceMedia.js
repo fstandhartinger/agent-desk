@@ -270,9 +270,9 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
   /**
    * Which model writes the dictation text (16 Nov 2026). Measured on 8 of his dictations against a careful reference (merge of the same three
    * recogniser answers, word guard after it): gpt-oss-120b 4.8 % wrong words (3.4 % with RULES 11), gemini-3.8-flash 1.4-2.6 % (median ~2.0 s per call,
-   * gpt-oss ~1.8 s). DESK_DICTATE_CLEAN_MODEL (else DESK_DICTATE_MERGE_MODEL) names another; an OpenRouter id (with a "/") goes there. No Google key: the OpenRouter model.
+   * gpt-oss ~1.8 s). DESK_DICTATE_CLEAN_MODEL=gemini-3.8-flash switches merge and final pass to Gemini (Google API, needs GOOGLE_API_KEY); an OpenRouter id (with a "/") goes there; unset = the OpenRouter merge model.
    */
-  const cleanModel = () => (env.DESK_DICTATE_CLEAN_MODEL || env.DESK_DICTATE_MERGE_MODEL || (googleKey() ? 'gemini-3.8-flash' : '')).trim(); // an explicitly configured merge model stays in charge
+  const cleanModel = () => String(env.DESK_DICTATE_CLEAN_MODEL ?? '').trim(); // unset: the OpenRouter merge model (DESK_DICTATE_MERGE_MODEL) as before
   async function fastMerge(prompt, signal, o = {}) {
     if (!o.free && !limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
     if (!o.free) limits.addCost(0.001);
