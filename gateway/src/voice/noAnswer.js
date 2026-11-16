@@ -48,7 +48,9 @@ const PROMISE = /\b(?:ich\s+(?:schaue?|seh[e]?|prüfe?|lese?|suche?|hole?|checke
 // announcement counts: short, no comma/colon, no conjunction, no negation, no digit ("Ich zeichne kein Diagramm, weil ..." is an answer).
 const ANNOUNCED = /^(?:ich\s+(?:schaue?|prüfe?|lese?|suche?|hole?|checke?|recherchiere?|gucke?|werfe?|zeichne?|male?|lade?|öffne?)\b|[^.!?…]{0,30}\bkommt\s+gleich)/i;
 const FAILED_STEP = /^die\s+suche\s+(?:lieferte|ergab|brachte)\s+(?:nichts|keine?\b)/i;
-const NOT_BARE = /[,;:]|\b(?:nicht|kein\w*|nie|niemals|weil|aber|denn|dass|damit|sondern|obwohl|und|oder|sie|er|es)\b|\d/i;
+// A standalone number makes it an answer ("Ich lese 500 Dollar"); a digit inside a name does not (live eval 16 Nov, Grok q37 a#542918:
+// "Ich schaue in die Runde-2-Dateien." counted as an answer, the watchdog stood down and Florian got nothing).
+const NOT_BARE = /[,;:]|\b(?:nicht|kein\w*|nie|niemals|weil|aber|denn|dass|damit|sondern|obwohl|und|oder|sie|er|es)\b|(?<![\p{L}\p{N}#_-])\d+(?:[.,]\d+)?(?![\p{L}\p{N}_-])/iu;
 const LEAD_IN = /^(?:ok|okay|gut|alles klar|ja)[,.!]?\s*/i;
 const bareAnnouncement = (part) => { const p = part.replace(LEAD_IN, ''); return p.length <= 45 && ANNOUNCED.test(p) && !NOT_BARE.test(p); };
 

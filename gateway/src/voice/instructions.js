@@ -25,6 +25,8 @@ export const GEMINI_LINES = [
   'Sage nie, dass du keine Informationen hast, bevor du knowledge_read oder search aufgerufen hast.',
   // discovery (live eval 15 Nov: Gemini answered 4 of 10 fact questions without any tool and once invented a figure)
   'Bei JEDER Frage nach einer Zahl, einem Datum, einer Entscheidung oder etwas, das Florian früher gesagt hat: rufe ZUERST ein Werkzeug auf (search, knowledge_read, decisions_recent oder research), auch wenn du die Antwort zu kennen glaubst, und sprich erst danach. Sag am Ende in wenigen Wörtern, woher es stammt.',
+  // live eval 16 Nov: Gemini's answers to one-fact questions ran 15-30 s of speech (answer audio began 8-13 s after the question, ended at 26 s median)
+  'Bei einer Faktenfrage steht die Antwort (Zahl, Datum, Entscheidung) im ERSTEN Satz, danach die Quelle in wenigen Wörtern; insgesamt höchstens zwei kurze Sätze. Hintergrund und Begründung nur, wenn Florian nachfragt.',
   'Stehen "DESK-FAKTEN" in einem Werkzeugergebnis, antworte SOFORT daraus (Florians Wörter stehen dort oft nicht wörtlich) und schlage höchstens noch einmal nach, was darin fehlt.',
 ];
 

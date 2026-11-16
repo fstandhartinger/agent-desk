@@ -51,7 +51,14 @@ const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job', 'co
 // Discovery (job agent-desk-context-discovery-20261115): the background research is the way out of the cap, never counted against it
 const UNCAPPED = new Set(['research', 'research_result']);
 // Round 2 (16 Nov): Gemini's finished turn is checked once per question (answerGuard.js) after this much quiet
-const GUARD_MS = 3000;
+// 16 Nov (live eval q33/q39): the check came 3 s after the answer's sound ended; 1.5 s is enough to see that nothing else follows
+export const GUARD_MS = 1500;
+// Grok q37 (16 Nov, a#542918): knowledge_read was back after 30 ms but held in the batch while search_files ran on (> 8 s); Grok had said
+// "Ich schaue in die Runde-2-Dateien." and nothing followed. A call that keeps finished results of the same question waiting this long is cut.
+export const SIBLING_WAIT_MS = 5000;
+// Per-provider shift of the no-answer clock. OpenAI's delegate needs up to ~9 s to its first tool call (live 2 Nov). Gemini starts its
+// answer 2.5-4.8 s after the last tool result (21 live sessions, 16 Nov): 7 s still never cuts into its thinking and recovers 3 s sooner.
+export const NO_ANSWER_SHIFT_MS = { openai: 2000, gemini: -3000 };
 const SPOKEN_KEEP = 12;
 const ECHO_MS = 20_000;
 const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
@@ -78,9 +85,8 @@ const normText = (t) => String(t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
 export const MAX_RECOVERIES = 2;
 const RECOVERY_FACT_CHARS = 1500;
 const HALF_SENTENCE_MS = 1500; // a mute this soon after the last word cut a sentence (GPT-Live transcripts often have no punctuation)
-const OPENAI_EXTRA_MS = 2000; // GPT-Live's delegate needs up to ~9 s to its first tool call (live 2 Nov)
 
-export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => cfg.voiceNoAnswerMs() + (provider === 'openai' ? OPENAI_EXTRA_MS : 0), toolTimeoutMs = TOOL_TIMEOUT_MS }) {
+export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date.now, mergeMs = cfg.userMergeMs(), noAnswerMs = () => Math.max(5000, cfg.voiceNoAnswerMs() + (NO_ANSWER_SHIFT_MS[provider] ?? 0)), toolTimeoutMs = TOOL_TIMEOUT_MS, siblingWaitMs = SIBLING_WAIT_MS }) {
   const { runTool, makeCtx, limits, audit, toolDefs, sid } = deps;
   let inScreenAgent = false;
   const sendJson = (obj) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(obj));
@@ -174,6 +180,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   // No-answer watchdog for all providers: a user turn with neither speech nor a running tool, or a spoken promise with nothing following.
   const pending = { active: false, text: '', answer: '', recoveries: 0, timer: null, facts: [], promised: false, overlap: false };
   let runningTools = 0;
+  const cuttable = new Map(); // id -> {name, at, cut}: running calls that may be cut when they hold back finished results (SIBLING_WAIT_MS)
+  let siblingTimer = null;
   let detachVision = null;
   let screenHeld = null; // screen context that arrived before the vendor was ready
   let briefingHeld = null; // the start briefing (item G), same: held until the vendor is ready
@@ -560,7 +568,9 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       const voiceTurn = { spoken: () => spoken.slice(), fromFragment, oldChain, speaking: () => now() - speechAt < SETTLE_MS, sinceSpeech: () => now() - speechAt, awaitingFinal: () => speechOpen && now() - speechAt < AWAIT_FINAL_MS, epoch: () => contentEpoch, provider, turn: turnId };
       const running = runTool(name, args, { ...makeCtx(page), canvas, turnProposals, maxChars: voiceCapFor(provider, name), voiceTurn, contextNote, conversation: convCtx });
       let limitTimer = null;
-      const res = LONG_TOOLS.has(name) || DRAW_TOOLS.has(name) ? await running : await Promise.race([running, new Promise((_, reject) => { limitTimer = setTimeout(() => { trace.event('tool.timeout', { turn: turnId, id, name, ms: toolTimeoutMs }); reject(new Error(`Zeitüberschreitung: ${name} hat nach ${Math.round(toolTimeoutMs / 1000)} s nicht geantwortet. Sag Florian, dass dieses Ergebnis fehlt, statt so zu tun, als hättest du es.`)); }, toolTimeoutMs); })]).finally(() => clearTimeout(limitTimer));
+      const slow = LONG_TOOLS.has(name) || DRAW_TOOLS.has(name) || ACTION_TOOLS.has(name) || UNCAPPED.has(name);
+      const cutP = slow ? null : new Promise((_, reject) => cuttable.set(id, { name, at: t0, cut: () => reject(new Error(`Abgebrochen: ${name} brauchte zu lange, Florian wartet. Antworte jetzt mit dem, was die anderen Werkzeuge geliefert haben, und sag kurz, dass dieser Teil fehlt; fehlt dir Wesentliches, rufe research auf (läuft im Hintergrund).`)) }));
+      const res = LONG_TOOLS.has(name) || DRAW_TOOLS.has(name) ? await running : await Promise.race([running, ...(cutP ? [cutP] : []), new Promise((_, reject) => { limitTimer = setTimeout(() => { trace.event('tool.timeout', { turn: turnId, id, name, ms: toolTimeoutMs }); reject(new Error(`Zeitüberschreitung: ${name} hat nach ${Math.round(toolTimeoutMs / 1000)} s nicht geantwortet. Sag Florian, dass dieses Ergebnis fehlt, statt so zu tun, als hättest du es.`)); }, toolTimeoutMs); })]).finally(() => { clearTimeout(limitTimer); cuttable.delete(id); });
       const full = String(res.content ?? '');
       output = full.slice(0, voiceCapFor(provider, name));
       trace.event('tool.done', { turn: turnId, id, name, ok: res.ok !== false, ms: now() - t0, chars: output.length, fullChars: full.length, cut: full.length > output.length });
@@ -631,6 +641,25 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     adapter.sendToolResult(id, requestedName, route ? `${output}\n\n${route}` : output);
     trace.event('tool.result_sent', { turn: turnId, id, name, reachedModel: true, responseRequested: true, routed: Boolean(route) });
+    armSiblingCut();
+  }
+
+  /** A finished result waits in the batch (xAI/OpenAI send all outputs of a response together) behind a slow call while the question waits. */
+  function armSiblingCut() {
+    if (siblingTimer || !pending.active || !cuttable.size || !(adapter?.held?.() > 0)) return;
+    siblingTimer = setTimeout(cutSlowSiblings, siblingWaitMs);
+    siblingTimer.unref?.();
+  }
+
+  function cutSlowSiblings() {
+    siblingTimer = null;
+    if (closed || !pending.active || !(adapter?.held?.() > 0)) return;
+    for (const [id, c] of cuttable) {
+      cuttable.delete(id);
+      audit({ action: 'voice.tool.cut', detail: `${provider}:${c.name}` });
+      trace.event('tool.cut_slow', { turn: turnId, id, name: c.name, ms: now() - c.at, held: adapter.held() });
+      c.cut();
+    }
   }
 
   function onEvent(e) {
@@ -966,6 +995,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     commitUser();
     closed = true;
     clearTimeout(startTimer);
+    clearTimeout(siblingTimer);
     clearInterval(tickTimer);
     clearTimeout(capTimer);
     clearTimeout(warnTimer);
