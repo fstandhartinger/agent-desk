@@ -216,6 +216,9 @@ function candidates(h, built, f, need) {
     for (let k = built.groups.length - 1; k >= 1 && seen.size < need * 3; k -= 1) {
       take(fetchRows(h, byRarity.slice(0, k).map((g) => `(${g.terms.join(' OR ')})`).join(' AND '), f, pool));
     }
+    // round 2 (16 Nov): the rarest words can be exactly the ones the place lacks ("verdict", "sample 2000" in an 8-word research
+    // query, q39): one any-word pass, bm25 favours chunks with many of the words, coverage ranks them below
+    if (built.groups.length >= 3) take(fetchRows(h, built.groups.map((g) => `(${g.terms.join(' OR ')})`).join(' OR '), f, pool));
   }
   const foldedGroups = built.groups.map((g) => ({ word: g.word, variants: g.variants.map(fold) }));
   const now = Date.now();
