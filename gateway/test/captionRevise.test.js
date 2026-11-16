@@ -74,3 +74,22 @@ it('DESK_DICTATE_CLEAN_MODEL=gemini-3.8-flash: the dictation merge goes to Gemin
   await createDeviceMedia({ env: base, fetchImpl }).dictate(speech(2), ctx, {});
   assert.ok(urls.some(u => u.includes('/chat/completions'))); assert.ok(!urls.some(u => u.includes('generateContent')));
 });
+it('the last chunk: when the better model misses the cap, the fast model answer is taken, not the bare recogniser text', async () => {
+  const keep = setInterval(() => {}, 1000);
+  const fetchImpl = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('gemini-3.8-flash')) return new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(Object.assign(Error('late'), { name: 'AbortError' }))));
+    if (u.includes('generateContent')) return Response.json({ candidates: [{ content: { parts: [{ text: 'Wir haben das JevBench Ergebnis.' }] } }] });
+    if (u.includes('openrouter')) return Response.json({ text: 'Wir haben das Jeff Bench Ergebnis.', usage: { seconds: 2 } });
+    return Response.json({ text: 'Wir haben das Jeff Bench Ergebnis.' });
+  };
+  const env = { OPENROUTER_API_KEY: 'k', OPENAI_API_KEY: 'o', GOOGLE_API_KEY: 'g', DESK_DICTATE_SOURCES: 'mai,openai', DESK_DICTATE_CLEAN_MODEL: 'gemini-3.8-flash', DESK_DICTATE_CLEAN_FAST_MODEL: 'gemini-3.5-flash-lite' };
+  const r = await createDeviceMedia({ env, fetchImpl }).dictate(speech(2), { process: 'x', fieldBefore: '', visibleIds: [], recentTerms: [] }, {});
+  clearInterval(keep);
+  assert.equal(r.merged, true); assert.equal(r.providers.merge.model, 'fast'); assert.match(r.text, /JevBench/);
+});
+it('a piece closed at a pause may not run past its audio', async () => {
+  const media = createDeviceMedia({ env, fetchImpl: fake({ mai: 'das ist der erste Satz', model: 'Das ist der erste Satz. Und dann kommt der zweite' }) });
+  const r = await media.revise(speech(3), { open: false, shown: 'das ist der erste Satz und dann kommt der zweite' }, { deviceId: 'rev-9' });
+  assert.equal(r.merged, false); assert.equal(r.text, 'das ist der erste Satz'); assert.equal(r.providers.model.reason, 'long');
+});

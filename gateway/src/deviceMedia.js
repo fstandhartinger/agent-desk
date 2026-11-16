@@ -272,7 +272,8 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
    * recogniser answers, word guard after it): gpt-oss-120b 4.8 % wrong words (3.4 % with RULES 11), gemini-3.8-flash 1.4-2.6 % (median ~2.0 s per call,
    * gpt-oss ~1.8 s). DESK_DICTATE_CLEAN_MODEL=gemini-3.8-flash switches merge and final pass to Gemini (Google API, needs GOOGLE_API_KEY); an OpenRouter id (with a "/") goes there; unset = the OpenRouter merge model.
    */
-  const cleanModel = () => String(env.DESK_DICTATE_CLEAN_MODEL ?? '').trim(); // unset: the OpenRouter merge model (DESK_DICTATE_MERGE_MODEL) as before
+  const cleanModel = () => String(env.DESK_DICTATE_CLEAN_MODEL ?? '').trim();
+  const cleanFastModel = () => String(env.DESK_DICTATE_CLEAN_FAST_MODEL ?? '').trim(); // the model for the text he waits for: final pass, and the backup of the last chunk's merge // unset: the OpenRouter merge model (DESK_DICTATE_MERGE_MODEL) as before
   async function fastMerge(prompt, signal, o = {}) {
     if (!o.free && !limits.check('device-media', 'spend').ok) throw deviceError('Tagesbudget erreicht.', 429);
     if (!o.free) limits.addCost(0.001);
@@ -400,6 +401,8 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     catch (err) { providers.model = failure(err, Date.now() - t0); }
     const finish = (text, merged, undone = 0) => ({ text: openEnd(properNames(applyCorrections(dropStutters(text).text, dictionary), knownNames(dictionary, env))), ms: Date.now() - started, seconds, providers, merged, cost: Number(cost.toFixed(6)), undone });
     if (!out || !keptWords(ref, out, 1.5)) { if (out) providers.model = { ...providers.model, ok: false, reason: 'different' }; return finish(ref, false); }
+    // a piece that ends at a pause: the answer may not run past its audio (the shown text can hold words spoken after the pause)
+    if (!open && contentWords(out).length > contentWords(ref).length + 1) { providers.model = { ...providers.model, ok: false, reason: 'long' }; return finish(ref, false); }
     // a change stands when a recogniser or the fast subtitle heard it there, or it is a near miss / known name (dictationGuard.js); numbers and negations stay
     const g = guardText(ref, out, { ...variantContext(ref, [...Object.values(sources), ...(shown ? [shown] : [])]), terms: guardTerms(dictionary, env, screenNames) });
     return finish(g.text, true, g.undone);
@@ -522,9 +525,15 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         const data = JSON.stringify({ glossar: dictationGlossary(env), varianten: variants, context: { ...resolvedContext, titles: undefined }, dictionary: mergeDictionary(resolvedDictionary, sources) }).replaceAll('<', '\\u003c').slice(0, 30000);
         const prompt = `<artifact_data>\n${data}\n</artifact_data>`;
         const mergeStop = new AbortController(), stop = () => mergeStop.abort(); controller.signal.addEventListener('abort', stop, { once: true });
-        let mergeTimer; const capped = new Promise(resolve => { mergeTimer = setTimeout(() => { providers.merge ??= { ok: false, ms: Date.now() - t0, reason: 'slow' }; stop(); resolve(''); }, budgetMs ? budget : dictationMergeMs(duration) * (patient ? 3 : 1)); }); // while he still talks the clean-up may take its time
+        // 16 Nov 2026: while he waits (the last or only chunk) a fast second model (DESK_DICTATE_CLEAN_FAST_MODEL) runs beside the better one; when the better one
+        // misses the cap, the fast answer is taken instead of the bare recogniser text (measured: gemini-3.8-flash 0.6-2.0 % wrong words but ~2 s, flash-lite 3.0 % in ~0.7 s).
+        const fastModel = !patient && cleanFastModel() && cleanFastModel() !== cleanModel() ? cleanFastModel() : '';
+        let fastAnswer = '';
+        const fastCall = fastModel ? fastMerge(prompt, mergeStop.signal, { system: MERGE_PROMPT, model: fastModel }).then(t => { fastAnswer = t; return t; }, () => '') : null;
+        let mergeTimer; const capped = new Promise(resolve => { mergeTimer = setTimeout(() => { if (fastAnswer) { providers.merge ??= { ok: true, ms: Date.now() - t0, model: 'fast' }; stop(); resolve(fastAnswer); return; } providers.merge ??= { ok: false, ms: Date.now() - t0, reason: 'slow' }; stop(); resolve(''); }, budgetMs ? budget : dictationMergeMs(duration) * (patient ? 3 : 1)); }); // while he still talks the clean-up may take its time
         const call = maiKey() || cleanModel() ? fastMerge(prompt, mergeStop.signal, { system: MERGE_PROMPT, model: cleanModel() }) : google([{ text: prompt }], mergeStop.signal, { system: MERGE_PROMPT, thinking: 'low', maxTokens: 3000 });
-        const answer = await Promise.race([call.catch(err => { providers.merge ??= failure(err, Date.now() - t0); return ''; }), capped, deadline]);
+        const primary = call.then(t => t || (fastCall ? fastCall : ''), async err => { const f = fastCall ? await fastCall : ''; if (f) { providers.merge ??= { ok: true, ms: Date.now() - t0, model: 'fast' }; return f; } providers.merge ??= failure(err, Date.now() - t0); return ''; });
+        const answer = await Promise.race([primary, capped, deadline]);
         clearTimeout(mergeTimer);
         // the clean-up must keep his words and his language: fillers and spoken corrections may go, but below 75 % of the content words of the source most
         // others agree with, or far from it in wording, the source stands
@@ -533,7 +542,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
         if (!expired && kept) {
           // every change of the model is checked on its own; what no recogniser heard and no rule explains is undone (dictationGuard.js)
           const g = guardText(ref, answer, { ...variantContext(ref, Object.values(variants)), terms: guardTerms(resolvedDictionary, env, screenNames()) });
-          text = g.text; merged = true; providers.merge = { ok: true, ms: Date.now() - t0, ...(g.undone ? { undone: g.undone } : {}) };
+          text = g.text; merged = true; providers.merge = { ok: true, ms: Date.now() - t0, ...(providers.merge?.model ? { model: providers.merge.model } : {}), ...(g.undone ? { undone: g.undone } : {}) };
         }
         else providers.merge ??= { ok: false, ms: Date.now() - t0, reason: expired ? 'timeout' : !answer ? 'empty' : !plausible(answer) ? 'implausible' : got < 0.75 * longest ? 'short' : 'different', ...(answer ? { words: got, longest, shortfall: Math.max(0, longest - got) } : {}) };
       }
@@ -616,7 +625,7 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       const after = i + 1 < windows.length ? windows[i + 1].split(' ').slice(0, 12).join(' ') : '';
       const data = JSON.stringify({ glossar, woerterbuch: terms, kontext: { process: process_ }, davor: before, diktat: w, danach: after }).replaceAll('<', '\\u003c');
       try {
-        const out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(budget), { system: FINAL_PROMPT, maxTokens: 2500, model: cleanModel() }));
+        const out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(budget), { system: FINAL_PROMPT, maxTokens: 2500, model: cleanFastModel() || cleanModel() }));
         if (!keptWords(w, out)) { failed += 1; return w; }
         const g = guardText(w, out, guardWith);
         undone += g.undone;
