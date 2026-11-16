@@ -12,6 +12,20 @@ import os from 'node:os';
 import { redact } from '../../src/redact.js';
 import { isDenied } from '../../src/paths.js';
 
+// Output must be a fixed point of redact(), line by line: scan.mjs (the gate before a mirror leaves the host) checks exactly
+// that. A whole-text pass can leave a line that a line-wise pass still changes (an assignment at a line start, a quote next to
+// "[REDACTED]"); a few rounds settle it, and a line that never settles is dropped to a marker (fail closed).
+export const RENDER_VERSION = 2;
+export function settle(text) {
+  let t = text;
+  for (let i = 0; i < 4; i += 1) {
+    const n = t.split('\n').map((l) => redact(l)).join('\n');
+    if (n === t) return t;
+    t = n;
+  }
+  return t.split('\n').map((l) => (redact(l) === l ? l : '[Zeile ausgeblendet: Geheimnis-Prüfung]')).join('\n');
+}
+
 const HOME = process.env.BRIDGE_HOME || os.homedir(); // BRIDGE_HOME: the test fixtures' home
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
 const HOST = arg('host', os.hostname().toLowerCase());
@@ -116,7 +130,7 @@ function render({ host, label, project, sid, day, entries }) {
     if (size + block.length > DAY_CAP) { parts.push('\n[Tagesdatei bei 1,5 MB abgeschnitten]'); break; }
     parts.push(block); size += block.length + 1;
   }
-  return redact(parts.join('\n'));
+  return settle(redact(parts.join('\n')));
 }
 
 function* transcripts() {
@@ -151,6 +165,7 @@ async function main() {
   fs.chmodSync(OUT, 0o700);
   const stateFile = path.join(OUT, '.state.json');
   let state = {}; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
+  const renderedBy = state['.version'] ?? 1;
   const next = {}; let read = 0, kept = 0, skipped = 0;
   const index = new Map(); // project -> [{sid, label, days:[{day, size, first}]}]
   for (const t of transcripts()) {
@@ -159,7 +174,7 @@ async function main() {
     const key = t.file;
     const prev = state[key];
     let rec;
-    if (prev && prev.size === st.size && prev.mtime === st.mtimeMs) { rec = prev; skipped += 1; }
+    if (prev && renderedBy === RENDER_VERSION && prev.size === st.size && prev.mtime === st.mtimeMs) { rec = prev; skipped += 1; }
     else {
       read += 1;
       const { meta, entries } = await readEntries(t.file, t.kind);
@@ -196,7 +211,8 @@ async function main() {
       lines.push(`- ${r.label} ${r.sid}: ${d[0].day}${d.length > 1 ? ` bis ${d.at(-1).day}` : ''}, ${Math.round(d.reduce((s, x) => s + x.size, 0) / 1024)} KB: ${d[0].first}`);
     }
   }
-  fs.writeFileSync(path.join(OUT, 'INDEX.md'), redact(lines.join('\n')).slice(0, DAY_CAP), { mode: 0o600 });
+  fs.writeFileSync(path.join(OUT, 'INDEX.md'), settle(redact(lines.join('\n')).slice(0, DAY_CAP)), { mode: 0o600 });
+  next['.version'] = RENDER_VERSION;
   fs.writeFileSync(stateFile, JSON.stringify(next), { mode: 0o600 });
   console.log(JSON.stringify({ host: HOST, out: OUT, read, unchanged: skipped, dayFiles: kept, projects: projects.length }));
 }

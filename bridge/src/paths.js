@@ -19,9 +19,22 @@ export const LAPTOP_MIRROR = path.join(HOME, 'data', 'laptop-mirror');
 const DENIED_SEGMENT = /^(\.git|\.ssh|\.gnupg|\.env.*|\.?secrets?|\.?credentials?|\.?tokens?|\.notify|\.mozilla|firefox|chromium|google-chrome(-.*)?|home-browser|home-chrome.*|chrome-(home|profile).*|browser-profiles?|User Data)$|sealed|wallet|reaxsign/i;
 const DENIED_FILE = /\.(key|pem|p12|pfx|env)$|^id_(rsa|dsa|ecdsa|ed25519)$|^auth\.json$|^\.netrc$|^\.git-credentials$|^dev-secrets\.env$|^(bridge|secrets)\.env$|(?:^|[._-])(?:secrets?|credentials?|tokens?)\.[^.]+$|\.(sqlite3?|sqlite-wal|sqlite-shm|vscdb)$|^cookies.*\.json$|\.har$|^\.credentials\.json$|^tokens?[^/]*\.json$|^(cookies?|login data|web data|local state|logins\.json|key[34]\.db)(-journal|-wal)?$/i;
 
+// Evaluation material the Desk must not read while it is graded on it (16 Nov 2026: a live Grok answer came from the
+// evaluating job's PROMPT.md). DESK_HIDE: comma list of job names; a path is hidden when any segment contains one of them
+// (job folder, its LeChonk job-data, its Claude project dir "-home-flori-jobs-<name>", chat-mirror files "jobs-<name>-…").
+// The names are long and unique, so the substring test cannot catch an unrelated job. ~/desk-knowledge/eval holds the gold.
+const HIDDEN_JOBS = String(process.env.DESK_HIDE ?? 'agent-desk-context-discovery-20261115').split(',').map((x) => x.trim()).filter((x) => x.length >= 12);
+
+export function isHidden(p) {
+  const segments = String(p).split(/[\\/]/).filter(Boolean);
+  if (segments.some((s) => HIDDEN_JOBS.some((name) => s.includes(name)))) return true;
+  return segments.some((s, i) => s === 'desk-knowledge' && segments[i + 1] === 'eval');
+}
+
 export function isDenied(p) {
   const segments = String(p).split(/[\\/]/).filter(Boolean);
   const file = segments.at(-1) ?? '';
+  if (isHidden(p)) return true;
   // "storage_state….json" as two tests: /storage[_-]state.*\.json$/ rescanned to the end from every "storage_state" (critic r7)
   return segments.some((s) => DENIED_SEGMENT.test(s)) || DENIED_FILE.test(file) || (/storage[_-]state/i.test(file) && /\.json$/i.test(file) && !/[\n\r\u2028\u2029]/.test(file));
 }
