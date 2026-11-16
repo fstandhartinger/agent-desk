@@ -1,7 +1,7 @@
 import { limits } from './limits.js';
-import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
+import { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT, GLOSSARY_TERMS, DICTATION_GLOSSARY, dictationGlossary, privateTerms, contentWords } from './dictationContext.js';
 import { guardText, variantContext, termKeys, splitWords, wordKey, alignWords, sentences, worthFormatting, numbered, parseBreaks, applyBreaks, stitchWindows, endsSentence, isListMark, properNames, dropStutters } from './dictationGuard.js';
-export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT };
+export { MERGE_PROMPT, FINAL_PROMPT, LIVE_PROMPT, FORMAT_PROMPT, REVISE_PROMPT };
 // Screen Agent media is processed in memory. Never include payloads or upstream errors in logs.
 export const deviceError = (message, status = 400) => Object.assign(new Error(message), { status });
 export function deviceIds(ids) {
@@ -331,6 +331,69 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
       return { text: r.text.trim(), ms: Date.now() - started, seconds: r.seconds ?? Math.round(audio.length / 320) / 100, cost, retried: r.retried };
     } catch (err) { throw Object.assign(deviceError('Der Untertitel-Dienst ist gerade nicht erreichbar.', 503), { code: 'mai-down', reason: reasonOf(err), upstream: err.upstream, ms: Date.now() - started }); }
   }
+  /** Which recognisers re-hear the subtitle's last seconds (env DESK_CAPTION_REVISE_SOURCES, default MAI only: the most accurate one on his speech and USD 0.10/h). */
+  const REVISE_SOURCES = ['mai', 'openai', 'assembly'];
+  const reviseSources = () => { const want = String(env.DESK_CAPTION_REVISE_SOURCES ?? 'mai').split(',').map(v => v.trim()).filter(n => REVISE_SOURCES.includes(n) && SOURCE_KEYS[n]()); return [...new Set(want)].slice(0, 3); };
+  const REVISE_COST = { mai: s => Math.ceil(s) / 3600 * 0.10, openai: s => s / 60 * 0.006, assembly: s => s / 60 * 0.006 };
+  /**
+   * The live subtitle re-read (16 Nov 2026): the trailing seconds of audio (up to 30 s) heard again by the stronger recognisers, then one correction call that
+   * merges their readings with what the fast subtitle shows, with his context (glossary, private names, dictionary, confirmed text before, screen names,
+   * the last Desk turns). Every change passes the word guard (a reading a recogniser heard, a near miss, a known name). The end stays open: no punctuation.
+   * On the caption ledger. Model late or failing: the consensus recogniser text (merged:false). No recogniser: 503, the app keeps its fast text.
+   * ctx: {shown, before, screenNames, turns, open}. Returns {text, ms, seconds, providers, merged, cost, undone}.
+   */
+  async function revise(audio, ctx = {}, { dictionary = {}, deviceId = 'device', sttMs = 3500, modelMs = 2500 } = {}) {
+    const names = reviseSources();
+    if (!names.length || !maiKey()) throw Object.assign(deviceError('Untertitel-Korrektur ist nicht eingerichtet.', 503), { code: 'no-key' });
+    const gate = limits.captionCheck(deviceId);
+    if (!gate.ok) throw Object.assign(deviceError('Untertitel-Budget erreicht.', 429), { code: 'caption-budget', retryAfter: gate.retryAfter });
+    const started = Date.now(), seconds = wavDuration(audio), providers = {}, sources = {};
+    const screenNames = (Array.isArray(ctx.screenNames) ? ctx.screenNames : []).filter(n => typeof n === 'string' && n.trim() && n.length <= 100).slice(0, 40);
+    const shown = clean(ctx.shown).slice(-1500), before = clean(ctx.before).slice(-600), open = ctx.open !== false;
+    const turns = (Array.isArray(ctx.turns) ? ctx.turns : []).filter(t => typeof t === 'string' && t.trim()).slice(-6).map(t => clean(t).slice(0, 300));
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), sttMs);
+    let cost = 0;
+    const prompt = vocabularyPrompt(withGlossaryTerms(dictionary, [...screenNames.slice(0, 25), ...privateTerms(env)]), 700);
+    const run = {
+      mai: async () => { const r = await mai(audio, phraseList(dictionary, [], [...screenNames, ...privateTerms(env), ...GLOSSARY_TERMS]), stop.signal); cost += r.cost ?? REVISE_COST.mai(seconds); if (r.text === null) throw Object.assign(Error('bad reply'), { reason: 'bad-reply' }); return r.text; },
+      openai: async () => {
+        const body = new FormData(); body.set('model', env.DESK_DICTATE_OPENAI_MODEL || 'gpt-transcribe'); body.set('language', 'de'); if (prompt) body.set('prompt', `${STT_LEAD} Begriffe: ${prompt}`); body.set('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
+        cost += REVISE_COST.openai(seconds);
+        const res = await fetchImpl(`${env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/audio/transcriptions`, { method: 'POST', headers: { authorization: `Bearer ${env.OPENAI_API_KEY}` }, redirect: 'error', body, signal: stop.signal });
+        if (!res.ok) throw Object.assign(Error('upstream'), { upstream: res.status });
+        const text = (await res.json()).text;
+        if (typeof text !== 'string') throw Object.assign(Error('bad reply'), { reason: 'bad-reply' });
+        return prompt && text.split(/\s+/).length >= 3 && normalized(prompt).includes(normalized(text)) ? '' : text;
+      },
+      assembly: async () => { cost += REVISE_COST.assembly(seconds); return (await routed('assemblyai/universal-3-6-pro', audio, stop.signal)).text; },
+    };
+    const plausible = t => typeof t === 'string' && t.trim() && t.trim().split(/\s+/).length <= seconds * 4.5 + 4;
+    try {
+      await Promise.all(names.map(async n => {
+        const t0 = Date.now();
+        try { const t = await run[n](); if (plausible(t)) { sources[n] = t.trim(); providers[n] = { ok: true, ms: Date.now() - t0 }; } else providers[n] = { ok: false, ms: Date.now() - t0, reason: 'empty' }; }
+        catch (err) { providers[n] = failure(err, Date.now() - t0); }
+      }));
+    } finally { clearTimeout(timer); limits.captionAdd(deviceId, cost); }
+    const best = chooseSource(sources);
+    if (!best) {
+      const all = Object.values(providers);
+      if (all.length && all.every(p => p.reason === 'empty')) return { text: '', ms: Date.now() - started, seconds, providers, merged: false, cost, undone: 0, silent: true };
+      throw Object.assign(deviceError('Kein Transkript für die Korrektur.', 503), { code: 'revise-down', providers });
+    }
+    const ref = best[1], openEnd = t => (open ? t.replace(/[\s,;:.…–-]+$/u, '') : t);
+    const glossar = dictationGlossary(env), terms = mergeDictionary(dictionary, { ...sources, shown }).begriffe;
+    const data = JSON.stringify({ glossar, woerterbuch: terms, davor: before, angezeigt: shown, varianten: sources, ...(screenNames.length || turns.length ? { context: { ...(screenNames.length ? { bildschirmNamen: screenNames } : {}), ...(turns.length ? { gespraech: turns } : {}) } } : {}) }).replaceAll('<', '\\u003c');
+    const t0 = Date.now();
+    let out = '';
+    try { out = clean(await fastMerge(`<artifact_data>\n${data}\n</artifact_data>`, AbortSignal.timeout(modelMs), { system: REVISE_PROMPT, maxTokens: 900, free: true })); providers.model = { ok: true, ms: Date.now() - t0 }; limits.captionAdd(deviceId, 0.0005); cost += 0.0005; }
+    catch (err) { providers.model = failure(err, Date.now() - t0); }
+    const finish = (text, merged, undone = 0) => ({ text: openEnd(properNames(applyCorrections(dropStutters(text).text, dictionary), knownNames(dictionary, env))), ms: Date.now() - started, seconds, providers, merged, cost: Number(cost.toFixed(6)), undone });
+    if (!out || !keptWords(ref, out, 1.5)) { if (out) providers.model = { ...providers.model, ok: false, reason: 'different' }; return finish(ref, false); }
+    // a change stands when a recogniser or the fast subtitle heard it there, or it is a near miss / known name (dictationGuard.js); numbers and negations stay
+    const g = guardText(ref, out, { ...variantContext(ref, [...Object.values(sources), ...(shown ? [shown] : [])]), terms: guardTerms(dictionary, env, screenNames) });
+    return finish(g.text, true, g.undone);
+  }
   /** patient: a chunk while he is still talking: nobody waits for it, so every recogniser gets its time (up to the soft limit) instead of "two are in, go". */
   async function dictate(audio, context, dictionary, { patient = false } = {}) {
     const plan = sourcePlan();
@@ -557,5 +620,5 @@ export function createDeviceMedia({ env = process.env, fetchImpl = fetch, budget
     const out = properNames(applyCorrections(dropStutters(breaksJob ? carryBreaks(input, cleaned, await breaksJob) : cleaned).text, dictionary), knownNames(dictionary, env));
     return { text: out, ms: Date.now() - started, windows: windows.length, changed, failed, undone, breaks: countBreaks(out) };
   }
-  return { highlight, dictate, vision, caption, polish };
+  return { highlight, dictate, vision, caption, polish, revise };
 }

@@ -79,6 +79,16 @@ export const LIVE_PROMPT = `Du korrigierst live mitlaufende Untertitel eines Dik
 Klingt ein Wort in "text" nach einem Namen aus dem Glossar oder Wörterbuch, schreib den Namen genau so, wie er dort steht (auch wenn die Aussprache im Glossar anders beschrieben ist).
 ${RULES}`;
 
+/** The live subtitle re-read with better evidence (16 Nov 2026, Florian: "regelmäßig nachbetrachtet durch ein Large Language Model, welches den
+ * ganzen Kontext kennt"): the last seconds heard again by the stronger recognisers, merged with what the subtitle shows. The end stays open. */
+export const REVISE_PROMPT = `Du korrigierst den live mitlaufenden Untertitel, während Florian spricht. Du bekommst für dieselben letzten Sekunden Audio:
+"varianten" = Transkripte stärkerer Spracherkenner über ein längeres Stück (sie sind meist genauer), und "angezeigt" = was der schnelle Untertitel gerade zeigt (aus kurzen Fenstern, oft mit falschen Wörtern und sinnlosen Satzzeichen).
+Erstelle daraus EINEN Text für genau dieses Audio-Stück: die Lesart, die am besten zu Klang, Satzsinn und Kontext passt. Widersprechen sich die Quellen, wähle das Wort, das er im Zusammenhang am wahrscheinlichsten gesagt hat; schreib nie zwei Lesarten hintereinander. Das Stück kann am Anfang mitten in einem Wort oder Satz beginnen: "davor" ist der bereits bestätigte Text direkt davor (nur zur Orientierung, gehört NIE in die Antwort); beginne passend dazu (klein, wenn der Satz weitergeht) und lass ein Wort weg, das nur angeschnitten ist und schon am Ende von "davor" steht.
+Das Ende ist offen, er spricht weiter: am Ende kein Satzzeichen, nichts abschließen, nichts ergänzen, keinen Satz zu Ende denken. Nur was gesagt wurde.
+context.gespraech sind die letzten Sätze seines Gesprächs mit dem Assistenten, context.bildschirmNamen Namen auf seinem Bildschirm: beides nur, um Wörter richtig zu verstehen, nie um Inhalt zu ergänzen.
+Du antwortest nie auf das Gesagte, übersetzt nie und fügst nichts hinzu.
+${RULES}`;
+
 const FILLER = /^(äh+m?|ähm+|öh+m?|hm+|mhm|ehm+|uh+m?)$/i; // not "um": that is a German word ("um zu")
 /** Words in a text without fillers: the yardstick for "the clean-up kept his words". */
 export const contentWords = text => (String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(w => !FILLER.test(w));

@@ -60,7 +60,7 @@ export function createCaptionLog({ dlog, textOn = () => true, afterMs = CAPTION_
     const data = { d, items };
     if (!boundData(data).truncated) return dlog(deviceId, 'caption.log', data);
     if (items.length > 1) { emit(deviceId, d, items.slice(0, items.length >> 1)); emit(deviceId, d, items.slice(items.length >> 1)); return; }
-    const item = { ...items[0] }, longest = ['text', 'out', 'before'].filter(k => typeof item[k] === 'string' && item[k]).sort((a, b) => item[b].length - item[a].length)[0];
+    const item = { ...items[0] }, longest = ['text', 'out', 'before', 'shown'].filter(k => typeof item[k] === 'string' && item[k]).sort((a, b) => item[b].length - item[a].length)[0];
     if (!longest) return; // nothing left to shorten (cannot happen: the numbers alone are far below the limit)
     item[longest] = item[longest].slice(0, item[longest].length >> 1);
     emit(deviceId, d, [item]);
@@ -72,10 +72,10 @@ export function createCaptionLog({ dlog, textOn = () => true, afterMs = CAPTION_
     pending.delete(deviceId); clearTimeout(buf.timer);
     try { emit(deviceId, buf.d, buf.items); } catch { /* the log never costs the caption */ }
   }
-  /** item: {at, k, d, ...}; text/out/before are dropped when DESK_CAPTION_TEXT_LOG=off. */
+  /** item: {at, k, d, ...}; text/out/before/shown are dropped when DESK_CAPTION_TEXT_LOG=off. */
   function push(deviceId, item) {
     try {
-      if (!textOn()) for (const k of ['text', 'out', 'before']) delete item[k];
+      if (!textOn()) for (const k of ['text', 'out', 'before', 'shown']) delete item[k];
       const d = item.d ?? null;
       let buf = pending.get(deviceId);
       if (buf && buf.d !== d) { flush(deviceId); buf = undefined; }
@@ -251,6 +251,35 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       catch (err) { noteCaption(record.deviceId, { ok: false, ms: err.ms, status: err.upstream ?? err.status }); throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'caption-failed' } }); }
     } finally { capBusy.set(record.deviceId, capBusy.get(record.deviceId) - 1); if (!capBusy.get(record.deviceId)) capBusy.delete(record.deviceId); capInFlight--; }
   }
+  /** One re-read of the subtitle's last seconds (route /api/device/revise). Context: shown (the fast text for this audio), before (confirmed text before it),
+   * turns (his last sentences / the conversation, at most 6), open (he is still speaking), visibleIds, recentTerms. */
+  async function revise(record, form) {
+    const audio = form.get('audio');
+    if (!audio || typeof audio.arrayBuffer !== 'function' || form.getAll('audio').length !== 1 || form.getAll('context').length > 1 || audio.size > 30 * 32000 + 4096) throw fail('Audio fehlt oder ist zu groß.', audio?.size > 30 * 32000 + 4096 ? 413 : 400);
+    const dictation = form.has('dictation') ? dictationId(form.get('dictation'), form.getAll('dictation').length) : null, seq = form.has('seq') ? seqNumber(form.get('seq'), form.getAll('seq').length) : null;
+    let c = {}; if (form.has('context')) { try { c = JSON.parse(form.get('context')); } catch { throw fail('Ungültiger Kontext.'); } }
+    const str = (v, max) => v === undefined || (typeof v === 'string' && v.length <= max);
+    if (!c || typeof c !== 'object' || Array.isArray(c) || !str(c.shown, 1500) || !str(c.before, 600) || (c.open !== undefined && typeof c.open !== 'boolean')
+      || (c.turns !== undefined && (!Array.isArray(c.turns) || c.turns.length > 6 || c.turns.some(t => typeof t !== 'string' || t.length > 300)))
+      || (c.recentTerms !== undefined && (!Array.isArray(c.recentTerms) || c.recentTerms.length > 50 || c.recentTerms.some(v => typeof v !== 'string' || v.length > 100)))) throw fail('Ungültiger Kontext.');
+    deviceIds(c.visibleIds ?? []);
+    const buffer = Buffer.from(await audio.arrayBuffer());
+    if (wavDuration(buffer) > 30) throw fail('Höchstens 30 Sekunden Audio.', 413);
+    if ((capBusy.get(record.deviceId) ?? 0) >= 3 || capInFlight >= 8) throw Object.assign(fail('Untertitel ausgelastet.', 429), { code: 'busy', body: { error: 'Untertitel ausgelastet.', code: 'busy' } });
+    capBusy.set(record.deviceId, (capBusy.get(record.deviceId) ?? 0) + 1); capInFlight++;
+    const words = dictation && appAllows(form.get('log')), at = now();
+    try {
+      const dict_ = await Promise.race([dictionary().catch(() => ({})), new Promise(resolve => setTimeout(() => resolve({}), 600).unref?.())]);
+      const r = await media.revise(buffer, { shown: c.shown ?? '', before: c.before ?? '', turns: c.turns ?? [], open: c.open !== false, screenNames: [...new Set([...(c.recentTerms ?? []), ...screenText.terms(record.deviceId, 40)])].slice(0, 40) }, { dictionary: dict_, deviceId: record.deviceId });
+      noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost });
+      captionLog.push(record.deviceId, { at, k: 'r', d: dictation, n: seq, ms: r.ms, sec: r.seconds, merged: r.merged, undone: r.undone, ...(words ? { shown: String(c.shown ?? '').slice(0, 600), text: r.text.slice(0, 990) } : {}) });
+      return { text: r.text, ms: r.ms, seconds: r.seconds, merged: r.merged, costUsd: r.cost, providers: r.providers, ...(r.silent ? { silent: true } : {}) };
+    } catch (err) {
+      noteCaption(record.deviceId, { ok: false, ms: Date.now() - at, status: err.status });
+      captionLog.push(record.deviceId, { at, k: 'r', d: dictation, n: seq, ms: Date.now() - at, ok: false, err: String(err?.code ?? err?.status ?? 'error').slice(0, 40) });
+      throw Object.assign(err, { body: err.body ?? { error: err.message, code: err.code ?? 'revise-failed' } });
+    } finally { capBusy.set(record.deviceId, capBusy.get(record.deviceId) - 1); if (!capBusy.get(record.deviceId)) capBusy.delete(record.deviceId); capInFlight--; }
+  }
   async function handle(req, res, url, ctx) {
     const path = url.pathname;
     if (!path.startsWith('/api/device/')) return false;
@@ -303,7 +332,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     ctx.deviceId = record.deviceId;
-    if (path !== '/api/device/caption' && path !== '/api/device/polish') rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // captions have their own bucket: 40/min of them must not starve command polls and the trace; a computer run adds a poll, a beat and a result per step
+    if (path !== '/api/device/caption' && path !== '/api/device/polish' && path !== '/api/device/revise') rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // captions have their own bucket: 40/min of them must not starve command polls and the trace; a computer run adds a poll, a beat and a result per step
     if (path === '/api/device/computer' && req.method === 'POST') {
       // device token only (no scope: this is how the scope is switched); the answer says what is now on
       const body = await readJson(req, 512);
@@ -329,7 +358,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     const computerRes = /^\/api\/device\/session\/([^/]+)\/computer\/(c[0-9a-f]{16})\/result$/.exec(path);
     const computerBeat = /^\/api\/device\/session\/([^/]+)\/computer\/beat$/.exec(path);
     const screenTextPost = path === '/api/device/screen-text' && req.method === 'POST';
-    const scope = screenTextPost ? (record.scopes.includes('dictate') ? 'dictate' : 'screen') : computerRes || computerBeat ? 'computer' : target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' || path === '/api/device/polish' ? 'dictate' : path.split('/')[3];
+    const scope = screenTextPost ? (record.scopes.includes('dictate') ? 'dictate' : 'screen') : computerRes || computerBeat ? 'computer' : target || cmdResult || path === '/api/device/log' ? 'screen' : path === '/api/device/caption' || path === '/api/device/polish' || path === '/api/device/revise' ? 'dictate' : path.split('/')[3];
     if (!record.scopes.includes(scope)) throw fail('Zugriff verweigert.', 403);
     if ((target || cmdResult || computerRes || computerBeat) && !validSessionId((target ?? cmdResult ?? computerRes ?? computerBeat)[1])) throw fail('Fremde oder abgelaufene Sitzung.', 403);
     if (path === '/api/device/exists' && req.method === 'GET') {
@@ -413,6 +442,15 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       let form;
       try { form = await new Response(bytes, { headers: { 'content-type': req.headers['content-type'] } }).formData(); } catch { throw fail('Ungültiges Multipart.'); }
       sendJson(res, 200, await caption(record, form));
+    } else if (path === '/api/device/revise' && req.method === 'POST') {
+      // The subtitle re-read while he speaks (16 Nov 2026): the last seconds (<= 30 s) heard again by the stronger recognisers and merged with his context.
+      if (['off', '0', 'false', 'no'].includes(String(env.DESK_CAPTION_REVISE ?? '').trim().toLowerCase())) throw Object.assign(fail('Untertitel-Korrektur ist ausgeschaltet.', 503), { code: 'revise-off', body: { error: 'Untertitel-Korrektur ist ausgeschaltet.', code: 'revise-off' } });
+      rate(`revise:${record.deviceId}`, 30);
+      if (!/^multipart\/form-data;\s*boundary=/i.test(req.headers['content-type'] ?? '')) throw fail('Multipart erforderlich.', 415);
+      const bytes = await readBody(req, 30 * 32000 + 65536);
+      let form;
+      try { form = await new Response(bytes, { headers: { 'content-type': req.headers['content-type'] } }).formData(); } catch { throw fail('Ungültiges Multipart.'); }
+      sendJson(res, 200, await revise(record, form));
     } else if (target && target[2] === 'highlight' && req.method === 'POST') {
       rate(`media:${record.deviceId}`, 12);
       const body = await readJson(req, 4 * 1024 * 1024 + 8192), ids = deviceIds(body.ids);
