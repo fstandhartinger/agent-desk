@@ -382,7 +382,7 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   const twin = recall('job', sid, JOB_DEDUPE_MS, now).find((e) => jaccard(e.prompt, p) >= JACCARD || (norm(e.title) === norm(t) && jaccard(e.prompt, p) >= 0.3));
   if (twin) {
     ctx.trace?.()?.event?.('action.agent_job', { turn: g.vt.turn, id: twin.requestId, name: twin.name ?? null, host: twin.host, card: twin.card ?? null, duplicate: true });
-    return out(true, `Der Job läuft schon${twin.name ? ` (${twin.name})` : ' (wird gerade gestartet)'}; kein zweiter gestartet. Korrekturen schickt Florian per Antwort auf die Telegram-Karte. Sag nur einen kurzen Satz.`);
+    return out(true, `Der Job läuft schon${twin.name ? ` (${twin.name})` : ' (wird gerade gestartet)'}; kein zweiter gestartet. Korrekturen schickt Florian per Antwort auf die Telegram-Karte. Sag nur einen kurzen Satz, ohne den Jobnamen vorzulesen.`);
   }
   if (!ctx.hub?.call) return release(g, 'start_agent_job'), out(false, 'Nichts gestartet: keine Verbindung zur Werkstatt. Sag Florian in EINEM Satz, dass die Werkstatt gerade nicht erreichbar ist und er es später noch einmal sagen kann.');
   const verdict = (ctx.limits ?? defaultLimits).check(sid, 'agentJob');
@@ -408,7 +408,7 @@ async function agentJob({ title, prompt, host }, ctx, clock) {
   entry.name = name; entry.card = res.card;
   ctx.audit?.({ action: 'action.agent_job', detail: `${aid ?? 'a#?'} ${name} title=${t} host=${res.host ?? host ?? 'auto'} card=${res.card ?? '-'}` });
   traced?.event?.('action.agent_job', { turn: g.vt.turn, id: requestId, name, host: res.host ?? host ?? 'auto', card: res.card ?? null, duplicate: false });
-  return out(true, `Job ${name} läuft. Karte: ${CARD_WORD[res.card] ?? 'unterwegs'}. Sag nur einen kurzen Satz.`);
+  return out(true, `Job ${name} läuft. Karte: ${CARD_WORD[res.card] ?? 'unterwegs'}. Sag nur einen kurzen Satz in Alltagssprache, ohne den Jobnamen vorzulesen (etwa "Der Job läuft, die Karte ist unterwegs.").`);
 }
 
 export async function runVoiceAction(name, args, ctx, clock = ctx.clock ?? defaultClock) {
