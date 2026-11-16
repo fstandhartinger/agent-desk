@@ -270,7 +270,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     const words = dictation && appAllows(form.get('log')), at = now();
     try {
       const dict_ = await Promise.race([dictionary().catch(() => ({})), new Promise(resolve => setTimeout(() => resolve({}), 600).unref?.())]);
-      const r = await media.revise(buffer, { shown: c.shown ?? '', before: c.before ?? '', turns: c.turns ?? [], open: c.open !== false, screenNames: [...new Set([...(c.recentTerms ?? []), ...screenText.terms(record.deviceId, 40)])].slice(0, 40) }, { dictionary: dict_, deviceId: record.deviceId });
+      const r = await media.revise(buffer, { shown: c.shown ?? '', before: c.before ?? '', turns: [...(vision.captionTurns?.(record.deviceId) ?? []), ...(c.turns ?? [])].slice(-6), open: c.open !== false, screenNames: [...new Set([...(c.recentTerms ?? []), ...screenText.terms(record.deviceId, 40)])].slice(0, 40) }, { dictionary: dict_, deviceId: record.deviceId });
       noteCaption(record.deviceId, { ok: true, ms: r.ms, status: 200, cost: r.cost });
       captionLog.push(record.deviceId, { at, k: 'r', d: dictation, n: seq, ms: r.ms, sec: r.seconds, merged: r.merged, undone: r.undone, ...(words ? { shown: String(c.shown ?? '').slice(0, 600), text: r.text.slice(0, 990) } : {}) });
       return { text: r.text, ms: r.ms, seconds: r.seconds, merged: r.merged, costUsd: r.cost, providers: r.providers, ...(r.silent ? { silent: true } : {}) };
@@ -488,7 +488,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const words = appAllows(body.log) && (body.mode !== 'live' || dictation !== null); // live: only for a dictation (an id); final/format: the dictation's own text
       const live = body.mode === 'live', entry = at => ({ at, k: 'p', d: dictation, ...(words ? { text: body.text.slice(0, 1500), before: (pctx.before ?? '').slice(-300) } : {}) });
       try {
-        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '', before: pctx.before ?? '', screenNames: live ? screenText.terms(record.deviceId, 40) : [] }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId, format: body.format === true });
+        const r = await media.polish(body.text, { process: pctx.process ?? '', fieldBefore: pctx.fieldBefore ?? '', before: pctx.before ?? '', screenNames: screenText.terms(record.deviceId, 40), turns: vision.captionTurns?.(record.deviceId) ?? [] }, { mode: body.mode, dictionary: dict_, deviceId: record.deviceId, format: body.format === true });
         if (!live) dlog(record.deviceId, 'dictation.polish', { mode: body.mode, ms: r.ms, chars: r.text.length, windows: r.windows, changed: r.changed, failed: r.failed, undone: r.undone ?? 0, breaks: r.breaks ?? 0, ...(dictation ? { d: dictation } : {}), ...(textLog() && words ? { text: r.text } : {}) });
         else captionLog.push(record.deviceId, { ...entry(now()), ms: r.ms, ok: !r.failed, changed: r.changed, undone: r.undone ?? 0, ...(words ? { out: r.text.slice(0, 990) } : {}) });
         sendJson(res, 200, r);

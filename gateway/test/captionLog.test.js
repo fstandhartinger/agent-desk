@@ -345,4 +345,27 @@ describe('device routes: caption.log, dictation text, screen names, validation',
     await app.traces.flushAll(1000);
     assert.equal((await until(() => logs('dic-stats')[0])).data.items.length, 1);
   });
+
+  it('revise and final polish routes supply device screen names and the attached voice conversation', async () => {
+    const oldTerms = app.devices.screenText.terms, oldTurns = app.devices.vision.captionTurns;
+    app.devices.screenText.terms = id => { assert.equal(id, deviceId); return ['Nordgatan']; };
+    app.devices.vision.captionTurns = id => { assert.equal(id, deviceId); return ['Desk: Welches Unternehmen?']; };
+    try {
+      assert.equal((await polish({ mode: 'final', text: 'Wir testen Nordgatan heute.' })).status, 200);
+      const sent = dataOf(chats.at(-1));
+      assert.deepEqual(sent.kontext.bildschirmNamen, ['Nordgatan']);
+      assert.deepEqual(sent.kontext.gespraech, ['Desk: Welches Unternehmen?']);
+      const form = new FormData();
+      form.set('audio', new Blob([wav(3)]), 'test.wav');
+      form.set('context', JSON.stringify({ shown: maiText, turns: [] }));
+      finalReply = d => d.angezeigt;
+      assert.equal((await post('/api/device/revise', form)).status, 200);
+      const revised = dataOf(chats.at(-1));
+      assert.deepEqual(revised.context.bildschirmNamen, ['Nordgatan']);
+      assert.deepEqual(revised.context.gespraech, ['Desk: Welches Unternehmen?']);
+    } finally {
+      app.devices.screenText.terms = oldTerms; app.devices.vision.captionTurns = oldTurns;
+      finalReply = d => d.diktat;
+    }
+  });
 });
