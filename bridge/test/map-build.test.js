@@ -256,3 +256,17 @@ test('a source that suddenly lists far fewer files (a wiped mirror) removes noth
   assert.equal(r.changes.removed, 0);
   assert.equal(one("SELECT count(*) AS n FROM docs WHERE source = 'jobs'").n, before + 1, 'old rows stay, the new job is added');
 });
+
+test('server agent chats: the compact mirror is a source with project, session and day nodes, personal, and searchable', { skip }, () => {
+  const docs = all("SELECT node, class, title, summary FROM docs WHERE source = 'chats/lechonk' ORDER BY node");
+  assert.deepEqual(docs.map((d) => d.node), ['chats/lechonk/INDEX', 'chats/lechonk/jobs-demo-job/0badc0de/2026-11-15']);
+  assert.ok(docs.every((d) => d.class === 'personal'));
+  assert.match(docs[1].summary, /Duo-Gewinn/);
+  const nodes = all("SELECT path, kind, parent FROM nodes WHERE path LIKE 'chats/lechonk%' ORDER BY path");
+  assert.deepEqual(nodes.map((n) => [n.path, n.kind]), [
+    ['chats/lechonk', 'source'], ['chats/lechonk/INDEX', 'file'], ['chats/lechonk/jobs-demo-job', 'project'],
+    ['chats/lechonk/jobs-demo-job/0badc0de', 'session'], ['chats/lechonk/jobs-demo-job/0badc0de/2026-11-15', 'day'],
+  ]);
+  assert.match(one("SELECT summary FROM nodes WHERE path = 'chats/lechonk'").summary, /kompakter Text/);
+  assert.equal(one("SELECT kind FROM nodes WHERE path = 'chats/sandy'").kind, 'live'); // no Sandy mirror yet: live only
+});

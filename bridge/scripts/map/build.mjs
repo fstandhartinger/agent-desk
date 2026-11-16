@@ -43,7 +43,7 @@ const nul = (v) => (v === undefined ? null : v);
 // ---- arguments -----------------------------------------------------------------------------------------------------------
 function parseArgs(argv) {
   const o = {
-    dir: MAP_DIR, mirror: MIRROR_DIR, jobsData: path.join(HOME, 'jobs-data'), laptop: LAPTOP_MIRROR, board: true, boardCmd: path.join(HOME, 'bin', 'sandy-read'),
+    dir: MAP_DIR, mirror: MIRROR_DIR, jobsData: path.join(HOME, 'jobs-data'), laptop: LAPTOP_MIRROR, chats: path.join(KNOWLEDGE_DIR, 'chats-mirror'), board: true, boardCmd: path.join(HOME, 'bin', 'sandy-read'),
     full: false, quiet: false, maxBoard: Infinity, shrinkMin: SHRINK_GUARD_MIN,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -52,6 +52,7 @@ function parseArgs(argv) {
     if (a === '--dir') o.dir = path.resolve(next());
     else if (a === '--mirror') o.mirror = path.resolve(next());
     else if (a === '--laptop') o.laptop = path.resolve(next());
+    else if (a === '--chats') o.chats = path.resolve(next());
     else if (a === '--board-cmd') o.boardCmd = path.resolve(next());
     else if (a === '--max-board') o.maxBoard = Number(next());
     else if (a === '--shrink-min') o.shrinkMin = Number(next());
@@ -150,7 +151,7 @@ function parseSections(text) {
 
 function firstUserLine(text) {
   const lines = String(text).split('\n');
-  const at = lines.findIndex((l) => /^### .* — Florian\s*$/.test(l));
+  const at = lines.findIndex((l) => /^### .* — (?:Florian|Auftrag\/Mensch)\s*$/.test(l));
   if (at < 0) return '';
   for (let i = at + 1; i < lines.length; i += 1) {
     const l = lines[i].trim();
@@ -362,6 +363,29 @@ function collectLaptop(o) {
   return { sources: ['chats/laptop'], descs, ok: true };
 }
 
+// Agent chats of the servers as a compact text mirror (bridge/scripts/chats/mirror.mjs, discovery round 2, 16 Nov 2026): same day-file
+// format as the laptop mirror. A host without a mirror folder keeps its live-only root entry (chats_search).
+const CHAT_HOSTS = ['lechonk', 'sandy'];
+function collectChatMirrors(o) {
+  const descs = [], sources = [];
+  for (const host of CHAT_HOSTS) {
+    const root = path.join(o.chats, host);
+    if (!fs.existsSync(path.join(root, 'INDEX.md'))) continue;
+    const source = `chats/${host}`;
+    sources.push(source);
+    const idx = allowedFile(path.join(root, 'INDEX.md'), { source, node: `${source}/INDEX`, parent: source, sort: 0, analyze: 'plain', titleHint: `INDEX.md (Inhaltsverzeichnis der Agent-Chats ${host})` });
+    if (idx) descs.push(idx);
+    for (const e of readdirOrNull(path.join(root, 'sessions')) ?? []) {
+      const m = LAPTOP_DAY.exec(e.name);
+      if (!m || !e.isFile()) continue;
+      const [, project, sid, day] = m;
+      const d = allowedFile(path.join(root, 'sessions', e.name), { source, node: `${source}/${project}/${sid}/${day}`, parent: `${source}/${project}/${sid}`, sort: -Number(day.replace(/-/g, '')), analyze: 'laptop-day', titleHint: day });
+      if (d) { d.mtime = Math.min(d.mtime, Date.parse(`${day}T23:59:59Z`)); descs.push(d); }
+    }
+  }
+  return { sources, descs, ok: true };
+}
+
 function collectSkills() {
   const root = path.join(HOME, '.agents', 'skills');
   const entries = readdirOrNull(root);
@@ -423,7 +447,7 @@ function collectExplainer() {
   return { sources: ['explainer'], descs, ok: true };
 }
 
-const COLLECTORS = [collectWissen, collectExports, collectDecisions, collectRegeln, collectJobs, collectJobsData, collectLaptop, collectSkills, collectCode, collectExplainer];
+const COLLECTORS = [collectWissen, collectExports, collectDecisions, collectRegeln, collectJobs, collectJobsData, collectLaptop, collectChatMirrors, collectSkills, collectCode, collectExplainer];
 
 // ---- board (sandy-read board-sql, incremental by entry id) ------------------------------------------------------------------
 function boardSql(o, sql) {
@@ -691,7 +715,7 @@ function docNodes(desc, doc) {
   const kids = extra.sections ?? [];
   const nodes = [{
     path: desc.node, parent: desc.parent, title: doc.title, summary: doc.summary, size: doc.size, updated: doc.mtime,
-    kind: kids.length ? 'document' : desc.source === 'chats/laptop' && desc.analyze === 'laptop-day' ? 'day' : 'file',
+    kind: kids.length ? 'document' : desc.source.startsWith('chats/') && desc.analyze === 'laptop-day' ? 'day' : 'file',
     open: kids.length ? openHint.discover(desc.node) : openHint.readFile(doc.path), sort: desc.sort, ...own,
   }];
   if (kids.length) nodes[0].summary = squash(`${doc.summary} [${doc.path}; ${kids.length} Abschnitte]`, 300);
@@ -758,6 +782,13 @@ const ROOT_INFO = {
   web: { title: 'Web', text: 'Websuche und HTTP-Abruf: Phase 2, noch nicht angeschlossen.', live: true },
 };
 
+// a server's agent chats once their compact mirror is indexed (otherwise ROOT_INFO's live-only entry)
+const CHAT_INDEXED = Object.fromEntries(['lechonk', 'sandy'].map((host) => [`chats/${host}`, {
+  title: `Agent-Chats ${host === 'lechonk' ? 'LeChonk' : 'Sandy'}`,
+  text: `Claude-Code- und Codex-Sitzungen der Agenten auf ${host === 'lechonk' ? 'LeChonk' : 'Sandy'} als kompakter Text (was Auftrag und Agent sagten, Werkzeuge als eine Zeile): Projekt → Sitzung → Tag, letzte 120 Tage. Rohverläufe live: chats_search(host="${host}").`,
+  live: false,
+}]));
+
 const plural = (n, one, many) => `${n.toLocaleString('de-DE')} ${n === 1 ? one : many}`;
 
 function aggregateNodes(db, o, meta) {
@@ -767,8 +798,8 @@ function aggregateNodes(db, o, meta) {
 
   // root
   SOURCE_ORDER.forEach((name, i) => {
-    const info = ROOT_INFO[name];
     const s = bySource[name];
+    const info = s && CHAT_INDEXED[name] ? CHAT_INDEXED[name] : ROOT_INFO[name];
     const counts = s ? ` (${plural(s.n, 'Dokument', 'Dokumente')}, neueste ${isoMinute(s.newest).slice(0, 10)})` : '';
     add({
       path: name, parent: '', title: info.title, summary: `${info.text}${info.live ? '' : counts}`, size: s?.bytes ?? null, updated: s?.newest ?? null,
@@ -825,11 +856,12 @@ function aggregateNodes(db, o, meta) {
     });
   });
 
-  // laptop: project -> session (days are per-doc nodes), memory
+  // laptop and server chats: project -> session (days are per-doc nodes), laptop memory
+  for (const chatSource of ['chats/laptop', ...CHAT_HOSTS.map((h) => `chats/${h}`)]) {
   const projects = new Map();
   let memory = 0;
   let memoryNewest = 0;
-  for (const r of db.prepare("SELECT node, mtime, size FROM docs WHERE source = 'chats/laptop'").all()) {
+  for (const r of db.prepare("SELECT node, mtime, size FROM docs WHERE source = ?").all(chatSource)) {
     const parts = r.node.split('/');
     if (parts[2] === 'memory') { memory += 1; memoryNewest = Math.max(memoryNewest, r.mtime ?? 0); continue; }
     if (parts.length < 5) continue; // INDEX
@@ -846,17 +878,18 @@ function aggregateNodes(db, o, meta) {
   [...projects.entries()].map(([name, sessions]) => ({ name, sessions, newest: Math.max(...[...sessions.values()].map((s) => s.newest)) })).sort((a, b) => b.newest - a.newest).forEach((p, i) => {
     const days = [...p.sessions.values()].reduce((n, s) => n + s.days.length, 0);
     add({
-      path: `chats/laptop/${p.name}`, parent: 'chats/laptop', title: `Projekt ${p.name}`, summary: `${plural(p.sessions.size, 'Sitzung', 'Sitzungen')}, ${plural(days, 'Tag', 'Tage')}`,
-      updated: p.newest, kind: 'project', open: openHint.discover(`chats/laptop/${p.name}`), class: 'personal', sort: 10 + i,
+      path: `${chatSource}/${p.name}`, parent: chatSource, title: `Projekt ${p.name}`, summary: `${plural(p.sessions.size, 'Sitzung', 'Sitzungen')}, ${plural(days, 'Tag', 'Tage')}`,
+      updated: p.newest, kind: 'project', open: openHint.discover(`${chatSource}/${p.name}`), class: 'personal', sort: 10 + i,
     });
     [...p.sessions.entries()].sort((a, b) => b[1].newest - a[1].newest).forEach(([sid, s], k) => {
       const sorted = [...s.days].sort();
       add({
-        path: `chats/laptop/${p.name}/${sid}`, parent: `chats/laptop/${p.name}`, title: `Sitzung ${sid}`, summary: `${plural(s.days.length, 'Tag', 'Tage')}, ${sorted[0]} bis ${sorted.at(-1)}, ${Math.round(s.size / 1024)} KB`,
-        size: s.size, updated: s.newest, kind: 'session', open: openHint.discover(`chats/laptop/${p.name}/${sid}`), class: 'personal', sort: k,
+        path: `${chatSource}/${p.name}/${sid}`, parent: `${chatSource}/${p.name}`, title: `Sitzung ${sid}`, summary: `${plural(s.days.length, 'Tag', 'Tage')}, ${sorted[0]} bis ${sorted.at(-1)}, ${Math.round(s.size / 1024)} KB`,
+        size: s.size, updated: s.newest, kind: 'session', open: openHint.discover(`${chatSource}/${p.name}/${sid}`), class: 'personal', sort: k,
       });
     });
   });
+  }
 
   // code: repos and their top-level folders
   for (const [name, dir] of CODE_REPOS()) {

@@ -66,6 +66,10 @@ export function makeFixture() {
   write(path.join(laptop, 'sessions', 'Demo__abcd1234__2026-11-10.md'),
     '# Laptop Claude Code, Projekt Demo, Sitzung abcd1234, 2026-11-10 (UTC)\n\nNur gesprochener Text.\n\n### 2026-11-10 09:00 UTC — Florian\nWie viel kostet die Bewertungsphase mit 36 Stunden?\n\n### 2026-11-10 09:01 UTC — Claude\nEtwa 370 USD für drei GPUs, das ist freigegeben.\n');
   write(path.join(laptop, 'sessions', 'Demo__abcd1234__2026-11-12.md'), '# Laptop Claude Code, Projekt Demo, Sitzung abcd1234, 2026-11-12 (UTC)\n\n### 2026-11-12 08:00 UTC — Florian\nBitte prüfe den Zustand der Server.\n');
+  // server agent chats as a compact mirror (bridge/scripts/chats/mirror.mjs, discovery round 2)
+  const chats = path.join(home, 'desk-knowledge', 'chats-mirror', 'lechonk');
+  write(path.join(chats, 'INDEX.md'), '# Agent-Chats lechonk\n\n## Projekt jobs-demo-job\n');
+  write(path.join(chats, 'sessions', 'jobs-demo-job__0badc0de__2026-11-15.md'), '# Agent-Chat lechonk, Codex, Projekt jobs-demo-job, Sitzung 0badc0de, 2026-11-15 (UTC)\n\n### 2026-11-15 15:30 UTC — Auftrag/Mensch\nPrüfe den Duo-Gewinn von Trainingsversuch 2.\n\n### 2026-11-15 15:40 UTC — Agent (Codex)\nDer Duo-Gewinn ist ein Messartefakt der Rehearsal-Fenster.\n');
   write(path.join(laptop, 'memory', 'feedback-demo.md'), '---\nname: feedback-demo\ndescription: Florian prefers short answers\n---\nKeep answers short.\n');
 
   write(path.join(home, '.agents', 'skills', 'demo-skill', 'SKILL.md'), '---\nname: demo-skill\ndescription: Demo skill used to test the map\n---\n# Demo\n\nThis skill talks about cucumbers.\n');

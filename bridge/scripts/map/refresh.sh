@@ -12,6 +12,12 @@ chmod 700 "$DIR"
 exec 9>"$DIR/.refresh.lock"
 flock -n 9 || { echo "another map refresh is running"; exit 0; }
 status=0
+# This host's agent chats as a compact text mirror (~/desk-knowledge/chats-mirror/<host>, discovery round 2): incremental, about a
+# second when little changed; a failure is logged and never stops the map refresh.
+if [ "${DESK_CHATS_MIRROR:-on}" = on ]; then
+  { printf '%s chats-mirror ' "$(date -u +%FT%TZ)"; "$NODE" "$HERE/../chats/mirror.mjs"; } >> "$DIR/.refresh.log" 2>&1 \
+    || printf '%s chats-mirror exited with %s (the map refresh goes on)\n' "$(date -u +%FT%TZ)" "$?" >> "$DIR/.refresh.log"
+fi
 {
   printf '%s ' "$(date -u +%FT%TZ)"
   "$NODE" "$HERE/build.mjs" --dir "$DIR" --quiet
