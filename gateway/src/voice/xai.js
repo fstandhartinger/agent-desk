@@ -123,6 +123,8 @@ export function createXai(opts, emit) {
       return 'sent';
     },
     interrupt: () => { watchdog.clear(); send({ type: 'response.cancel' }); }, // a new question while the old answer is still running (the server VAD also cuts audio itself)
+    /** Finished tool results waiting for the other calls of the same response (session: SIBLING_WAIT_MS). */
+    held: () => batch.results.length,
     sendToolResult: (id, _name, output, opts) => batch.result({ id, output, stale: opts?.stale }),
     close: () => { watchdog.clear(); ws.close(); },
   };

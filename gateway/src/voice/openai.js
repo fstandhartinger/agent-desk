@@ -184,6 +184,8 @@ export function createOpenAI(opts, emit) {
     /** Start briefing (a table of contents, <= 400 tokens): instructions.append like the screen context (only grows: it goes out once, plus one update when the device part is late; appends persist in the history). */
     setBriefing: (text) => { send({ type: 'session.instructions.append', event_id: `screen-brief-${++screenSeq}`, delegation_id: null, content: fit(text, 'briefing') }); return 'sent'; },
     interrupt: () => { watchdog.clear(); send({ type: 'session.instructions.append', delegation_id: null, content: 'Florian hat gerade eine neue Frage gestellt. Die Frage davor ist abgebrochen: antworte nur auf die neueste Frage und recherchiere dafür neu.' }); },
+    /** Finished tool results waiting for the other calls of the same response (session: SIBLING_WAIT_MS). */
+    held: () => batch.results.length,
     sendToolResult: (id, _name, output, opts) => {
       let out = output;
       if (context && !opts?.stale) { out = `${output}\n\n=== DESK-FAKTEN zur aktuellen Frage (schon gelesen): antworte Florian jetzt daraus, kurz und auf Deutsch ===\n${context}`; context = null; handed = true; }
