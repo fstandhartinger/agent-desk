@@ -29,7 +29,7 @@ test('gemini: interrupted maps to speech_started; setup uses thinking only for t
   assert.deepEqual(gemini({ serverContent: { interrupted: true } }), [{ t: 'speech_started' }]);
   const ext = setupMessage({ instructions: 'x', tools }).setup;
   assert.equal(ext.model, MODELS.thinking);
-  assert.equal(ext.generationConfig.thinkingConfig.thinkingLevel, 'medium');
+  assert.equal(ext.generationConfig.thinkingConfig.thinkingLevel, 'low');
   assert.equal(setupMessage({ instructions: 'x', tools, model: MODELS.fast }).setup.generationConfig.thinkingConfig, undefined);
   assert.equal(ext.tools[0].functionDeclarations[0].name, 'job_status');
 });

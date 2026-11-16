@@ -6,7 +6,7 @@ import { Resampler } from './resample.js';
 import { fitContext } from './toc.js';
 
 const BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-export const LANGUAGE_HINT = 'Antworte Florian auf Deutsch, in kurzen gesprochenen Sätzen, auch wenn dieses Ergebnis englische Wörter enthält.';
+export const LANGUAGE_HINT = 'Antworte Florian auf Deutsch, in kurzen gesprochenen Sätzen, auch wenn dieses Ergebnis englische Wörter enthält. Nenne am Ende in wenigen Wörtern die Quelle (zum Beispiel „laut den Entscheidungen vom 14. November“).';
 // Round 12 (critic r11 defect 5; live r12): Gemini answered 21 s after the question. Exact early facts (the knowledge topic by its
 // own slug, the ledger, desk status) go to Gemini at once as desk input; other facts ride along inside its first tool result (like
 // GPT-Live), after which it may research once more (session cap). Fuzzy facts sent at once made it say "keine Information" (3 of 3).
@@ -18,7 +18,9 @@ export const MODELS = { thinking: 'models/gemini-3.8-live-extended-thinking', fa
 
 export function setupMessage({ instructions, tools, voice, model = MODELS.thinking, vocabulary = [] }) {
   const generationConfig = { responseModalities: ['AUDIO'] };
-  if (model === MODELS.thinking) generationConfig.thinkingConfig = { thinkingLevel: 'medium' };
+  // Round 2 of job agent-desk-context-discovery (16 Nov): at 'medium' the model thought 5,000-18,000 tokens over tool results and its
+  // spoken answer ended mid-sentence (a#dc1f7e, a#24a881, a#bb58ae); 'low' is accepted by this model ('minimal' is refused, 1007)
+  if (model === MODELS.thinking) generationConfig.thinkingConfig = { thinkingLevel: 'low' };
   if (voice) generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } };
   return {
     setup: {

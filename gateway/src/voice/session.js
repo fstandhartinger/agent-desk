@@ -19,6 +19,7 @@ import { bestSummary, cleanHistory, conversationIdOf, memoryCache, memoryInstruc
 import { completeChat } from '../llm.js';
 import { createRecorder } from './recorder.js';
 import { createHash } from 'node:crypto';
+import { guardDecision } from './answerGuard.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
 // 15 Nov 2026 (a#a54cbb ended at the cap mid-sentence, no warning): a visible warning before the cap, then the session hands over to a
@@ -49,6 +50,8 @@ const DRAW_TOOLS = new Set(['canvas_draw', 'canvas_render']);
 const ACTION_TOOLS = new Set(['output_main_agent_prompt', 'start_agent_job', 'computer_task']);
 // Discovery (job agent-desk-context-discovery-20261115): the background research is the way out of the cap, never counted against it
 const UNCAPPED = new Set(['research', 'research_result']);
+// Round 2 (16 Nov): Gemini's finished turn is checked once per question (answerGuard.js) after this much quiet
+const GUARD_MS = 3000;
 const SPOKEN_KEEP = 12;
 const ECHO_MS = 20_000;
 const AWAIT_FINAL_MS = 4000; // a sound without any transcript after this long was noise
@@ -115,6 +118,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let audioSeen = false;
   let lastUserText = '';
   let researchTools = 0; // non-drawing tool calls of the current user turn
+  let audioUntil = 0; // when the assistant audio sent so far ends playing (24 kHz PCM16 = 48,000 bytes per second)
+  let guard = { question: '', tools: 0, answer: '', last: '', nudged: false, timer: null }; // Gemini answer guard (answerGuard.js), per question
   let factsAt = null; // researchTools when the early facts went out with a tool result (round 12)
   // Round 12 (live r12, Gemini fast: first search 0.4 s after the question, before the early facts were read): a Gemini research
   // result waits for the early illustrator's facts until FACTS_WAIT_MS after the question was complete
@@ -248,6 +253,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     if (role === 'user') lastHisAt = now();
     if (role === 'assistant' && timing && timing.turn === turnId && !timing.usefulAt && !isPromiseOnly(text) && !isFiller(text)) { timing.usefulAt = now(); timing.firstWords = text.slice(0, 80); }
     if (role === 'assistant') {
+      if (guard.question) { guard.answer = `${guard.answer} ${text}`.slice(-2000); guard.last = text; }
       deps.computer?.assistantFinal(sid, text);
       heardBack = { text: `${now() - heardBack.at < ECHO_MS ? `${heardBack.text} ` : ''}${text}`.slice(-4000), at: now() };
       if (!isPromiseOnly(text)) { if (lastFinal) lastFinal.answered = true; if (spoken.length) { spoken.at(-1).answered = true; spoken.at(-1).asked = text.slice(-300); } } // asked: what a bare "ja" after it answers (intent fallback, intentTrigger.js)
@@ -353,8 +359,22 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     expectFacts(canvas?.userTurn(text));
   }
 
+  /** Gemini, a finished turn after GUARD_MS of quiet: ask once to finish a cut answer or to check an unchecked fact (answerGuard.js). */
+  function runGuard() {
+    if (closed || !adapter || guard.nudged || responding || responseOpen || runningTools > 0 || speechOpen || userOpen) return;
+    if (now() < audioUntil) { guard.timer = setTimeout(runGuard, audioUntil - now() + 1500); guard.timer.unref?.(); return; } // Florian still hears the answer
+    const d = guardDecision(guard);
+    if (!d) return;
+    guard.nudged = true;
+    audit({ action: 'voice.answer_guard', detail: `${provider} ${d.kind} turn=${turnId}` });
+    trace.event('voice.answer_guard', { turn: turnId, kind: d.kind, last: String(guard.last).slice(-80), tools: guard.tools });
+    if (adapter.recover) adapter.recover(d.text);
+    else adapter.sendText?.(d.text);
+  }
+
   /** The question waits for an answer: `noAnswerMs` of silence with no running tool -> recovery. */
   function armNoAnswer(text) {
+    if (provider === 'gemini') { clearTimeout(guard.timer); guard = { question: needsAnswer(text) ? text : '', tools: 0, answer: '', last: '', nudged: false, timer: null }; }
     if (pending.settled === turnId) return; // the fragments of this turn were committed after its answer had begun
     const offer = isYes(text) && now() - heardBack.at < 120_000 ? offerOf(heardBack.text) : null;
     pending.active = needsAnswer(text) || Boolean(offer);
@@ -509,6 +529,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     const oldChain = fromFragment || (staleChain && (responseId == null || overtaken.has(responseId)) && belongsToOldQuestion(args, previousQuestion, question));
     const myEpoch = oldChain ? contentEpoch - 1 : contentEpoch;
     trace.event('tool.call', { turn: turnId, id, name, args, responseId, epoch: contentEpoch, myEpoch, staleChain, oldChain });
+    clearTimeout(guard.timer);
+    if (!DRAW_TOOLS.has(name)) guard.tools += 1;
     const evt = { type: 'tool', id, name, args };
     // round 12: once the early facts went out with a tool result, Gemini may research once more, then it answers
     if (factsAt === null && adapter?.factsDelivered?.()) factsAt = researchTools;
@@ -625,6 +647,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('context.trimmed', { provider: e.provider ?? provider, kind: e.kind, from: e.from, to: e.to });
         break;
       case 'audio':
+        audioUntil = Math.max(audioUntil, now()) + Math.round(e.pcm.length / 48);
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
         if (timing && !timing.audioAt && !isSilent(e.pcm)) { timing.audioAt = now(); trace.event('audio.first', { turn: timing.turn, msAfterQuestion: timing.audioAt - timing.at }); }
         audioRun.bytes += e.pcm.length;
@@ -645,6 +668,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         lastSpeechStart = now();
         speechStartSeen = true;
         speechOpen = true;
+        clearTimeout(guard.timer);
         flushTranscript();
         beginUserTurn(false);
         dropAudio = false;
@@ -662,6 +686,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('response.done', { turn: turnId, id: e.id, ...(e.usage ? { usage: e.usage } : {}) });
         flushTranscript();
         if (!userOpen) canvas?.turnDone();
+        if (provider === 'gemini' && guard.question && !guard.nudged) { clearTimeout(guard.timer); guard.timer = setTimeout(runGuard, GUARD_MS); guard.timer.unref?.(); }
         if (capDue && !responseOpen && runningTools === 0) maybeRollover();
         break;
       case 'usage': { // tokens of one vendor response (OpenAI delegate, Gemini usageMetadata, xAI response.done)
