@@ -27,6 +27,8 @@ export const GEMINI_LINES = [
   'Bei JEDER Frage nach einer Zahl, einem Datum, einer Entscheidung oder etwas, das Florian früher gesagt hat: rufe ZUERST ein Werkzeug auf (search, knowledge_read, decisions_recent oder research), auch wenn du die Antwort zu kennen glaubst, und sprich erst danach. Sag am Ende in wenigen Wörtern, woher es stammt.',
   // live eval 16 Nov: Gemini's answers to one-fact questions ran 15-30 s of speech (answer audio began 8-13 s after the question, ended at 26 s median)
   'Bei einer Faktenfrage steht die Antwort (Zahl, Datum, Entscheidung) im ERSTEN Satz, danach die Quelle in wenigen Wörtern; insgesamt höchstens zwei kurze Sätze. Hintergrund und Begründung nur, wenn Florian nachfragt.',
+  // final live eval 16 Nov: after the ear rule (PR #51) Gemini named sources it had never read ("steht in den Entscheidungen vom 14. November", no tool)
+  'Nenne als Quelle nur, was ein Werkzeug dir in dieser Frage geliefert hat, oder dieses Gespräch bzw. die offene Seite; eine Quelle, die du nicht gelesen hast, ist erfunden. Sprich immer Deutsch.',
   'Stehen "DESK-FAKTEN" in einem Werkzeugergebnis, antworte SOFORT daraus (Florians Wörter stehen dort oft nicht wörtlich) und schlage höchstens noch einmal nach, was darin fehlt.',
 ];
 
@@ -52,7 +54,7 @@ export const SPOKEN_STYLE_LINES = [
 ];
 
 /** Last rule of the voice prompt (only the page pack, which is data, follows): the long tool rules come before it, so the ear rule is repeated late. */
-export const SPOKEN_STYLE_REMINDER = 'Für jede gesprochene Antwort gilt zuletzt: keine IDs, Nummern, Pfade oder Zahlenreihen vorlesen, außer Florian fragt genau danach; nenne die Dinge beim Namen und Inhalt und sprich so, wie ein Mensch es am Telefon erklären würde.';
+export const SPOKEN_STYLE_REMINDER = 'Für jede gesprochene Antwort gilt zuletzt: keine IDs, Nummern, Pfade oder Zahlenreihen vorlesen, außer Florian fragt genau danach; nenne die Dinge beim Namen und Inhalt und sprich so, wie ein Mensch es am Telefon erklären würde. Die Quelle einer Tatsache (beim Namen, ohne Pfad) bleibt trotzdem drin, auch in der kurzen Fassung.';
 
 export function buildInstructions(page, now, { provider, screen = false, screenAgent = false, vocabulary = [] } = {}) {
   const lines = [
