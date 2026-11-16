@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { redact } from './redact.js';
-import { HOME, isDenied, claudeProjectDirs, toCanonical } from './paths.js';
+import { HOME, isDenied, isHidden, claudeProjectDirs, toCanonical } from './paths.js';
 import { recentJobDirs } from './jobs.js';
 import { assertNoSecretFragment, hitInSecret } from './secretQuery.js';
 
@@ -322,8 +322,9 @@ export async function search({ query, agent = 'all', limit = 15 } = {}) {
         project = sessionName(file);
         sessionId = path.basename(file, '.jsonl');
       } else if (cls.agent === 'codex') {
-        if (!cwdCache.has(file)) cwdCache.set(file, jobLabel(await codexCwd(file)));
+        if (!cwdCache.has(file)) { const cwd = await codexCwd(file); cwdCache.set(file, cwd && isHidden(cwd) ? null : jobLabel(cwd)); }
         project = cwdCache.get(file);
+        if (project === null) continue; // a session of a hidden (evaluating) job: its path never names the job, its cwd does
         sessionId = path.basename(file, '.jsonl').replace(/^rollout-[\d-]+T[\d-]+-/, '');
       } else {
         const inMessage = file.includes(`${path.sep}message${path.sep}`);
@@ -466,6 +467,7 @@ export async function read({ ref, offset = 0, limit = 40 } = {}) {
   const entry = REFS.get(String(ref ?? ''));
   if (!entry) throw new Error('unknown or expired ref; run chats_search again');
   if (!allowedChatFile(entry.file)) throw new Error('transcript not available');
+  if (entry.agent === 'codex' && isHidden((await codexCwd(entry.file)) ?? '')) throw new Error('transcript not available');
   const st = await fs.promises.stat(entry.file);
   if (st.size > MAX_TRANSCRIPT_BYTES) throw new Error('transcript too large to render');
   let turns;

@@ -10,20 +10,40 @@ import path from 'node:path';
 import readline from 'node:readline';
 import os from 'node:os';
 import { redact } from '../../src/redact.js';
-import { isDenied } from '../../src/paths.js';
+import { isDenied, isHidden } from '../../src/paths.js';
 
 // Output must be a fixed point of redact(), line by line: scan.mjs (the gate before a mirror leaves the host) checks exactly
 // that. A whole-text pass can leave a line that a line-wise pass still changes (an assignment at a line start, a quote next to
 // "[REDACTED]"); a few rounds settle it, and a line that never settles is dropped to a marker (fail closed).
-export const RENDER_VERSION = 2;
-export function settle(text) {
-  let t = text;
-  for (let i = 0; i < 4; i += 1) {
-    const n = t.split('\n').map((l) => redact(l)).join('\n');
-    if (n === t) return t;
-    t = n;
+export const RENDER_VERSION = 3;
+/** True when redact() leaves every line and every pair of adjacent lines (a key on one line, its value on the next) unchanged. */
+export function isRedactionFixedPoint(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (redact(lines[i]) !== lines[i]) return false;
+    if (i + 1 < lines.length) { const pair = `${lines[i]}\n${lines[i + 1]}`; if (redact(pair) !== pair) return false; }
   }
-  return t.split('\n').map((l) => (redact(l) === l ? l : '[Zeile ausgeblendet: Geheimnis-Prüfung]')).join('\n');
+  return true;
+}
+export function settle(text) {
+  let lines = text.split('\n');
+  for (let round = 0; round < 4; round += 1) {
+    if (isRedactionFixedPoint(lines)) return lines.join('\n');
+    const next = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const one = redact(lines[i]);
+      if (i + 1 < lines.length) {
+        const pair = `${one}\n${lines[i + 1]}`;
+        const r = redact(pair);
+        if (r !== pair) { next.push(...r.split('\n')); i += 1; continue; }
+      }
+      next.push(one);
+    }
+    lines = next;
+  }
+  // never settled: drop every line that is part of a changing line or pair (fail closed)
+  const bad = new Set();
+  lines.forEach((l, i) => { if (redact(l) !== l) bad.add(i); if (i + 1 < lines.length && redact(`${l}\n${lines[i + 1]}`) !== `${l}\n${lines[i + 1]}`) { bad.add(i); bad.add(i + 1); } });
+  return lines.map((l, i) => (bad.has(i) ? '[Zeile ausgeblendet: Geheimnis-Prüfung]' : l)).join('\n');
 }
 
 const HOME = process.env.BRIDGE_HOME || os.homedir(); // BRIDGE_HOME: the test fixtures' home
@@ -61,7 +81,7 @@ function toolLine(name, input) {
   let a = '';
   if (input && typeof input === 'object') a = input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.query ?? input.url ?? input.description ?? input.prompt ?? '';
   else if (typeof input === 'string') a = input;
-  return `→ ${name}${a ? `: ${squash(a, 160)}` : ''}`;
+  return `→ ${name}${a ? `: ${squash(redact(a), 160)}` : ''}`; // redact before cutting: a cut token can fall below a pattern's length
 }
 
 /** One transcript line -> {role, text, ts} entries (Claude Code format). */
@@ -179,10 +199,11 @@ async function main() {
       read += 1;
       const { meta, entries } = await readEntries(t.file, t.kind);
       const project = projectName(t.kind === 'claude' ? (meta.cwd ?? t.dir) : meta.cwd);
+      const hidden = isHidden(project) || isHidden(meta.cwd ?? '') || isHidden(t.dir ?? ''); // evaluating job: no file at all (Codex paths never name it)
       const byDay = new Map();
       for (const e of entries) { const day = String(e.ts ?? '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue; (byDay.get(day) ?? byDay.set(day, []).get(day)).push(e); }
       // a session with no word of a person or the agent (only tool calls) is not worth a file
-      for (const day of [...byDay.keys()]) if (!byDay.get(day).some((e) => e.role !== 'tool')) byDay.delete(day);
+      for (const day of [...byDay.keys()]) if (hidden || !byDay.get(day).some((e) => e.role !== 'tool')) byDay.delete(day);
       for (const f of prev?.files ?? []) { try { fs.unlinkSync(path.join(sessionsDir, f)); } catch { /* gone */ } }
       const files = [], days = [];
       for (const [day, list] of byDay) {

@@ -356,9 +356,10 @@ export async function discover(params = {}) {
     }));
     return { ...head, query, lines, total: all.length, nextOffset: offset + limit < all.length ? offset + limit : null };
   }
-  const total = stmt(h, 'SELECT count(*) AS n FROM nodes WHERE parent = ?').get(node.path).n;
-  const kids = stmt(h, `SELECT ${NODE_COLS} FROM nodes WHERE parent = ? ORDER BY sort, path LIMIT ? OFFSET ?`).all(node.path, limit, offset).filter((k) => !isHidden(k.path));
-  return { ...head, lines: kids.map(lineOf), total, nextOffset: offset + kids.length < total ? offset + kids.length : null };
+  // hidden nodes (paths.js DESK_HIDE) are dropped before paging, so total and nextOffset stay exact (review of PR #49)
+  const all = stmt(h, `SELECT ${NODE_COLS} FROM nodes WHERE parent = ? ORDER BY sort, path`).all(node.path).filter((k) => !isHidden(k.path));
+  const kids = all.slice(offset, offset + limit);
+  return { ...head, lines: kids.map(lineOf), total: all.length, nextOffset: offset + kids.length < all.length ? offset + kids.length : null };
 }
 
 function readStatusFile() {

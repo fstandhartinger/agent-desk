@@ -23,11 +23,17 @@ const DENIED_FILE = /\.(key|pem|p12|pfx|env)$|^id_(rsa|dsa|ecdsa|ed25519)$|^auth
 // evaluating job's PROMPT.md). DESK_HIDE: comma list of job names; a path is hidden when any segment contains one of them
 // (job folder, its LeChonk job-data, its Claude project dir "-home-flori-jobs-<name>", chat-mirror files "jobs-<name>-…").
 // The names are long and unique, so the substring test cannot catch an unrelated job. ~/desk-knowledge/eval holds the gold.
-const HIDDEN_JOBS = String(process.env.DESK_HIDE ?? 'agent-desk-context-discovery-20261115').split(',').map((x) => x.trim()).filter((x) => x.length >= 12);
+// Default: the discovery job and the worktrees its workers used (their Claude project dirs are -home-flori-wt-<name>).
+const HIDE_DEFAULT = 'agent-desk-context-discovery-20261115,wt-agent-desk-discovery,wt-agent-desk-map-index,wt-agent-desk-web-tools,wt-agent-desk-shell-sandbox';
+const HIDE_RAW = String(process.env.DESK_HIDE || HIDE_DEFAULT).split(',').map((x) => x.trim()).filter(Boolean);
+const HIDDEN_JOBS = HIDE_RAW.filter((x) => x.length >= 12);
+if (HIDDEN_JOBS.length !== HIDE_RAW.length) console.error(`paths: DESK_HIDE names under 12 characters ignored: ${HIDE_RAW.length - HIDDEN_JOBS.length}`);
 
 export function isHidden(p) {
   const segments = String(p).split(/[\\/]/).filter(Boolean);
   if (segments.some((s) => HIDDEN_JOBS.some((name) => s.includes(name)))) return true;
+  // a worktree path /home/flori/wt/<name> splits into "wt" + "<name>": match the pair as well
+  if (segments.some((s, i) => s === 'wt' && segments[i + 1] && HIDDEN_JOBS.includes(`wt-${segments[i + 1]}`))) return true;
   return segments.some((s, i) => s === 'desk-knowledge' && segments[i + 1] === 'eval');
 }
 

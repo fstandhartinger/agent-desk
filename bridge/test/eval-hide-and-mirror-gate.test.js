@@ -21,6 +21,9 @@ test('hidden: the evaluating job in every place it appears, and the gold set', (
     `jobs/2026-11/${JOB}`,
     JOB,
     '/home/flori/desk-knowledge/eval/questions.jsonl',
+    '/home/flori/wt/agent-desk-discovery/bridge/src/map.js',
+    '/home/flori/.claude-A/projects/-home-flori-wt-agent-desk-map-index/s.jsonl',
+    'jobs-agent-desk-context-discovery-20261115__ab12cd34__2026-11-15.md',
   ]) {
     assert.equal(isHidden(p), true, p);
     assert.equal(isDenied(p), true, p);
@@ -33,14 +36,15 @@ test('not hidden: sister jobs, other knowledge, a folder merely named eval', () 
     '/home/flori/jobs/agent-desk-context-discovery-20261201/PROMPT.md',
     '/home/flori/desk-knowledge/topics/servers.md',
     '/home/flori/jobs/generalist-round2-build-20261113/eval/RESULT.md',
+    '/home/flori/wt/agent-desk-voice-history/bridge/src/map.js',
   ]) assert.equal(isHidden(p), false, p);
 });
 
 const SCAN = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'scripts', 'chats', 'scan.mjs');
 const KEY = ['sk', 'ant', 'api03', 'Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0PpOoNnMmLl'].join('-');
 
-function scan(dir) {
-  const r = spawnSync(process.execPath, [SCAN, dir], { encoding: 'utf8' });
+function scan(dir, extra = [], env = process.env) {
+  const r = spawnSync(process.execPath, [SCAN, ...extra, dir], { encoding: 'utf8', env });
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
@@ -72,4 +76,30 @@ test('scan.mjs: a key in any file fails, the key is never printed; symlinks fail
 
 test('scan.mjs: usage error on a missing dir', () => {
   assert.equal(scan('/nonexistent/scan-dir').code, 2);
+});
+
+test('scan.mjs: a key on the line after its name fails; binary and non-UTF-8 files fail; option before the dir', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'pair.md'), `${'x'.repeat(9000)}\n"api_key":\n  "Qw3rTy9UiOp2AsDfGhJk4LzXcVbNm7Qa"\n`);
+    fs.writeFileSync(path.join(dir, 'bin.dat'), Buffer.from([0x41, 0x00, 0x42]));
+    fs.writeFileSync(path.join(dir, 'latin1.md'), Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65]));
+    const r = scan(dir, ['--max-bytes', '100000']);
+    assert.equal(r.code, 3, r.out);
+    assert.match(r.out, /FAIL secret-shaped text: pair\.md/);
+    assert.match(r.out, /FAIL binary content: bin\.dat/);
+    assert.match(r.out, /FAIL not valid UTF-8: latin1\.md/);
+    assert.doesNotMatch(r.out, /Qw3rTy9/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('scan.mjs: fails closed when no secret values could be loaded', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-home-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'ok.md'), 'nothing here\n');
+    const r = scan(dir, [], { PATH: process.env.PATH, HOME: home, BRIDGE_HOME: home });
+    assert.equal(r.code, 3, r.out);
+    assert.match(r.out, /no known secret values loaded/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
 });
