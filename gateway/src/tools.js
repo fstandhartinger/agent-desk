@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { artifactData } from './artifacts.js';
 import { SID, eventsOf } from './claudeSessions.js';
 import { fetchExplainerJson } from './explainer.js';
@@ -221,6 +222,17 @@ export const BRIDGE_TOOLS = {
 };
 
 const DEFAULT_MAX = 6000;
+// Bridge paths are canonical host paths; the gateway runs in a container as `node` and has a different homedir.
+const LECHONK_HOME = '/home/flori';
+const LAPTOP_MIRROR_ROOT = path.resolve(LECHONK_HOME, 'data', 'laptop-mirror');
+
+/** The laptop mirror is stored on LeChonk; keep its read on that host, where the bridge allowlist applies. */
+function laptopMirrorReadHost(requested) {
+  if (typeof requested !== 'string') return null;
+  const expanded = requested.startsWith('~/') ? path.join(LECHONK_HOME, requested.slice(2)) : requested;
+  const absolute = path.resolve(expanded);
+  return absolute === LAPTOP_MIRROR_ROOT || absolute.startsWith(`${LAPTOP_MIRROR_ROOT}${path.sep}`) ? 'lechonk' : null;
+}
 
 // r6 P2-7: pseudo paths (/dev/null, /proc/…, "null") are no files; refused in the gateway, before the bridge and before any status line
 const PSEUDO_PATH_RE = /^\/(?:dev|proc|sys)(?:\/|$)|^(?:null|undefined|none|nil|\.|\/)?$/i;
@@ -600,8 +612,9 @@ export async function runTool(name, args, ctx) {
     try {
       if (BRIDGE_TOOLS[name]) {
         const [method, mapArgs] = BRIDGE_TOOLS[name];
-        host = ctx.hub.pick?.(method) ?? 'bridge';
-        result = await ctx.hub.call(method, mapArgs(clean, max));
+        const pathHost = name === 'read_file' ? laptopMirrorReadHost(clean.path) : null;
+        host = pathHost ?? ctx.hub.pick?.(method) ?? 'bridge';
+        result = await ctx.hub.call(method, mapArgs(clean, max), pathHost ? { host: pathHost } : undefined);
       } else if (READ_HANDLERS[name]) ({ result, host = host, empty } = await READ_HANDLERS[name](clean, ctx, max));
       else result = await gatewayTool(name, clean, ctx, max);
     } catch (err) {
