@@ -196,6 +196,23 @@ describe('other read tools', () => {
       ['discord.read', { channel: '@me/123456789012345678', limit: 50 }],
     ]);
   });
+  it('read_file routes laptop mirror paths to lechonk and leaves other paths on the default route', async () => {
+    const hub = new BridgeHub();
+    const s = fakeWs('sandy', hub);
+    const l = fakeWs('lechonk', hub);
+    const mirror = '/home/flori/data/laptop-mirror';
+    try {
+      await runTool('read_file', { path: `${mirror}/INDEX.md` }, { hub, audit: () => {} });
+      await runTool('read_file', { path: '~/data/laptop-mirror/INDEX.md' }, { hub, audit: () => {} });
+      await runTool('read_file', { path: `${mirror}-archive/INDEX.md` }, { hub, audit: () => {} });
+      await runTool('read_file', { path: `${mirror}/../jobs/example/STATE.md` }, { hub, audit: () => {} });
+      assert.deepEqual(reqs(l), ['ctx.read', 'ctx.read']);
+      assert.deepEqual(reqs(s), ['ctx.read', 'ctx.read']);
+    } finally {
+      s.ws.close();
+      l.ws.close();
+    }
+  });
   it('run_readonly accepts only the fixed ids; discord_read validates the channel', async () => {
     const { hub, s } = hubFor({});
     for (const command of ['rm -rf /', 'quota-pace status; id', 'disk ', 'send']) {
