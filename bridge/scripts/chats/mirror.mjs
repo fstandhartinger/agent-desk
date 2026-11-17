@@ -56,6 +56,8 @@ const DAY_CAP = 1_500_000; // the search skips files over 2 MB
 const USER_CAP = 6_000;
 const ASSISTANT_CAP = 8_000;
 const LINE_CAP = 4_000_000; // a transcript line above this is a tool result or an image: skipped unparsed
+const PROJECT_READ_ATTEMPTS = 3;
+const PROJECT_READ_RETRY_MS = 20;
 
 const squash = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}\n[… ${s.length - n} Zeichen gekürzt]` : s);
@@ -160,7 +162,7 @@ function* transcripts() {
     const account = e.name === '.claude' ? 'Claude' : `Claude ${e.name.slice(8)}`;
     for (const p of fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true }) : []) {
       if (!p.isDirectory()) continue;
-      for (const f of fs.readdirSync(path.join(root, p.name))) {
+      for (const f of readProjectDirectory(path.join(root, p.name))) {
         if (f.endsWith('.jsonl') && /^[0-9a-f]{8}-/.test(f)) yield { kind: 'claude', file: path.join(root, p.name, f), dir: p.name, sid: f.slice(0, 8), label: account };
       }
     }
@@ -177,6 +179,20 @@ function* transcripts() {
     }
   };
   yield* walk(codex, 0);
+}
+
+/** A Claude project can be removed between listing its parent and reading it; retry briefly, then fail closed. */
+export function readProjectDirectory(projectDir, readDir = fs.readdirSync) {
+  for (let attempt = 0; attempt < PROJECT_READ_ATTEMPTS; attempt += 1) {
+    try { return readDir(projectDir); }
+    catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+      if (attempt + 1 < PROJECT_READ_ATTEMPTS) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, PROJECT_READ_RETRY_MS);
+    }
+  }
+  const error = new Error(`incomplete chat source snapshot: Claude project directory disappeared (${path.basename(projectDir)})`);
+  error.code = 'ERR_INCOMPLETE_CHAT_SNAPSHOT';
+  throw error;
 }
 
 async function main() {
