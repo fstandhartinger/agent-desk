@@ -46,6 +46,19 @@ export function settle(text) {
   return lines.map((l, i) => (bad.has(i) ? '[Zeile ausgeblendet: Geheimnis-Prüfung]' : l)).join('\n');
 }
 
+export const INDEX_CUT = '… (Inhaltsverzeichnis gekürzt; ältere Sitzungen findet search, Quelle chats)';
+/** INDEX.md text: redacted line by line (settle), cut at a line boundary. A whole-text redact() above OFFLOAD_FROM (8 KB) hits
+ * the worker budget on a large index and returns the fallback marker, which emptied the Sandy table of contents. */
+export function renderIndex(lines, cap = 1_500_000) {
+  const kept = [];
+  let size = 0;
+  for (const line of settle(lines.join('\n')).split('\n')) {
+    if (size + line.length + 1 > cap) { kept.push(INDEX_CUT); break; }
+    kept.push(line); size += line.length + 1;
+  }
+  return settle(kept.join('\n'));
+}
+
 const HOME = process.env.BRIDGE_HOME || os.homedir(); // BRIDGE_HOME: the test fixtures' home
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
 const HOST = arg('host', os.hostname().toLowerCase());
@@ -248,7 +261,7 @@ async function main() {
       lines.push(`- ${r.label} ${r.sid}: ${d[0].day}${d.length > 1 ? ` bis ${d.at(-1).day}` : ''}, ${Math.round(d.reduce((s, x) => s + x.size, 0) / 1024)} KB: ${d[0].first}`);
     }
   }
-  fs.writeFileSync(path.join(OUT, 'INDEX.md'), settle(redact(lines.join('\n')).slice(0, DAY_CAP)), { mode: 0o600 });
+  fs.writeFileSync(path.join(OUT, 'INDEX.md'), renderIndex(lines), { mode: 0o600 });
   next['.version'] = RENDER_VERSION;
   fs.writeFileSync(stateFile, JSON.stringify(next), { mode: 0o600 });
   console.log(JSON.stringify({ host: HOST, out: OUT, read, unchanged: skipped, dayFiles: kept, projects: projects.length }));
