@@ -5,6 +5,7 @@ import { TAX_NO_SOURCE, TaxClaimFilter, isUnsourcedTaxClaim } from '../src/taxFi
 import { buildInstructions as textPrompt } from '../src/prompt.js';
 import { buildInstructions as voicePrompt } from '../src/voice/instructions.js';
 import { SYSTEM_PROMPT } from '../src/illustrator.js';
+import { guardDecision } from '../src/voice/answerGuard.js';
 import { completionStream, fakeServer, login, readSse, setEnv, startGateway } from './helpers/env.js';
 
 describe('tax claim filter', () => {
@@ -32,6 +33,18 @@ describe('prompts carry the tax rule', () => {
     assert.match(voicePrompt(null), rule);
     assert.match(textPrompt(null, { spoken: true }), /keine Quelle – frag den Steuerberater/);
     assert.match(SYSTEM_PROMPT, /Dazu habe ich keine Quelle – frag den Steuerberater/);
+  });
+  // board #66206 (eval final4 gemini q48): a GPU-hours/cost question got the Steuerberater line before any lookup
+  it('the tax rule names its scope: costs and GPU-hours are not tax questions, no fallback before a lookup', () => {
+    for (const p of [textPrompt(null), voicePrompt(null), textPrompt(null, { spoken: true })]) {
+      assert.match(p, /gilt nur für Steuerrecht/);
+      assert.match(p, /Kosten, Preise, Ausgaben, GPU-Stunden und Budgets sind keine Steuerfragen/);
+      assert.match(p, /Steuerberater-Satz sagst du nie, bevor du nachgesehen hast/);
+    }
+  });
+  it('the voice answer guard still nudges a tool-less Steuerberater answer to a cost question (q48)', () => {
+    const d = guardDecision({ question: 'Wie viele GPU-Stunden und wie viel Geld haben die Generalist-Bewertungsrechner der letzten Runde zusammen verbraucht?', tools: 0, answer: 'Dazu habe ich keine Quelle – frag bitte den Steuerberater.', last: 'Dazu habe ich keine Quelle – frag bitte den Steuerberater.' });
+    assert.equal(d?.kind, 'check');
   });
 });
 
