@@ -9,10 +9,12 @@ export function nowBerlin(now = new Date()) {
 }
 
 /** Date and counting rules shared by the text and voice prompts. */
-export const TAX_RULE = 'Steuerrechtliche Aussagen nur mit Quelle (Datei, Board, DECISIONS): nenne den Pfad oder die Board-Nummer dazu; sonst sag: "Dazu habe ich keine Quelle – frag den Steuerberater." Erfinde keine Steuerregeln (wann Steuerpflicht entsteht, was steuerfrei ist).';
+export const TAX_RULE = 'Steuerrechtliche Aussagen nur mit Quelle (Datei, Board, DECISIONS): nenne den Pfad oder die Board-Nummer dazu; sonst sag: "Dazu habe ich keine Quelle – frag den Steuerberater." Erfinde keine Steuerregeln (wann Steuerpflicht entsteht, was steuerfrei ist). Diese Regel gilt nur für Steuerrecht (Steuerpflicht, steuerfrei, Umsatzsteuer, Abzüge); Kosten, Preise, Ausgaben, GPU-Stunden und Budgets sind keine Steuerfragen: die schlägst du mit den Werkzeugen nach. Den Steuerberater-Satz sagst du nie, bevor du nachgesehen hast, und nie als Ersatz für "das habe ich nicht gefunden".';
 
+// 18 Nov 2026 (board #66206, eval final4 gemini q48 a#fa26d2): Gemini answered a GPU-hours/cost question with the Steuerberater line
+// before any tool call, then corrected itself after the check nudge. The rule now names its scope and forbids the line as a generic fallback.
 /** The spoken variant of TAX_RULE: the source by its name, not by path or board number (Florian, 16 Nov 2026: IDs and number runs read aloud are long and useless). */
-export const TAX_RULE_SPOKEN = 'Steuerrechtliche Aussagen nur mit Quelle (Datei, Board, DECISIONS): nenne die Quelle beim Namen ("laut der Steuernotiz", "laut dem Board-Eintrag zur Umsatzsteuer"), ohne Pfad oder Nummer vorzulesen; sonst sag: "Dazu habe ich keine Quelle – frag den Steuerberater." Erfinde keine Steuerregeln (wann Steuerpflicht entsteht, was steuerfrei ist).';
+export const TAX_RULE_SPOKEN = 'Steuerrechtliche Aussagen nur mit Quelle (Datei, Board, DECISIONS): nenne die Quelle beim Namen ("laut der Steuernotiz", "laut dem Board-Eintrag zur Umsatzsteuer"), ohne Pfad oder Nummer vorzulesen; sonst sag: "Dazu habe ich keine Quelle – frag den Steuerberater." Erfinde keine Steuerregeln (wann Steuerpflicht entsteht, was steuerfrei ist). Diese Regel gilt nur für Steuerrecht (Steuerpflicht, steuerfrei, Umsatzsteuer, Abzüge); Kosten, Preise, Ausgaben, GPU-Stunden und Budgets sind keine Steuerfragen: die schlägst du mit den Werkzeugen nach. Den Steuerberater-Satz sagst du nie, bevor du nachgesehen hast, und nie als Ersatz für "das habe ich nicht gefunden".';
 
 /** spoken: the voice prompt; dates, paths and sources are said for the ear (the facts stay exactly as in the source). */
 export function groundingLines(now, { spoken = false } = {}) {
