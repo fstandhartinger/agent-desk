@@ -48,8 +48,13 @@ export const isGoWord = (text) => { const t = norm(text); return t.split(' ').le
 const RESUME = /^(?:(?:bitte|jetzt|einfach|ruhig|dann|ja|okay|also) )*(?:(?:du (?:sollst|kannst) (?:bitte |jetzt |einfach |ruhig )*|bitte )(?:da |damit )?(?:weiter ?machen|fortfahren|fortsetzen)|mach (?:bitte |jetzt |einfach |ruhig |da |damit )*weiter|fahr(?:e)? (?:bitte |jetzt |einfach |ruhig |damit )*fort|continue (?:with|where)|keep going with)(?: |$)/;
 export function isResumeDirective(text) {
   const clauses = String(text).match(/[^.!?]+[.!?]?/g) ?? [];
-  const last = clauses.filter(clause => /\b(?:weiter|fort|continue|keep going)/i.test(clause)).at(-1);
-  return Boolean(last && !last.includes('?') && RESUME.test(norm(last)) && !NEGATION.test(norm(last)));
+  let resume = false;
+  for (const clause of clauses) {
+    const text = norm(clause);
+    if (/^(?:nein|warte|halt|stopp?)\b|\b(?:nicht|nie) weiter\w*/u.test(text)) resume = false;
+    else if (!clause.includes('?') && RESUME.test(text) && !NEGATION.test(text)) resume = true;
+  }
+  return resume;
 
 }
 

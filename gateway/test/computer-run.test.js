@@ -573,7 +573,9 @@ test('unrestricted hands-on replay: retains the task past idle and resumes on a 
   }
   assert.equal(h.session.said.length, 0);
   assert.equal(h.computer.runOf('s1').run, run);
-  say(h, 'Mach bitte weiter mit dem geöffneten Fenster.');
+  say(h, 'Mach weiter. Warte kurz.');
+  assert.equal(h.vision.ofOp('resume').length, 0);
+  say(h, 'Nein, dafür keinen neuen Job starten. Du sollst einfach weitermachen, wo du vorhin warst. Öffne die Einstellung und so weiter.');
   await until(() => ended(h));
   assert.equal(stopReason(h), 'done');
   assert.equal(h.vision.ofOp('resume').length, 1);
