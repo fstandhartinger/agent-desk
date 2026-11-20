@@ -196,7 +196,8 @@ test('scheduled voice rollover waits for an active computer run to finish', (t) 
   const h = harness(t, { computer: { runOf: () => active, userPartial() {}, userFinal() {}, assistantFinal() {} } });
   h.msg({ type: 'start' });
   h.emit({ t: 'ready', model: 'm' });
-  t.mock.timers.tick(HARD_CAP_MS);
+  t.mock.timers.tick(HARD_CAP_MS - CAP_WARN_MS);
+  t.mock.timers.tick(CAP_WARN_MS);
   assert.ok(!types(h).includes('closed'));
   active = null;
   h.emit({ t: 'turn_done' });
