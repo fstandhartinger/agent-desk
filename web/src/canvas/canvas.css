@@ -136,3 +136,6 @@
   .cv-panel .cv-history { padding: 4px 10px 6px; }
   .cv-panel .cv-hist { height: 30px; }
 }
+
+.cv-card-branch { cursor: pointer; }
+.cv-card-branch:hover rect, .cv-card-branch:focus-visible rect { stroke: var(--color-fg, #fff); stroke-width: 2.5px; }

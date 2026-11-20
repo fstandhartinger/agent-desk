@@ -1,0 +1,13 @@
+--- a/notify
++++ b/notify
+@@ -140,0 +141 @@
++from card_voice_summary import store_voice_summary
+@@ -517,0 +519 @@
++            store_voice_summary(card)
+@@ -533,0 +536 @@
++            store_voice_summary(card)
+--- a/notify_settle.py
++++ b/notify_settle.py
+@@ -182,0 +183,2 @@
++    from card_voice_summary import store_voice_summary
++    store_voice_summary(card)

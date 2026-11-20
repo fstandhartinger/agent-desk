@@ -1,12 +1,13 @@
 // Loaded only when starting voice; picker metadata and entry diagnostics stay out of initial JS.
-import { voiceNameForStart } from './voiceNames';
+import { selectedVoiceName, voiceNameForStart } from './voiceNames';
 import { buildEntry, clientInfo } from './clientInfo';
 import { focusedCanvasId } from '../canvas/bus';
 import type { VoiceOption } from './voice';
 import type { PageContext } from './types';
 
 export async function prepareVoiceStart(opt: VoiceOption, page: PageContext | undefined, startupCard?: string) {
-  const voice = await voiceNameForStart(opt.provider);
+  const preferred = voiceNameForStart(opt.provider);
+  const voice = startupCard ? selectedVoiceName(opt.provider) : await preferred;
   // Capture the voice now, but read focus/device/entry when the WebSocket actually opens.
   return () => voiceStartMessage(opt, page, voice, startupCard);
 }

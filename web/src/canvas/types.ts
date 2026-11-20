@@ -24,6 +24,7 @@ export interface CanvasSpec {
   kind: CanvasKind;
   title: string;
   caption?: string;
+  cardBranches?: string[];
   highlight?: string;
   sources: CanvasSource[];
   unsourced?: boolean;

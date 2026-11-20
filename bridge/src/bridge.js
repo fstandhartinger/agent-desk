@@ -14,7 +14,7 @@ import * as audio from './audio.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
 import { cardStartup } from './cardStartup.js';
-import { cardLink, cardRead, cardsRecent } from './notify.js';
+import { cardLink, cardRead, cardsRecent, cardVoiceSummary, prefetchCardSummaries } from './notify.js';
 import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
@@ -92,6 +92,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
       'notify.cardRead': cardRead,
+      'notify.cardVoiceSummary': cardVoiceSummary,
       'notify.cardStartup': cardStartup,
       'notify.cardsRecent': cardsRecent, // start briefing (Sandy only: ~/.notify lives there)
       'board.recent': board.recent,
@@ -238,6 +239,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     setInterval(warn, 6 * 3600_000).unref();
   }
   const bridge = startBridge({ url: DESK_URL, token: BRIDGE_TOKEN, host });
+  if (host === 'sandy') {
+    const prefetch = () => { void prefetchCardSummaries().catch(() => {}); };
+    prefetch();
+    setInterval(prefetch, 30_000).unref();
+  }
   process.on('unhandledRejection', (err) => log(`unhandled rejection: ${err?.message ?? err}`));
   process.on('uncaughtException', (err) => log(`uncaught exception: ${err.message}`));
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { bridge.close(); process.exit(0); });

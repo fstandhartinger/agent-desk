@@ -88,7 +88,7 @@ export function applyEvent(s: CanvasState, ev: CanvasBusEvent, now = Date.now())
   }
   // `focus: false` (a late draw of an earlier turn / another topic): history only, never takes the stage - unless nothing is shown yet
   const lateDraw = (ev as CanvasBusEvent & { focus?: boolean }).focus === false;
-  const follow = lateDraw ? !s.current : !s.pinnedAt || now - s.pinnedAt > FOLLOW_PAUSE_MS || s.current === ev.id || !s.current;
+  const follow = ev.spec?.cardBranches && !prev ? true : lateDraw ? !s.current : !s.pinnedAt || now - s.pinnedAt > FOLLOW_PAUSE_MS || s.current === ev.id || !s.current;
   return { ...s, seen, entries, order: order.slice(0, HISTORY), current: follow ? ev.id : s.current, pinnedAt: follow ? 0 : s.pinnedAt, ...(details ? { details } : {}) };
 }
 

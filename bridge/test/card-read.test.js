@@ -57,3 +57,16 @@ it('plain cards keep angle brackets; HTML cards lose tags; the last footer-looki
 it('pageText keeps visible text only', () => {
   assert.equal(pageText('<style>a{}</style><p>One</p><ul><li>Two</li></ul>'), 'One\nTwo');
 });
+
+it('prefetches a startup summary by artifact ID and refreshes it after a card edit', async () => {
+  const { cardVoiceSummary, prefetchCardSummaries } = await import('../src/notify.js');
+  const file = path.join(home, '.notify', 'cards', '128.json');
+  await fs.writeFile(file, JSON.stringify({ ...card, aid: 'abc123', text: '🤖 LÄUFT\nOld headline\na#abc123', status: '🤖 LÄUFT', voice_summary: 'Cached headline', answered: false, ask: true }));
+  await prefetchCardSummaries();
+  assert.deepEqual(await cardVoiceSummary({ aid: 'abc123' }), { id: '128', aid: 'abc123', title: 'Cached headline', status: 'offen' });
+  await fs.writeFile(file + '.new', JSON.stringify({ ...card, aid: 'abc123', text: '✅ ERLEDIGT\nSettled headline\na#abc123', settled: true }));
+  await fs.rename(file + '.new', file);
+  assert.equal((await cardVoiceSummary({ aid: 'abc123' })).title, 'Settled headline');
+  assert.equal((await cardVoiceSummary({ id: '128' })).status, 'erledigt');
+  assert.equal(await cardVoiceSummary({ id: '128', aid: 'def456' }), null);
+});

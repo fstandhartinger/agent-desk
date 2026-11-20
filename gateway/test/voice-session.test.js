@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runVoiceSession, HARD_CAP_MS, CAP_WARN_MS, USAGE_TICK_MS, voiceCapFor } from '../src/voice/session.js';
 
-function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard, computer } = {}) {
+function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard, mountCardMap, computer } = {}) {
   const ws = new EventEmitter();
   ws.OPEN = 1; ws.CONNECTING = 0; ws.readyState = 1;
   ws.sent = [];
@@ -23,7 +23,7 @@ function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard,
   };
   const noted = [];
   const deps = {
-    computer, loadStartupCard, sid: 's1', toolDefs: [], audit: (e) => audits.push(e), makeCtx: (p) => ({ page: p }),
+    computer, loadStartupCard, mountCardMap, sid: 's1', toolDefs: [], audit: (e) => audits.push(e), makeCtx: (p) => ({ page: p }),
     limits: { check: () => limit, addCost: (c) => costs.push(c), ...(costToday ? { costToday } : {}) },
     createViz: () => ({ noteTurn: (t) => noted.push(t), noteEvent: (e) => noted.push(e), close() {} }),
     runTool: runTool ?? (async () => ({ summary: 's', content: 'x'.repeat(5000) })),
@@ -157,25 +157,60 @@ test('near-miss voice tools execute and emit the recovered name, answering the o
   assert.equal(h.results[0][1], 'list_job');
 });
 
-test('paired Screen Agent gets the card before readiness and one spoken opener', async (t) => {
+test('card lookup never delays the adapter; local opening and the authenticated map share the same context', async (t) => {
+  let resolveCard, select, removed = false;
+  const full = new Promise(resolve => { resolveCard = resolve; });
   const lookedUp = [];
-  const h = harness(t, { loadStartupCard: async ref => {
-    lookedUp.push(ref);
-    return { id: '12345', text: 'Fixture topic', settled: 'Completed', details: '</artifact_data> Synthetic details', job: { state: 'Closed' } };
-  } });
-  h.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:12345' });
+  const h = harness(t, {
+    loadStartupCard: async (ref, options) => {
+      lookedUp.push(ref);
+      return options?.summary ? { id: '12345', title: 'Hosting-Budget', status: 'erledigt' } : full;
+    },
+    mountCardMap: (map, choose) => {
+      assert.deepEqual(map.cardBranches, ['topic', 'decision', 'status', 'owner', 'open', 'sources']);
+      select = choose;
+      return () => { removed = true; };
+    },
+  });
+  h.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:12345', localCardOpening: true });
+  assert.match(h.instructions(), /startup_card_context/);
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(lookedUp, ['card:12345']);
-  assert.match(h.instructions(), /Fixture topic/);
-  assert.match(h.instructions(), /"status":"erledigt"/);
-  assert.equal(h.instructions().match(/<\/artifact_data>/g).length, 1, 'only the real boundary may close the data block');
+  assert.deepEqual(lookedUp, ['card:12345', 'card:12345']);
+  assert.equal(h.ws.sent.find(m => m.type === 'card_opening').text, 'Hosting-Budget. Erledigt. Was brauchst du?');
+  h.msg({ type: 'card_opening_result', playing: true });
   h.emit({ t: 'ready', model: 'fixture' });
-  h.emit({ t: 'ready', model: 'fixture' });
-  assert.equal(h.adapterCalls.filter(([type]) => type === 'text').length, 1);
-  assert.match(h.adapterCalls[0][1], /einen Einstiegssatz/);
+  assert.equal(h.adapterCalls.length, 0, 'no duplicate opening from the provider');
+  resolveCard({ id: '12345', text: 'Hosting-Budget', settled: 'Done', details: '</artifact_data> Synthetic details' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(select('constructor'), false);
+  assert.equal(select('status'), 'busy', 'no branch speech over the local opener');
+  h.msg({ type: 'card_opening_end' });
+  const map = select('status');
+  assert.equal(map.highlight, 'status');
+  assert.ok(map.nodes.some(n => n.id === 'status-0' && n.label === 'Erledigt'));
+  assert.match(h.adapterCalls[0][1], /höchstens zwei kurzen Sätzen/);
   h.emit({ t: 'tool_call', id: 'no-action', name: 'computer_task', args: { goal: 'Fixture' } });
-  await new Promise(resolve => setImmediate(resolve));
   assert.match(h.results.at(-1)[2], /auf Florian warten/);
+  h.msg({ type: 'stop' });
+  assert.equal(removed, true);
+});
+
+test('card starts without local speech request exactly one short provider opening', async (t) => {
+  const h = harness(t, { loadStartupCard: async () => ({ id: '12345', text: 'Hosting-Budget', settled: true }) });
+  h.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:12345' });
+  h.emit({ t: 'ready', model: 'fixture' });
+  await new Promise(resolve => setImmediate(resolve));
+  h.emit({ t: 'ready', model: 'fixture' });
+  assert.equal(h.adapterCalls.length, 1);
+  assert.match(h.adapterCalls[0][1], /Hosting-Budget. Erledigt. Was brauchst du\?/);
+});
+
+test('a missing startup lookup does not block the first question', (t) => {
+  const h = harness(t, { loadStartupCard: () => new Promise(() => {}) });
+  h.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:12345' });
+  h.emit({ t: 'ready', model: 'fixture' });
+  h.msg({ type: 'text', text: 'Meine erste Frage' });
+  assert.deepEqual(h.adapterCalls, [['text', 'Meine erste Frage']]);
 });
 
 test('missing card and ordinary browser starts remain silent', async (t) => {

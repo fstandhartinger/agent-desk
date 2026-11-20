@@ -76,7 +76,7 @@ export default function Desk({ onLoggedOut }: { onLoggedOut: () => void }) {
       notifyNative(ev);
       if (ev.phase === 'ready') logActivity('system', 'Skizze auf der Canvas', ev.spec?.title ?? ev.title, 'violet');
       else if (ev.phase === 'error') logActivity('system', 'Skizze fehlgeschlagen', ev.message, 'red');
-      if (ev.phase !== 'pending') return;
+      if (ev.phase !== 'pending' && !ev.spec?.cardBranches) return;
       if (tabRef.current !== 'live') setCanvasNew(true);
       if (!kinoStore.get().kino) setLayout((l) => revealLive(l, explainerOnRef.current));
     });

@@ -123,6 +123,50 @@ export async function cardRead({ id, includeState = false } = {}) {
   };
 }
 const MAX_PAGE_BYTES = 512 * 1024;
+const CARD_DIR = path.join(HOME, '.notify', 'cards');
+const CARD_ID = /^[1-9]\d{0,11}$/;
+const summaries = new Map();
+
+function headline(lines) {
+  return lines.find((line) => /^Worum geht['’]s:/i.test(line))?.replace(/^[^:]+:\s*/, '')
+    ?? lines.find((line) => !/^(?:[🧑🤖✅🚨]|a#)/u.test(line)) ?? '';
+}
+
+async function indexedSummary(id) {
+  const file = path.join(CARD_DIR, `${id}.json`);
+  const { ino, mtimeMs } = await fs.stat(file);
+  const cached = summaries.get(id);
+  if (cached?.ino === ino && cached.mtimeMs === mtimeMs) return cached.value;
+  const card = JSON.parse(await readCapped(file, 65536));
+  const lines = (card.parse_mode === 'HTML' ? pageText(card.text) : String(card.text ?? '')).split('\n').map((line) => line.trim()).filter(Boolean);
+  const footer = lines.findLast((line) => /^a#[0-9a-f]{6}(?:\s*·\s*Karte\s+\d+)?$/i.test(line));
+  const aid = (footer?.slice(2, 8) ?? card.aid ?? '').toLowerCase();
+  const status = card.settled || /^✅/.test(card.status || lines[0] || '') ? 'erledigt'
+    : card.answered ? 'beantwortet' : card.ask ? 'offen' : '';
+  const rawTitle = typeof card.voice_summary === 'string' ? card.voice_summary : headline(lines);
+  const title = redact(rawTitle).replace(/https?:\/\/\S+|\ba#[0-9a-f]{6}\b/gi, '').replace(/\s+/g, ' ').trim().slice(0, 180);
+  const value = title ? { id, aid, title, status } : null;
+  summaries.delete(id);
+  summaries.set(id, { ino, mtimeMs, value });
+  if (summaries.size > 100) summaries.delete(summaries.keys().next().value);
+  return value;
+}
+
+export async function prefetchCardSummaries() {
+  const ids = (await fs.readdir(CARD_DIR)).map((name) => name.replace(/\.json$/, '')).filter((id) => CARD_ID.test(id));
+  // Message numbers increase on each send. Older files can still be read on demand.
+  await Promise.allSettled(ids.sort((a, b) => Number(b) - Number(a)).slice(0, 50).map(indexedSummary));
+}
+
+export async function cardVoiceSummary({ id, aid } = {}) {
+  if (aid !== undefined && !/^[0-9a-f]{6}$/.test(aid)) return null;
+  if (!id && aid) id = [...summaries.values()].find(({ value }) => value?.aid === aid)?.value.id;
+  if (typeof id !== 'string' || !CARD_ID.test(id)) return null;
+  try {
+    const summary = await indexedSummary(id);
+    return aid && summary?.aid !== aid ? null : summary;
+  } catch { /* The local card may have been removed, or its cached file may be unreadable. */ return null; }
+}
 
 /**
  * notify.cardsRecent: Telegram cards of the last hours for the start briefing. Reads ~/.notify/cards/*.json directly

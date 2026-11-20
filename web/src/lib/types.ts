@@ -46,6 +46,7 @@ export type VoiceServerMsg =
   | { type: 'ready'; provider: string; model: string }
   | { type: 'transcript'; role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean; typed?: boolean; replace?: boolean; quiet?: boolean; context?: boolean }
   | { type: 'speech_started' }
+  | { type: 'card_opening'; text: string }
   | ToolEvent
   | HandoffEvent
   | ClaudeProposalEvent

@@ -15,6 +15,8 @@ import { detailLabel, hasDetail, variantSpec } from './detail';
 import Stage from './Stage';
 import { useRevealCount } from './useReveal';
 import { autoView, canPan, controlsAutoHide, panBy, scaleOf, scrollEdges, scrollMode, wantsBig, wholeView, zoomAt, CONTROLS_IDLE_MS, type VB } from './view';
+import { api, errorMessage } from '../lib/api';
+import { toast } from '../lib/toast';
 import { useSize } from '../viz/hooks';
 import './canvas.css';
 
@@ -301,7 +303,7 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
     <div className={`cv-root flex h-full min-h-0 flex-col ${className}`} data-canvas-id={entry?.id ?? ''} data-phase={entry?.phase ?? 'empty'}>
       {entry && (
         <header className="cv-head shrink-0">
-          <span className={`cv-kind ${pending ? 'cv-kind-pending' : ''}`} title={kind ? KIND_LABEL[kind] : 'Skizze'}><Icon className="h-[18px] w-[18px]" /></span>
+          <span className={`cv-kind ${pending ? 'cv-kind-pending' : ''}`} title={spec?.cardBranches ? 'Mindmap' : kind ? KIND_LABEL[kind] : 'Skizze'}><Icon className="h-[18px] w-[18px]" /></span>
           <div className="cv-text min-w-0">
             <h2 className="cv-title" key={title}>{title}</h2>
             {spec?.caption && <p className="cv-caption">{spec.caption}</p>}
@@ -333,7 +335,7 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
                 >
                   <ImageDown className="h-4 w-4" />
                 </button>
-                <button
+                {!spec.cardBranches && <button
                   type="button"
                   className="cv-btn cv-copy"
                   onClick={async () => { await onCopy?.(raw ?? spec); setCopied(true); window.setTimeout(() => setCopied(false), 1600); }}
@@ -341,7 +343,7 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
                   title="JSON kopieren"
                 >
                   {copied ? <Check className="h-4 w-4 text-moss" /> : <Copy className="h-4 w-4" />}
-                </button>
+                </button>}
               </>
             )}
             {onExpand && (
@@ -380,7 +382,11 @@ export default function CanvasView({ state, onSelect, onExport, onCopy, onExpand
           )}
           {shown && view.vb && (
             <div className={`${view.scroll ? 'relative' : 'absolute inset-0'} ${pending ? 'cv-updating' : ''}`} style={view.scroll ? { width: view.box.w, height: view.box.h } : undefined}>
-              <Stage scene={shown} canvasId={spec!.id} vb={view.vb} box={view.box} instant={view.instant} />
+              <Stage scene={shown} canvasId={spec!.id} vb={view.vb} box={view.box} instant={view.instant}
+                branches={spec?.cardBranches} onBranch={(branch) => {
+                  void api('/api/canvas/card-branch', { method: 'POST', json: { id: spec!.id, branch } })
+                    .catch(error => toast(errorMessage(error), 'error'));
+                }} />
             </div>
           )}
         </div>

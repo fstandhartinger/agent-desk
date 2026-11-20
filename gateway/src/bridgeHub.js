@@ -13,6 +13,7 @@ export const BRIDGE_HOST = /^(lechonk|sandy)$/;
 export const ROUTE = {
   'notify.cardLink': ['sandy'],
   'notify.cardRead': ['sandy'],
+  'notify.cardVoiceSummary': ['sandy'],
   'notify.cardStartup': ['sandy'],
   'notify.cardsRecent': ['sandy'],
   'board.recent': ['sandy'],
