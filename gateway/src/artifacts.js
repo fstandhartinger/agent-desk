@@ -170,7 +170,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     if (aid) {
       if (!cardSummaryInFlight.has(aid)) {
         const lookup = hub.call('notify.cardVoiceSummary', { aid }, { timeoutMs: 450 })
-          .catch(() => null).finally(() => cardSummaryInFlight.delete(aid));
+          .catch(() => /* local summary unavailable: try the registry */ null).finally(() => cardSummaryInFlight.delete(aid));
         cardSummaryInFlight.set(aid, lookup);
       }
       const cached = await cardSummaryInFlight.get(aid);

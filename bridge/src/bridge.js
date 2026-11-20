@@ -240,7 +240,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const bridge = startBridge({ url: DESK_URL, token: BRIDGE_TOKEN, host });
   if (host === 'sandy') {
-    const prefetch = () => { void prefetchCardSummaries().catch(() => {}); };
+    const prefetch = () => { void prefetchCardSummaries().catch(() => { /* optional prefetch: missing cards are still read on demand */ }); };
     prefetch();
     setInterval(prefetch, 30_000).unref();
   }

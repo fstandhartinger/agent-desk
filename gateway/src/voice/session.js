@@ -884,7 +884,7 @@ ${opening}`);
       && /^(?:card:[1-9]\d{0,11}|a#[0-9a-f]{6})$/.test(msg.startupCard) ? msg.startupCard : null;
     if (startupRef) {
       const lookupAt = now();
-      const lookup = (options) => deps.loadStartupCard(startupRef, options).catch(() => null);
+      const lookup = (options) => deps.loadStartupCard(startupRef, options).catch(() => /* unavailable: the lookup outcome is traced below */ null);
       void lookup({ summary: true }).then(card => {
         if (!closed) trace.event('card.startup.summary', { found: !!card, ms: now() - lookupAt });
         offerOpening(card, msg.localCardOpening === true);
