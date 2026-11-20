@@ -8,6 +8,7 @@ export default function Companion() {
   useEffect(() => {
     const host = nativeHost();
     if (!host || new URLSearchParams(location.search).get('companion') !== '1') return;
+    globalThis.speechSynthesis?.getVoices(); // warm the local Windows voice list before the hotkey
     let live = true;
     const session = () => { if (live) void auth.me().catch(() => /* ignored */ {}); };
     session();

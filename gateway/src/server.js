@@ -17,7 +17,7 @@ import { handleExplainer } from './explainer.js';
 import { handleHandoff, handleHandoffDiscard } from './handoff.js';
 import { handleClaudeProposal, handleClaudeProposalDiscard } from './claudeProposal.js';
 import { attachKnowledge } from './knowledge.js';
-import { clientIp, openSse, sendJson } from './http.js';
+import { clientIp, openSse, readJson, sendJson } from './http.js';
 import { limits } from './limits.js';
 import { TEXT } from './messages.js';
 import { snapshot as providerSnapshot } from './providerHealth.js';
@@ -64,12 +64,12 @@ async function sessionLookup(res, url, traces) {
 }
 
 /** SSE of the canvas bus: replay of the ring after Last-Event-ID (or ?since=), then live. */
-function streamCanvas(req, res, url, bus) {
+function streamCanvas(req, res, url, bus, audience) {
   let last = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
   if (!Number.isFinite(last) || last < 0) last = 0;
   const sse = openSse(res);
   const deliver = (event, seq) => {
-    if (seq <= last) return;
+    if (seq <= last || !bus.visible(event, audience)) return;
     last = seq;
     sse.send(event, seq);
   };
@@ -88,6 +88,15 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => /* ignored */ {}));
   const canvasBus = createCanvasBus();
+  const cardMaps = new Map();
+
+  function mountCardMap(audience, spec, select) {
+    const publish = (spec) => canvasBus.publish({ phase: 'ready', id: spec.id, kind: spec.kind, spec, by: 'voice' }, { owner: spec.id, audience });
+    const entry = { audience, select, publish };
+    cardMaps.set(spec.id, entry);
+    publish(spec);
+    return () => cardMaps.delete(spec.id);
+  }
   const illustrator = createIllustrator({ bus: canvasBus, hub });
   // A Claude Code session drew something (```desk-canvas block -> bridge event {kind:"canvas", spec}): validate and publish.
   hub.on('evt', ({ topic, data }) => {
@@ -127,8 +136,19 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });
     }
     if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
-    if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest() });
-    if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus);
+    if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest(session.deviceHash) });
+    if (pathname === '/api/canvas/events' && req.method === 'GET') return streamCanvas(req, res, url, canvasBus, session.deviceHash);
+    if (pathname === '/api/canvas/card-branch' && req.method === 'POST') {
+      if (!session.deviceHash || !originOk(req)) return sendJson(res, 403, { error: TEXT.badOrigin });
+      const { id, branch } = await readJson(req, 512) ?? {};
+      const map = cardMaps.get(id);
+      if (!map || map.audience !== session.deviceHash || typeof branch !== 'string') return sendJson(res, 404, { error: 'Die Kartensitzung ist nicht aktiv.' });
+      const spec = map.select(branch);
+      if (spec === 'busy') return sendJson(res, 409, { error: 'Die Sprachsitzung ist gerade beschäftigt.' });
+      if (!spec) return sendJson(res, 404, { error: 'Dieser Zweig ist nicht verfügbar.' });
+      map.publish(spec);
+      return sendJson(res, 200, { ok: true });
+    }
     if (pathname === '/api/chat' && req.method === 'POST') return handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, briefing: devices.briefing, traces, research });
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
     if (pathname === '/api/handoff/discard') return handleHandoffDiscard(req, res, { sid, ip });
@@ -203,7 +223,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
-      ...(session.deviceHash ? { loadStartupCard: artifacts.startupCard } : {}),
+      ...(session.deviceHash ? { loadStartupCard: artifacts.startupCard, mountCardMap: (spec, select) => mountCardMap(session.deviceHash, spec, select) } : {}),
       vision: devices.vision,
       briefing: devices.briefing,
       computer: withResearchAttach(devices.computer, research),

@@ -11,6 +11,7 @@ export function createCanvasBus({ ring = RING } = {}) {
   const ready = new Map(); // id -> ready event, insertion order = oldest first
   // Round 12 (critic r11 defect 2): the conversation / voice session / Claude session that wrote an id first owns it. Kept
   // here, never in the events (an owner key names a login session).
+  const audiences = new WeakMap();
   const owners = new Map(); // id -> owner
   let seq = 0;
   let lastAt = 0;
@@ -20,9 +21,10 @@ export function createCanvasBus({ ring = RING } = {}) {
      * event: {phase, id, kind?, title?, spec?, by, provider?, message?}. Stamps type, `at` (epoch ms, strictly
      * increasing so id + at dedupes) and the SSE sequence number. Returns the stamped event.
      */
-    publish(partial, { owner } = {}) {
+    publish(partial, { owner, audience } = {}) {
       lastAt = Math.max(Date.now(), lastAt + 1);
       const event = { type: 'canvas', ...partial, at: lastAt };
+      if (audience) audiences.set(event, audience);
       for (const key of Object.keys(event)) if (event[key] === undefined) delete event[key];
       seq += 1;
       entries.push({ seq, event });
@@ -64,9 +66,11 @@ export function createCanvasBus({ ring = RING } = {}) {
       return entries.filter((e) => e.seq > sinceSeq);
     },
 
+    visible(event, audience) { return !audiences.has(event) || audiences.get(event) === audience; },
+
     /** Latest ready event per id, newest first, at most 20. */
-    latest() {
-      return [...ready.values()].reverse();
+    latest(audience) {
+      return [...ready.values()].filter(event => this.visible(event, audience)).reverse();
     },
 
     get seq() { return seq; },

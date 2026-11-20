@@ -62,7 +62,10 @@ const vbLerp = (a: VB, b: VB, t: number): VB => [0, 1, 2, 3].map((i) => a[i] + (
 
 /** `vb` = the part of the scene on screen (see view.ts); the svg always fills `box`. A changed `vb` animates (auto-fit
  *  on updates, zoom buttons) unless `instant` (pinch, wheel, drag); a new canvas id snaps to its view. */
-function Stage({ scene, canvasId, vb, box, instant = false }: { scene: Scene; canvasId: string; vb: VB; box: { w: number; h: number }; instant?: boolean }) {
+function Stage({ scene, canvasId, vb, box, instant = false, branches, onBranch }: {
+  scene: Scene; canvasId: string; vb: VB; box: { w: number; h: number }; instant?: boolean;
+  branches?: string[]; onBranch?: (id: string) => void;
+}) {
   const svgRef = useRef<SVGSVGElement>(null);
   const liveVb = useRef<{ id: string; vb: VB } | null>(null);
   const vbRaf = useRef(0);
@@ -160,10 +163,19 @@ function Stage({ scene, canvasId, vb, box, instant = false }: { scene: Scene; ca
 
   const shownVb = liveVb.current?.id === canvasId ? liveVb.current.vb : vb;
   return (
-    <svg ref={svgRef} className="cv-svg" width={box.w} height={box.h} viewBox={shownVb.join(' ')} role="img" aria-hidden="true">
+    <svg ref={svgRef} className="cv-svg" width={box.w} height={box.h} viewBox={shownVb.join(' ')} role={branches ? 'group' : 'img'} aria-label={branches ? 'Zweige der Mindmap' : undefined} aria-hidden={branches ? undefined : true}>
       <defs dangerouslySetInnerHTML={{ __html: GLOW_FILTER }} />
       <g key={canvasId}>
-        {prims.map((p) => <PrimEl key={p.key} p={p} enter={!entering || entering.has(p.key)} reg={reg} />)}
+        {prims.map((p) => {
+          const shape = <PrimEl key={p.key} p={p} enter={!entering || entering.has(p.key)} reg={reg} />;
+          const id = p.key.startsWith('n:') ? p.key.split(':')[1] : '';
+          if (!branches?.includes(id)) return shape;
+          if (p.t !== 'rect') return <g key={p.key} pointerEvents="none">{shape}</g>;
+          return <g key={p.key} className="cv-card-branch" role="button" tabIndex={0} aria-label={p.title}
+            onClick={() => onBranch?.(id)} onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBranch?.(id); }
+            }}>{shape}</g>;
+        })}
         {ghosts.map((p) => <PrimEl key={p.key} p={p} enter={false} exit reg={() => {}} />)}
       </g>
     </svg>

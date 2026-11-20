@@ -114,6 +114,9 @@ export function createXai(opts, emit) {
       if (prev) send({ type: 'conversation.item.delete', event_id: `screen-del-${screenSeq}`, item_id: prev });
       return 'sent';
     },
+    setCardContext: (text) => {
+      send({ type: 'conversation.item.create', event_id: 'screen-startup-card', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: fit(text, 'card') }] } });
+    },
     /** Start briefing: one conversation item of its own (replaced by id), never response.create; errors carry the screen- prefix, so they stay soft. */
     setBriefing: (text) => {
       const prev = briefId;

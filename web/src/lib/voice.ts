@@ -73,6 +73,11 @@ export class VoiceSession {
   private switching: Promise<boolean> | null = null;
   private ready = false;
   private startMessage: (() => unknown) | null = null;
+  private earlyAudio: ArrayBuffer[] = [];
+  private earlyMic: ArrayBuffer[] = [];
+  private localVoice: SpeechSynthesisVoice | undefined;
+  private openingModule: Promise<typeof import('./cardOpening') | null> | undefined;
+  private stopOpening: (() => void) | null = null;
   private closed = false;
   private decay = 0;
   private onset = new SpeechOnset();
@@ -105,10 +110,18 @@ export class VoiceSession {
     this.gate.muted = this.startMuted;
     voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null }));
     this.set('connecting', '');
-    // Capture the selection at start; changes during connection also belong to the next session.
-    try { this.startMessage = await (await import('./voiceStart')).prepareVoiceStart(this.opt, this.page, this.startupCard); }
-    catch { this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.'); return; }
-    if (this.closed) return;
+    const startMessage = import('./voiceStart').then(m => m.prepareVoiceStart(this.opt, this.page, this.startupCard)).catch(() => {
+      if (!this.closed) this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.');
+      return null;
+    });
+    if (this.startupCard) {
+      this.localVoice = globalThis.speechSynthesis?.getVoices().find(voice => voice.localService && /^de(?:-|$)/i.test(voice.lang));
+      if (this.localVoice) this.openingModule = import('./cardOpening').catch(() => null);
+      this.connect(startMessage);
+    } else {
+      this.startMessage = await startMessage;
+      if (this.closed || !this.startMessage) return;
+    }
     try {
       this.stream = await this.openMic();
       this.gate.applyTracks();
@@ -119,9 +132,11 @@ export class VoiceSession {
       return;
     }
     if (this.closed) return this.cleanup();
-    await this.setupAudio();
+    try { await this.setupAudio(); }
+    catch { this.fail('Audio konnte nicht gestartet werden. Bitte erneut versuchen.'); return; }
     if (this.closed) return this.cleanup();
-    this.connect();
+    for (const pcm of this.earlyAudio.splice(0)) this.play(pcm);
+    if (!this.startupCard) this.connect();
   }
 
   private async setupAudio() {
@@ -143,6 +158,11 @@ export class VoiceSession {
       levels.mic = this.gate.muted ? 0 : Math.min(1, e.data.rms * 4);
       this.watchOnset();
       const ws = this.ws;
+      if (this.stopOpening) return; // isolated local speaker output never goes to the vendor as user speech
+      if (!this.ready && this.startupCard && !this.gate.muted && !companionMuted()) {
+        this.earlyMic.push(e.data.pcm);
+        if (this.earlyMic.length > 100) this.earlyMic.shift(); // two seconds, only until the provider gets ready
+      }
       this.gate.frame(e.data.pcm, !companionMuted() && this.ready && ws?.readyState === WebSocket.OPEN, (pcm) => ws!.send(pcm));
     };
     src.connect(this.mic);
@@ -161,7 +181,7 @@ export class VoiceSession {
     if (ctx.state === 'suspended') await ctx.resume();
   }
 
-  private connect() {
+  private connect(startMessage?: Promise<(() => unknown) | null>) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const q = new URLSearchParams({ provider: this.opt.provider });
     if (this.opt.variant) q.set('variant', this.opt.variant);
@@ -169,18 +189,23 @@ export class VoiceSession {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ ...(this.startMessage!() as object), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
+    const sendStart = (message: (() => unknown) | null) => {
+      if (!message || this.closed || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ ...(message() as object), ...(this.localVoice ? { localCardOpening: true } : {}), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
       this.event('ws.open', {});
       this.flushEvents();
       this.unwatchFocus?.();
       this.unwatchFocus = watchFocusedCanvas((id) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'focus', focusedCanvasId: id })); });
     };
+    ws.onopen = () => {
+      if (startMessage) void startMessage.then(sendStart);
+      else sendStart(this.startMessage);
+    };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
-        this.cursor.audio(e.data.byteLength); // before the transfer detaches the buffer
-        this.player?.port.postMessage(e.data, [e.data]);
+        if (this.player) this.play(e.data);
+        else if (this.earlyAudio.length < 100) this.earlyAudio.push(e.data);
         return;
       }
       let m: VoiceServerMsg;
@@ -198,14 +223,51 @@ export class VoiceSession {
     ws.onclose = (e) => { this.event('ws.close', { code: e.code }); this.onGone(); };
   }
 
+  private play(pcm: ArrayBuffer) {
+    this.cursor.audio(pcm.byteLength);
+    this.player?.port.postMessage(pcm, [pcm]);
+  }
+
+  private async speakOpening(text: string) {
+    const deadline = performance.now() + 250;
+    const speech = await this.openingModule;
+    if (this.closed) return;
+    if (!speech || !this.localVoice || !text || this.stopOpening || performance.now() > deadline) {
+      this.sendJson({ type: 'card_opening_result', playing: false });
+      return;
+    }
+    this.earlyMic = [];
+    this.stopOpening = speech.speakCardOpening(this.localVoice, text, () => {
+      this.sendJson({ type: 'card_opening_result', playing: true });
+      this.event('card.opening.audio', { local: true });
+      this.set('speaking');
+      this.h.onTranscript('assistant', text, true, false, false, false, { quiet: true });
+    }, (played) => {
+      this.stopOpening = null;
+      if (this.closed) return;
+      if (!played) this.sendJson({ type: 'card_opening_result', playing: false });
+      else {
+        this.sendJson({ type: 'card_opening_end' });
+        this.set(this.ready ? 'listening' : 'connecting');
+      }
+    });
+  }
+
   private handle(m: VoiceServerMsg) {
     switch (m.type) {
+      case 'card_opening':
+        void this.speakOpening(m.text);
+        break;
       case 'ready':
         this.reachedReady = true;
         this.ready = true;
         this.cursor.start();
         voiceStore.set((s) => ({ ...s, readyAt: Date.now() })); // the session timer in the dock runs from here, like the billing clock
-        this.set('listening', m.model);
+        this.set(this.stopOpening ? voiceStore.get().state : 'listening', m.model);
+        const frames = this.earlyMic.splice(0);
+        if (!this.stopOpening && !this.gate.muted && !companionMuted() && this.ws?.readyState === WebSocket.OPEN) {
+          for (const frame of frames) this.ws.send(frame);
+        }
         if (this.gate.muted) this.sendJson({ type: 'mute', muted: true, source: 'dock' });
         break;
       case 'session':
@@ -408,6 +470,7 @@ export class VoiceSession {
   }
 
   interrupt() {
+    this.stopOpening?.();
     this.player?.port.postMessage('flush');
     this.cursor.reset();
     levels.speaker = 0;
@@ -431,6 +494,9 @@ export class VoiceSession {
   }
 
   private cleanup() {
+    this.stopOpening?.();
+    this.earlyAudio = [];
+    this.earlyMic = [];
     this.ready = false;
     this.cursor.stop();
     this.gate.reset();

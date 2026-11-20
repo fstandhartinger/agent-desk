@@ -1,6 +1,7 @@
-import LiveCanvasPanel from '../../canvas/LiveCanvasPanel';
+import { lazy, Suspense } from 'react';
 
-// The Canvas tab shows the generative canvas (docs/CANVAS.md); the tool activity is a slim strip below it.
+const LiveCanvasPanel = lazy(() => import('../../canvas/LiveCanvasPanel'));
+
 export default function CanvasTab() {
-  return <LiveCanvasPanel />;
+  return <Suspense fallback={null}><LiveCanvasPanel /></Suspense>;
 }
