@@ -199,6 +199,8 @@ test('scheduled voice rollover waits for an active computer run to finish', (t) 
   t.mock.timers.tick(HARD_CAP_MS);
   assert.ok(!types(h).includes('closed'));
   active = null;
-  t.mock.timers.tick(1000);
+  h.emit({ t: 'turn_done' });
+  assert.ok(!types(h).includes('closed'), 'the final report gets time to start');
+  h.emit({ t: 'turn_done' });
   assert.ok(types(h).includes('closed'));
 });

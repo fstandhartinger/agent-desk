@@ -984,16 +984,30 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   }
 
   /** At the cap (or a vendor's go-away): hand over once nothing is running, at the latest after CAP_GRACE_MS; a silent session just ends. */
+  let capWaitTimer = null, capWaitedForComputer = false;
+  function scheduleRolloverCheck() {
+    if (capWaitTimer) return;
+    capWaitTimer = setTimeout(() => { capWaitTimer = null; maybeRollover(); }, 1000);
+    capWaitTimer.unref?.();
+  }
+
   function maybeRollover() {
     const reason = capReason;
     if (closed || rolledOver || !capDue) return;
     const computerRun = reason === 'hard-cap' && deps.computer?.runOf?.(sid);
     if (computerRun && !computerRun.paused) {
-      setTimeout(() => maybeRollover(), 1000).unref?.();
+      capWaitedForComputer = true;
+      scheduleRolloverCheck();
+      return;
+    }
+    if (capWaitedForComputer) {
+      capWaitedForComputer = false;
+      capDue = now();
+      scheduleRolloverCheck(); // give the run's final spoken report time to begin
       return;
     }
     const busy = responding || responseOpen || runningTools > 0 || (turn.role === 'assistant' && turn.text.trim());
-    if (busy && now() - capDue < CAP_GRACE_MS) { setTimeout(() => maybeRollover(), 1000).unref?.(); return; }
+    if (busy && now() - capDue < CAP_GRACE_MS) { scheduleRolloverCheck(); return; }
     if (!mayRollOver()) {
       trace.event('session.rollover_skipped', { reason, idleS: Math.round((now() - lastHisAt) / 1000) });
       sendJson({ type: 'notice', code: 'cap-end', message: reason === 'go-away' ? 'Die Sprachsitzung ist beendet (das Sprachmodell hat die Verbindung erneuert, und es wurde länger nichts gesagt).' : 'Die Sprachsitzung ist nach 30 Minuten beendet (in den letzten 10 Minuten wurde nichts gesagt).' });
@@ -1022,6 +1036,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     clearTimeout(siblingTimer);
     clearInterval(tickTimer);
     clearTimeout(capTimer);
+    clearTimeout(capWaitTimer);
     clearTimeout(warnTimer);
     clearInterval(memoryTimer);
     clearTimeout(audioRun.timer);
