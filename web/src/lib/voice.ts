@@ -91,7 +91,10 @@ export class VoiceSession {
     this.event(muted ? 'mute' : 'unmute', { source });
   });
 
-  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers, private startMuted = false) {}
+  constructor(private opt: VoiceOption, private page: PageContext | undefined, private h: VoiceHandlers, private startMuted = false, private startupCard?: string) {}
+
+  get wasReady() { return this.reachedReady; }
+  private reachedReady = false;
 
   private set(state: VoiceState, model?: string) {
     voiceStore.set((s) => ({ ...s, state, active: this.opt.key, model: model ?? s.model, error: state === 'error' ? s.error : null, activity: state === 'idle' ? null : s.activity }));
@@ -103,7 +106,7 @@ export class VoiceSession {
     voiceStore.set((s) => ({ ...s, muted: this.startMuted, aid: null, serverNotice: null, activity: null, readyAt: null, usage: null }));
     this.set('connecting', '');
     // Capture the selection at start; changes during connection also belong to the next session.
-    try { this.startMessage = await (await import('./voiceStart')).prepareVoiceStart(this.opt, this.page); }
+    try { this.startMessage = await (await import('./voiceStart')).prepareVoiceStart(this.opt, this.page, this.startupCard); }
     catch { this.fail('Sprachsitzung konnte nicht geladen werden. Bitte erneut versuchen.'); return; }
     if (this.closed) return;
     try {
@@ -198,6 +201,7 @@ export class VoiceSession {
   private handle(m: VoiceServerMsg) {
     switch (m.type) {
       case 'ready':
+        this.reachedReady = true;
         this.ready = true;
         this.cursor.start();
         voiceStore.set((s) => ({ ...s, readyAt: Date.now() })); // the session timer in the dock runs from here, like the billing clock

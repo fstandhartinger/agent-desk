@@ -15,7 +15,7 @@ export default function Companion() {
     const message = (event: MessageEvent) => {
       const m = event.data as { type?: unknown; on?: unknown } | null;
       if (m?.type === 'mute' && typeof m.on === 'boolean') setVoiceMuted(m.on, 'hotkey'); // Screen Agent's global hotkey: same switch as the dock
-      handleNativeMessage(event.data, host, setIds, { start(provider) { if (provider) setVoiceOption(provider); if (['idle', 'error'].includes(voiceStore.get().state)) startVoice(); }, stop: stopVoice, state: () => voiceStore.get().state });
+      handleNativeMessage(event.data, host, setIds, { start(provider, startupCard) { if (provider) setVoiceOption(provider); if (['idle', 'error'].includes(voiceStore.get().state)) startVoice(startupCard); }, stop: stopVoice, state: () => voiceStore.get().state });
     };
     const unsubscribe = voiceStore.subscribe(() => voiceAck(host, voiceStore.get().state));
     let lastMuted = voiceStore.get().muted;

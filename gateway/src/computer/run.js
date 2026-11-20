@@ -8,13 +8,13 @@ import { artifactData } from '../artifacts.js';
 import { deviceError } from '../deviceMedia.js';
 import { limits as defaultLimits } from '../limits.js';
 import { ABOUT } from '../voiceActions.js';
-import { askInstruction, ASK_MS, buildAsk, isGoWord, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
+import { askInstruction, ASK_MS, buildAsk, isGoWord, isResumeDirective, mapAnswer, MAX_ASKS, MAX_EXPIRIES, parseAnswer, saidExactly, SAY_WAIT_MS } from './confirm.js';
 import { isStopWord, isTrigger, looksLikeHost, scopeWordsOf } from './gate.js';
 import { unrestricted, UNRESTRICTED_ACTIONS, UNRESTRICTED_RUN_MS } from './mode.js';
 import { clientHasV2, goalForTrace, openrouterComplete, runLoop, toWire, waitMsFor } from './loop.js';
 import { serverRead } from './serverRead.js';
 
-export const BEAT_MS = 5000, BEAT_DEAD_MS = 15_000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, STEP_REPORT = 25, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
+export const BEAT_MS = 5000, BEAT_DEAD_MS = 15_000, RUN_MS = 10 * 60_000, MAX_ACTIONS = 150, IDLE_MS = 60_000, GUARD_MS = 5 * 60_000;
 export const MAX_QUESTIONS = 3, ANSWER_MS = 60_000, GOAL_CHARS = 1000;
 export const STEER_KEEP = 40, STEER_CHARS = 1500; // his sentences during an unrestricted run that every model request repeats
 export const RESULT_CODES = ['done', 'refused', 'needs-confirm', 'stale-ref', 'killed', 'handson', 'unclear', 'no-run', 'denied'];
@@ -90,7 +90,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   function makeRun(sid, s, { text, goalArg, scopeWords, turn = null, said = '' }) {
     const R = {
       sid, run: hex('r'), startedAt: now(), goalText: String(text).slice(0, GOAL_CHARS), scopeWords, actions: 0, cost: 0, seq: 0, asks: 0, expiries: 0, questions: 0,
-      ended: false, why: null, paused: false, awaitingGo: false, stepLimit: unrestricted() ? Infinity : STEP_REPORT, pending: null, answer: null, inflight: 0, lastActivity: now(), appBeatAt: now(), nextBeat: now() + BEAT_MS,
+      ended: false, why: null, paused: false, inputGeneration: 0, pending: null, answer: null, inflight: 0, lastActivity: now(), appBeatAt: now(), nextBeat: now() + BEAT_MS,
       note: null, extTurn: null, waiters: [], abort: new AbortController(), tools: {}, model: cfg.computerModel(), signal: null,
     };
     R.signal = R.abort.signal;
@@ -119,17 +119,9 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.addCost = (usd) => { if (Number.isFinite(usd) && usd > 0) { R.cost += usd; addDay(usd); limits.addCost?.(usd); } };
     R.takeNote = () => { const n = [R.note, R.steerNote].filter(Boolean).join('\n') || null; R.note = null; R.steerNote = null; return n; };
 
-    /** Before each model turn: waits while hands-on, and after 25 steps builds the report and waits for a new spoken final. */
+    // Physical input takes precedence. Routine action counts never require a spoken checkpoint.
     R.gate = async () => {
-      if (R.ended) return false;
-      if (R.paused) await waitFor(() => !R.paused);
-      if (!R.ended && R.actions >= R.stepLimit && R.actions < MAX_ACTIONS) {
-        const used = Object.entries(R.tools).map(([t, n]) => `${n}× ${t}`).join(', ');
-        R.awaitingGo = true;
-        ev('computer.report', { run: R.run, actions: R.actions, tools: { ...R.tools } });
-        s.say?.(`[Hinweis vom Desk, nicht von Florian: Der Computer-Lauf hat ${R.actions} Schritte gemacht (${used}) und wartet. Sage Florian in einem Satz den Stand und frage, ob es weitergehen soll. Nichts anderes tun.]`);
-        await waitFor(() => !R.awaitingGo);
-      }
+      if (!R.ended && R.paused) await waitFor(() => !R.paused);
       return !R.ended;
     };
 
@@ -174,6 +166,9 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       if (res.code === 'no-run') { R.end('app-no-run'); return res; }
       if (res.run_state === 'handson' || res.code === 'handson') { markHandsOn(R); return res; }
       if (res.code === 'needs-confirm') return confirmFlow(R, s, id, res);
+      if (res.rule === 'step-report' && !unrestricted() && await resume(R)) {
+        return { ok: false, code: 'stale-ref', rule: 'step-report', note: 'Hole einen frischen Stand und führe den ausstehenden Schritt aus.' };
+      }
       return res;
     };
 
@@ -198,8 +193,8 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
 
     // F7: only the fixed forms (confirm.js buildAsk); his answer is mapped to ja / nein / one of the loop's options, never passed on as words.
     R.ask = async (args) => {
-      const a = buildAsk(args);
-      if (!a.ok) { ev('computer.refused', { run: R.run, rule: a.rule }); return { ok: false, code: 'refused', rule: a.rule, note: a.rule === 'ask-secret' ? 'Fragen nach Passwörtern, Codes, PINs, TANs, Schlüsseln oder Zahlen sind nicht erlaubt.' : 'Erlaubt sind nur form=yesno mit topic und form=choice mit 2 bis 4 options.' }; }
+      const a = buildAsk(args, { doer: unrestricted() });
+      if (!a.ok) { ev('computer.refused', { run: R.run, rule: a.rule }); return { ok: false, code: 'refused', rule: a.rule, note: a.rule === 'routine-question' ? 'Arbeite ohne Zwischenfreigabe weiter. Kläre nur einen konkreten zulässigen Grund.' : a.rule === 'ask-secret' ? 'Fragen nach Passwörtern, Codes, PINs, TANs, Schlüsseln oder Zahlen sind nicht erlaubt.' : 'Erlaubt sind nur form=yesno mit topic und form=choice mit 2 bis 4 options.' }; }
       if (R.questions >= MAX_QUESTIONS) return { ok: false, code: 'refused', rule: 'ask-cap', note: 'Mehr als drei Fragen pro Lauf gibt es nicht.' };
       R.questions += 1;
       ev('computer.ask', { run: R.run, form: a.form, chars: a.spoken.length });
@@ -217,6 +212,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
   function markHandsOn(R) {
     if (R.paused) return;
     R.paused = true;
+    R.inputGeneration += 1;
     R.ev('computer.handson', { run: R.run });
   }
 
@@ -302,10 +298,12 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       a.resolve(m.kind === 'unclear' ? { ok: false, code: 'unclear', note: 'Florians Antwort war nicht eindeutig.' } : { ok: true, code: 'done', result: { antwort: m.kind === 'yes' ? 'ja' : m.kind === 'no' ? 'nein' : m.option } });
       return;
     }
-    if (R.paused || R.awaitingGo) { // B/N2: only a positive go phrase without a negation resumes (the app is told with the `resume` op, no scope); at the step stop "nein" or a stop word ends the run
-      if (R.awaitingGo && (parseAnswer(text).kind === 'no' || isStopWord(text))) { R.ev('computer.step.no', { run: R.run, chars: text.length }); R.end('voice-stop'); return; }
-      if (!isGoWord(text)) { R.ev('computer.resume.ignored', { run: R.run, chars: text.length, after: R.awaitingGo ? 'step-report' : 'handson' }); return; }
-      resume(R);
+    if (R.paused) {
+      if (!isGoWord(text) && !(unrestricted() && isResumeDirective(text))) {
+        R.ev('computer.resume.ignored', { run: R.run, chars: text.length, after: 'handson' });
+        return;
+      }
+      void resume(R);
       return;
     }
     if (!unrestricted() && e.turn !== R.extTurn && isTrigger(text) && !ABOUT.test(text)) extend(R, e);
@@ -315,12 +313,17 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     R.resuming = true;
     try {
       const res = await vision.computerSend(R.sid, { id: hex('c'), run: R.run, seq: ++R.seq, op: 'resume' }, { waitMs: 5000, validate: validateResult });
-      R.ev('computer.resume', { run: R.run, ok: res.ok, code: res.code, after: R.paused ? 'handson' : 'step-report' });
+      R.ev('computer.resume', { run: R.run, ok: res.ok, code: res.code, after: R.paused ? 'handson' : 'legacy-checkpoint' });
       if (!res.ok || R.ended) return; // the app said no: the pause stays, he can say it again
       R.resumedAt = now();
-      if (R.paused) { R.paused = false; R.note = 'Die Hands-on-Pause ist vorbei. ALLE Referenzen sind ungültig: hole zuerst einen neuen Stand (ui_tree oder chrome_snapshot).'; }
-      else { R.awaitingGo = false; R.stepLimit = Math.min(MAX_ACTIONS, R.actions + STEP_REPORT); R.note = 'Florian hat gesagt, dass es weitergehen soll.'; }
+      R.touch();
+      R.paused = false;
+      R.note = 'Die Hands-on-Pause ist vorbei. ALLE Referenzen sind ungültig: hole zuerst einen neuen Stand (ui_tree oder chrome_snapshot).';
       R.waiters.splice(0).forEach((f) => f());
+      return true;
+    } catch {
+      R.ev('computer.resume', { run: R.run, ok: false, code: 'unreachable' });
+      return false;
     } finally { R.resuming = false; }
   }
   /**
@@ -380,7 +383,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
       if (P?.state === 'saying' && t - P.at > SAY_WAIT_MS) P.deferred.resolve({ kind: 'void', reason: 'no-speech' });
       else if (P?.state === 'asked' && t > P.expires) P.deferred.resolve({ kind: 'expired' });
       if (R.answer && t > R.answerDue) { const a = R.answer; R.answer = null; a.resolve({ ok: false, code: 'unclear', note: 'Florian hat nicht geantwortet' }); }
-      if (!R.inflight && !R.pending && !R.answer && t - R.lastActivity > IDLE_MS) R.end('idle');
+      if (!R.paused && !R.inflight && !R.pending && !R.answer && t - R.lastActivity > IDLE_MS) R.end('idle');
     }
     idleTimer();
   }
@@ -436,7 +439,7 @@ export function createComputer({ vision, hub, limits = defaultLimits, now = Date
     }
     go();
     if (res.result === NOTHING_NAMED) return { ok: true, text: 'Die Computer-Steuerung läuft, aber Florians Satz nennt keine Seite und kein Programm: so darf sie nur lesen, nichts klicken und nichts tippen. Sag ihm das in einem Satz: für einen Klick soll er das Wort "hier" oder den Namen der Seite mitsagen. Sprich ihm keinen ganzen Befehl vor.' };
-    return { ok: true, text: 'Die Computer-Steuerung läuft. Auf dem Bildschirm steht ein lila Rahmen; Strg+Win+Umschalt+X stoppt sofort. Sag nur einen kurzen Satz, zum Beispiel dass du anfängst; die Rückmeldung kommt, wenn der Lauf fertig ist.' };
+    return { ok: true, text: 'Die Computer-Steuerung läuft. Warte auf das Ergebnis und sprich erst dann.' };
   }
 
   /** The two voice action tools need the app confirm during a run and for 5 minutes after it. */

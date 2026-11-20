@@ -296,21 +296,13 @@ test('ask_florian: secrets are refused, the answer is data, and it can never sat
 });
 
 // ---- caps ----
-test('caps: 150 actions end the run; the 25-step report waits for a new spoken final and then goes on', async () => {
-  const h = setup({ script: Array.from({ length: 200 }, (_, i) => call('ui_windows', {})), app: () => ok(), costUsd: 0.0001 });
+test('caps: 150 actions end the run without asking at intermediate action counts', async () => {
+  const h = setup({ script: Array.from({ length: 200 }, () => call('ui_windows', {})), app: () => ok(), costUsd: 0.0001 });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
-  for (let seg = 1; seg <= 5; seg += 1) {
-    await until(() => h.session.events.filter((e) => e.type === 'computer.report').length >= seg);
-    assert.equal(h.vision.ofOp('action').length, seg * 25);
-    await flush();
-    assert.equal(h.vision.ofOp('action').length, seg * 25, 'waiting: nothing happens without a new final');
-    assert.match(h.session.said.at(-1), /Schritte gemacht/);
-    h.clock.t += 1000; h.computer.runOf('s1').appBeatAt = h.clock.t;
-    say(h, 'Ja, mach weiter.');
-  }
   await until(() => ended(h));
   assert.equal(stopReason(h), 'actions');
   assert.equal(h.vision.ofOp('action').length, MAX_ACTIONS);
+  assert.equal(h.session.said.length, 1, 'only the final status is spoken');
 });
 
 test('caps: 10 minutes, USD 1.50 per run, USD 5 per day', async () => {
@@ -372,11 +364,15 @@ test('heartbeat: bad bodies, a foreign device and a stale run id are refused; ki
   assert.ok(h.session.events.some((e) => e.type === 'computer.kill' && e.via === 'app'));
 });
 
-test('life: idle 60 s, the voice handle gone, a spoken stop word on a partial', async () => {
-  let h = setup({ script: [call('ui_click', { ref: 'e1' }), call('ui_windows', {})], app: (w) => (w.op === 'action' ? { ok: false, code: 'handson', run_state: 'handson' } : { ok: true, code: 'done' }) });
+test('life: a real idle 60 s, the voice handle gone, a spoken stop word on a partial', async () => {
+  let h = setup({ script: [call('ui_click', { ref: 'e1' })], app: w => w.op === 'action' ? { ok: false, code: 'handson', run_state: 'handson' } : ok() });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
-  await until(() => h.session.events.some((e) => e.type === 'computer.handson'));
-  h.clock.t += IDLE_MS + 1000; h.computer.runOf('s1').appBeatAt = h.clock.t; h.computer.tick();
+  await until(() => h.computer.runOf('s1')?.paused);
+  const idleRun = h.computer.runOf('s1');
+  idleRun.paused = false; // simulate a run without an action or a model request in flight
+  h.clock.t += IDLE_MS + 1000;
+  idleRun.appBeatAt = h.clock.t;
+  h.computer.tick();
   assert.equal(stopReason(h), 'idle');
 
   h = setup({ script: [call('ui_windows', {})], app: (w) => (w.op === 'action' ? new Promise(() => {}) : { ok: true, code: 'done' }) });
@@ -556,4 +552,31 @@ test('activity labels are built by the gateway from app results: quoted, strippe
   assert.match(done.label, /^Computer: klicke »[\p{L}\p{N} ]{1,40}«$/u);
   assert.ok(!/[<>"]/.test(done.label));
   assert.equal(h.session.activities[0].label, 'Computer: klicke');
+});
+
+test('unrestricted hands-on replay: retains the task past idle and resumes on a concrete spoken directive', async (t) => {
+  const prior = process.env.DESK_COMPUTER_GUARDS;
+  process.env.DESK_COMPUTER_GUARDS = 'off';
+  t.after(() => { if (prior === undefined) delete process.env.DESK_COMPUTER_GUARDS; else process.env.DESK_COMPUTER_GUARDS = prior; });
+  let actions = 0;
+  const h = setup({
+    script: [call('ui_windows'), call('ui_windows'), call('done', { summary: 'Finished' })],
+    app: w => w.op === 'action' && ++actions === 1 ? { ok: false, code: 'handson', run_state: 'handson' } : ok(),
+  });
+  await h.computer.begin('s1', { text: GOAL, goalArg: '' });
+  await until(() => h.session.events.some(e => e.type === 'computer.handson'));
+  const run = h.computer.runOf('s1').run;
+  for (let i = 0; i < 13; i++) {
+    h.clock.t += 5000;
+    h.computer.beat('s1', { deviceId: 'dev1' }, { run, state: 'handson' });
+    h.computer.tick();
+  }
+  assert.equal(h.session.said.length, 0);
+  assert.equal(h.computer.runOf('s1').run, run);
+  say(h, 'Mach weiter. Warte kurz.');
+  assert.equal(h.vision.ofOp('resume').length, 0);
+  say(h, 'Nein, dafür keinen neuen Job starten. Du sollst einfach weitermachen, wo du vorhin warst. Öffne die Einstellung und so weiter.');
+  await until(() => ended(h));
+  assert.equal(stopReason(h), 'done');
+  assert.equal(h.vision.ofOp('resume').length, 1);
 });

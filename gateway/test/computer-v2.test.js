@@ -305,13 +305,14 @@ test('steering: a correction during a hands-on pause or while a question to him 
   assert.ok(pending.length < 3500 && (pending.match(/Florian hat gerade gesprochen/g) ?? []).length === 1, 'a growing sentence replaces its alert, the pause note stays');
   h.computer.userFinal('s1', { text: 'mach weiter', turn: 3, at: 99 });
   // a question to him is open: his sentence is no clear yes/no, the loop still gets his words
-  const answer = R.ask({ form: 'yesno', topic: 'die Mail senden' });
+  const answer = R.ask({ form: 'yesno', reason: 'unnamed-recipient', topic: 'die Mail an die Buchhaltung senden' });
   h.computer.userFinal('s1', { text: 'Nimm den Entwurf von gestern.', turn: 4, at: 3 });
   assert.equal((await answer).code, 'unclear');
   assert.ok(R.spokenSince().includes('Nimm den Entwurf von gestern.'));
   b.release();
   await until(h.ended);
   assert.ok(goalMessage(h.calls[1]).includes('Aber noch nicht senden.') && goalMessage(h.calls[1]).includes('Nimm den Entwurf von gestern.'));
+  assert.ok(h.session.events.some(e => e.type === 'computer.model.stale_after_input'));
 });
 
 test('steering: sentences the loop has not read are never dropped, a long sentence keeps its end, and an overflow ends the run instead of forgetting', async () => {

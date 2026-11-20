@@ -44,6 +44,20 @@ const GO = new RegExp(`^(?:${FILL} )*(?:mach(?: ${FILL})* weiter|weiter ?machen|
 const NEGATION = /(?:^| )(?:nein|nee|nö|no|nicht|kein\p{L}*|nie|niemals|ohne|stopp?\p{L}*|halt|warte\p{L}*|moment|abbrech\p{L}*|abbruch|aufhör\p{L}*|lass|bloß|später|don|never|ich|selber|selbst|wir)(?= |$)/u;
 export const isGoWord = (text) => { const t = norm(text); return t.split(' ').length <= 4 && GO.test(t) && !NEGATION.test(t); };
 
+// A natural instruction can resume after physical takeover, but a question, bare assent or negation cannot.
+const RESUME = /^(?:(?:bitte|jetzt|einfach|ruhig|dann|ja|okay|also) )*(?:(?:du (?:sollst|kannst) (?:bitte |jetzt |einfach |ruhig )*|bitte )(?:da |damit )?(?:weiter ?machen|fortfahren|fortsetzen)|mach (?:bitte |jetzt |einfach |ruhig |da |damit )*weiter|fahr(?:e)? (?:bitte |jetzt |einfach |ruhig |damit )*fort|continue (?:with|where)|keep going with)(?: |$)/;
+export function isResumeDirective(text) {
+  const clauses = String(text).match(/[^.!?]+[.!?]?/g) ?? [];
+  let resume = false;
+  for (const clause of clauses) {
+    const text = norm(clause);
+    if (/^(?:nein|warte|halt|stopp?)\b|\b(?:nicht|nie) weiter\w*/u.test(text)) resume = false;
+    else if (!clause.includes('?') && RESUME.test(text) && !NEGATION.test(text)) resume = true;
+  }
+  return resume;
+
+}
+
 const DIGIT = { null: '0', zero: '0', eins: '1', ein: '1', eine: '1', zwei: '2', zwo: '2', drei: '3', vier: '4', fünf: '5', fuenf: '5', sechs: '6', sieben: '7', acht: '8', neun: '9' };
 const NO = /^(?:nein|no|nee|nö|stopp?|abbrechen|abbruch|nicht|lass das|bloß nicht|halt)\b/;
 
@@ -77,8 +91,15 @@ const ASK_CHARS = /^[\p{L}\p{N} .,;:!'"„“()/+&-]{1,100}$/u;
 const secretish = (t) => FORBIDDEN_ASK.test(t) || SPELLED.test(t) || LETTERS.test(t) || (t.match(/\d/g)?.length ?? 0) > 3 || !ASK_CHARS.test(t);
 
 /** {ok:true, form, spoken, options} | {ok:false, rule}: the question the voice model is told to read, built from the fixed forms only. */
-export function buildAsk({ form, topic, options } = {}) {
+export const ASK_REASONS = ['payment', 'identity', 'irreversible-delete', 'unnamed-recipient', 'contradictory-evidence'];
+const CONTINUE_ASK = /(?:^|\s)(?:weiter(?:\s*machen|\s*arbeiten|\s*gehen|\s*führen)?|fortfahren|fortsetzen|continue|proceed|keep going|go on)[.!?\s]*$/i;
+export function buildAsk({ form, topic, options, reason } = {}, { doer = false } = {}) {
   const t = typeof topic === 'string' ? topic.replace(/\s+/g, ' ').trim() : '';
+  if (doer && (!ASK_REASONS.includes(reason) || [t, ...(Array.isArray(options) ? options : [])].some(v => typeof v === 'string' && CONTINUE_ASK.test(v))))
+    return { ok: false, rule: 'routine-question' };
+  if (doer && reason === 'identity' && form === 'yesno') {
+    return { ok: true, form, options: [], spoken: 'Bitte schließe die Identitätsprüfung selbst ab und sag danach ja.' };
+  }
   if (form === 'yesno') {
     if (!t || t.length > 80) return { ok: false, rule: 'ask-form' };
     if (secretish(t)) return { ok: false, rule: 'ask-secret' };

@@ -203,6 +203,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
+      ...(session.deviceHash ? { loadStartupCard: artifacts.startupCard } : {}),
       vision: devices.vision,
       briefing: devices.briefing,
       computer: withResearchAttach(devices.computer, research),
