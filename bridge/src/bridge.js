@@ -13,6 +13,7 @@ import * as audit from './audit.js';
 import * as audio from './audio.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
+import { cardStartup } from './cardStartup.js';
 import { cardLink, cardRead, cardsRecent } from './notify.js';
 import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
@@ -91,6 +92,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'board.entry': board.entry,
       'notify.cardLink': cardLink,
       'notify.cardRead': cardRead,
+      'notify.cardStartup': cardStartup,
       'notify.cardsRecent': cardsRecent, // start briefing (Sandy only: ~/.notify lives there)
       'board.recent': board.recent,
       'state.current': stateCurrent,

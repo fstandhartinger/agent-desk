@@ -8,19 +8,24 @@ let muted = false;
 export const companionMuted = () => muted;
 export function setCompanionMuted(on: boolean) { muted = on; }
 
-export type HostVoice = { start(provider?: string): void; stop(): void; state(): string };
+export type HostVoice = { start(provider?: string, startupCard?: string): void; stop(): void; state(): string };
 export function voiceAck(host: Pick<NativeHost, 'postMessage'>, state: string) {
   host.postMessage({ type: 'voice-ack', on: !['idle', 'error'].includes(state), state });
 }
 export function handleNativeMessage(message: unknown, host: Pick<NativeHost, 'postMessage'>, showIds: (ids: string[]) => void, voice?: HostVoice) {
   if (!message || typeof message !== 'object') return;
-  const msg = message as { type?: unknown; on?: unknown; ids?: unknown; provider?: unknown };
+  const msg = message as { type?: unknown; on?: unknown; ids?: unknown; provider?: unknown; startupCard?: unknown };
   if (msg.type === 'mute' && typeof msg.on === 'boolean') {
     setCompanionMuted(msg.on);
     host.postMessage({ type: 'mute-ack', on: msg.on });
   } else if (msg.type === 'voice' && typeof msg.on === 'boolean' && voice) {
     if (msg.provider !== undefined && (typeof msg.provider !== 'string' || !['xai', 'openai', 'gemini', 'gemini-fast'].includes(msg.provider))) return;
-    if (msg.on) { setCompanionMuted(false); voice.start(msg.provider as string | undefined); }
+    if (msg.on) {
+      const ref = msg.startupCard;
+      const startupCard = typeof ref === 'string' && /^(?:card:[1-9]\d{0,11}|a#[0-9a-f]{6})$/.test(ref) ? ref : undefined;
+      setCompanionMuted(false);
+      voice.start(msg.provider as string | undefined, startupCard);
+    }
     else { setCompanionMuted(true); voice.stop(); }
     voiceAck(host, voice.state());
   } else if (msg.type === 'screen' && Array.isArray(msg.ids)) {

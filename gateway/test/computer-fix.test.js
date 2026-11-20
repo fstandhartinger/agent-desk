@@ -132,31 +132,17 @@ test('N2: after hands-on only a positive go phrase resumes, with the resume op (
   assert.equal(h.vision.ofOp('start').length, 1, 'no second start: resume adds no scope');
   assert.equal(h.vision.ofOp('resume')[0].goal, undefined);
 });
-test('N2: at the step stop "nein" and stop words end the run; "warte kurz" and chatter leave it waiting; only a go phrase continues', async () => {
-  const h = setup({ script: Array.from({ length: 40 }, () => call('ui_windows')), app: (w) => (w.op === 'action' ? ok() : { ok: true, code: 'done' }), costUsd: 0.0001 });
+test('an older app step checkpoint refreshes references without a spoken question', async () => {
+  let actions = 0;
+  const h = setup({
+    script: [call('ui_windows'), call('ui_windows'), call('done', { summary: 'Finished' })],
+    app: w => w.op === 'action' && ++actions === 1 ? { ok: false, code: 'refused', rule: 'step-report' } : ok(),
+  });
   await h.computer.begin('s1', { text: GOAL, goalArg: '' });
-  await until(() => h.computer.runOf('s1')?.awaitingGo);
-  const actions = h.vision.ofOp('action').length;
-  for (const t of ['Warte kurz, ich mache das noch', 'Moment, ich bin noch dran', 'Das Wetter wird morgen schön und alles']) { say(h, t); await flush(); }
-  assert.equal(h.vision.ofOp('resume').length, 0);assert.equal(h.vision.ofOp('action').length, actions);assert.equal(ended(h), false);
-  say(h, 'Nein, lass das');
   await until(() => ended(h));
-  assert.equal(stopReason(h), 'voice-stop');
-  assert.equal(h.vision.ofOp('resume').length, 0, 'ending is not resuming');
-  assert.equal(h.vision.ofOp('action').length, actions, 'not one more step after the "nein"');
-});
-test('B: the 25-step stop resumes with the resume op too', async () => {
-  const h = setup({ script: Array.from({ length: 40 }, () => call('ui_windows')), app: (w) => (w.op === 'action' ? ok() : { ok: true, code: 'done' }), costUsd: 0.0001 });
-  await h.computer.begin('s1', { text: GOAL, goalArg: '' });
-  await until(() => h.computer.runOf('s1')?.awaitingGo);
-  say(h, 'ja');
-  await flush();
-  assert.equal(h.vision.ofOp('resume').length, 0);
-  say(h, 'Ja, mach einfach weiter');
-  await until(() => h.vision.ofOp('resume').length === 1);
-  await until(() => h.vision.ofOp('action').length > 25);
-  assert.equal(h.vision.ofOp('start').length, 1);
-  await h.computer.runOf('s1')?.end('test');
+  assert.equal(h.vision.ofOp('resume').length, 1);
+  assert.equal(h.session.said.length, 1);
+  assert.match(JSON.stringify(h.model.calls[1].messages), /frischen Stand/);
 });
 
 // ---- void

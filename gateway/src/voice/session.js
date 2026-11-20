@@ -19,6 +19,7 @@ import { bestSummary, cleanHistory, conversationIdOf, memoryCache, memoryInstruc
 import { completeChat } from '../llm.js';
 import { createRecorder } from './recorder.js';
 import { createHash } from 'node:crypto';
+import { CARD_START_INSTRUCTIONS, startupCardData } from '../cardStartup.js';
 import { guardDecision } from './answerGuard.js';
 
 export const HARD_CAP_MS = 30 * 60_000;
@@ -95,6 +96,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let thoughtFor = 0; // the user turn the 'thinking' activity was sent for
   let adapter = null;
   let artifactBlock = '';
+  let startupCard = null;
+  let startupSpoken = false;
   // The registry's shared speech dictionary for the recogniser vocabulary (a#41d6d2). Fetched when the connection opens (cached 5 min), never awaited:
   // the adapter is created synchronously as before; the client's start message comes later, so the value is normally there by then.
   let speechDictionary = null;
@@ -529,6 +532,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   async function onToolCall({ id, name, args, responseId }) {
     const requestedName = name;
     name = resolveToolName(name);
+    if (startupCard && !spoken.some(e => !e.typed && !e.echo)) {
+      trace.event('card.startup.tool_ignored', { name });
+      adapter?.sendToolResult(id, requestedName, '{"error":"Nur den Einstiegssatz sprechen und auf Florian warten."}');
+      return;
+    }
     const t0 = now();
     assistantStarted();
     const question = `${userBuf} ${lastUserText} ${pending.text}`;
@@ -671,6 +679,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
         trace.event('session.ready', { provider, model: e.model });
         if (screenHeld) { const how = adapter?.setScreenContext?.(screenHeld); screenHeld = null; trace.event('screen.context', { how: how ?? 'unsupported', late: true }); }
         if (briefingHeld) { const how = adapter?.setBriefing?.(briefingHeld); briefingHeld = null; trace.event('briefing.context', { how: how ?? 'unsupported', late: true }); }
+        if (startupCard && !startupSpoken && !speechStartSeen) {
+          startupSpoken = true;
+          adapter?.sendText('[Desk-Startsignal: Sprich jetzt genau den einen Einstiegssatz zur geladenen Karte und warte dann auf Florian.]');
+          trace.event('card.startup.spoken_requested', { card: startupCard.id });
+        }
         break;
       case 'context_trimmed': // an appended context text was over the provider budget and got shortened (a#41d6d2); the session goes on
         trace.event('context.trimmed', { provider: e.provider ?? provider, kind: e.kind, from: e.from, to: e.to });
@@ -798,6 +811,10 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
       return;
     }
     page = msg.page ?? null;
+    inScreenAgent = msg.client?.app === 'screen-agent';
+    const cardReady = inScreenAgent && msg.startupCard && deps.loadStartupCard
+      ? Promise.race([deps.loadStartupCard(msg.startupCard).catch(() => { trace.event('card.startup.unavailable', { reason: 'lookup' }); return null; }), new Promise(resolve => setTimeout(resolve, 3800, null).unref?.())])
+      : null;
     const memoryReady = prepareMemory(msg); // in parallel with the page load below
     // Server-side page context (points/timeline/context.json/deepdive): nothing the browser sent except slug, t, sceneId and pointId is
     // trusted once it loads; without a loader or on failure the browser's own page object is used as before.
@@ -809,11 +826,12 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     }
     artifactBlock = deps.artifactInstructions?.() ?? '';
     const seed = typeof memoryReady?.then === 'function' ? await memoryReady : memoryReady; // synchronous unless a summary is awaited (bounded)
+    if (cardReady) startupCard = await cardReady;
     if (closed) return;
+    if (cardReady) trace.event('card.startup', { found: !!startupCard, ...(startupCard ? { card: startupCard.id } : {}) });
     startedAt = now();
     viz = deps.createViz((evt) => sendJson(evt));
     canvas = deps.createCanvas?.({ emit: sendJson, page, provider, onSkip: (info) => trace.event('canvas.skipped', { turn: turnId, reason: info.reason, by: info.by, ms: info.ms }), onFacts: (text, meta) => { const how = adapter?.addContext?.(text, meta); factsReady?.(); factsReady = null; factsDue = 0; audit({ action: 'voice.facts', detail: `${provider} ${how ?? 'held'} strong=${meta?.strong ?? '-'} final=${meta?.final ?? '-'} ${String(text).length}ch ${(String(text).match(/^### \S+/gm) ?? []).join(' ')}` }); }, ...focusOf(msg) }) ?? null;
-    inScreenAgent = msg.client?.app === 'screen-agent';
     // In the app the Desk window is hidden: a handoff button there is out of his sight, and with no page open there is no explainer to look up (trace a#92a698: "Gerade ist keine Erklärseite offen" as the answer to his marking).
     // researchOnly tools (web_search, http_get) belong to the background research agent: no voice model is offered them (and runTool refuses them outside a research run)
     const voiceTools = toolDefs.filter(t => !t.researchOnly);
@@ -828,7 +846,8 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     logPrompt('tools', sessionTools.map((t) => t.name).join(', '));
     recorder = createRecorder({ sink: deps.audioSink, aid: () => (/^a#[0-9a-f]{6}$/.test(trace.aid ?? '') ? trace.aid : null), now, trace: (type, data) => trace.event(type, data), quiet: () => Boolean(deps.computer?.quiet?.(sid, 'user')), enabled: cfg.audioRecord() });
     trace.event('audio.recorder', { on: recorder.on });
-    adapter = create({ apiKey, instructions, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
+    const startupBlock = startupCard ? `\n${CARD_START_INSTRUCTIONS}\n${startupCardData(startupCard)}` : '';
+    adapter = create({ apiKey, instructions: instructions + startupBlock, tools: sessionTools, voice: resolveVoice(provider, msg.voice), lang: msg.lang ?? 'de', vocabulary: vocab.hints, history }, onEvent);
     // Screen vision: the Screen Agent's running description reaches the model as passive context (adapter.setScreenContext: never a reply).
     detachVision = deps.vision?.attach(sid, { kind: 'voice', conversation: convCtx.turns, slow: provider === 'openai', trace: (type, data) => trace.event(type, data), setContext: (text) => {
       if (now() - screenLoggedAt >= 30_000) { screenLoggedAt = now(); logPrompt('screen', maskDigits(text)); } // at most one screen text per 30 s (trace size, critic H3)
@@ -852,7 +871,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
     tickTimer = setInterval(tick, USAGE_TICK_MS);
     warnTimer = setTimeout(() => {
       trace.event('session.cap_warning', { inMs: CAP_WARN_MS });
-      sendJson({ type: 'notice', code: 'cap-soon', message: 'Diese Sprachsitzung erreicht in 2 Minuten ihre Grenze von 30 Minuten (damit eine vergessene Sitzung nicht weiterläuft und kostet). Danach geht es von selbst in einer neuen Sitzung weiter, die das Gespräch kennt.' });
+      sendJson({ type: 'notice', code: 'cap-soon', message: 'Diese Sprachsitzung erreicht in 2 Minuten ihre Grenze von 30 Minuten. Ein laufender Computer-Auftrag kann vorher fertig werden.' });
       void refreshSummary('cap-warning');
     }, HARD_CAP_MS - CAP_WARN_MS);
     capTimer = setTimeout(() => {
@@ -968,6 +987,11 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   function maybeRollover() {
     const reason = capReason;
     if (closed || rolledOver || !capDue) return;
+    const computerRun = reason === 'hard-cap' && deps.computer?.runOf?.(sid);
+    if (computerRun && !computerRun.paused) {
+      setTimeout(() => maybeRollover(), 1000).unref?.();
+      return;
+    }
     const busy = responding || responseOpen || runningTools > 0 || (turn.role === 'assistant' && turn.text.trim());
     if (busy && now() - capDue < CAP_GRACE_MS) { setTimeout(() => maybeRollover(), 1000).unref?.(); return; }
     if (!mayRollOver()) {

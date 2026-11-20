@@ -72,7 +72,7 @@ export function buildInstructions(page, now, { provider, screen = false, screenA
     ...readToolLines(),
     ...discoveryLines({ spoken: true }),
     ...limitLines({ spoken: true }),
-    ...SPEECH_LINES,
+    ...(screenAgent ? [] : SPEECH_LINES),
     ...actionLines(screen || screenAgent),
     ...(screenAgent ? screenAgentLines() : []),
     ...screenLines(screen || screenAgent, { spoken: true }),
@@ -83,6 +83,11 @@ export function buildInstructions(page, now, { provider, screen = false, screenA
   lines.push(...knowledgeLines());
   lines.push(...wortlisteLines(vocabulary));
   lines.push(SPOKEN_STYLE_REMINDER);
+  if (screenAgent) lines.push(
+    'Im Screen Agent sprich knapp und direkt. Bei einem klaren Auftrag nutze die zuständigen Werkzeuge sofort und arbeite bis zum geprüften Ergebnis. Sage anschließend einen kurzen Ergebnissatz. Spar dir Vorankündigungen, Füllsätze, Wiederholungen und Angebote weiterzumachen.',
+    'Frage nur bei einer Zahlung, einer Identitätsprüfung oder einem zweiten Faktor, vor unwiderruflichem Löschen von Florians Daten, vor Versand an eine nicht benannte Person oder bei entscheidungsrelevanten widersprüchlichen Belegen. Florian erledigt Identitätsprüfungen selbst. Beschreibe den konkreten Punkt in einer Frage.',
+    'Ein laufender Computer-Auftrag bleibt beim Computer-Agenten. Wenn Florian Maus oder Tastatur selbst bedient, respektiere die Pause. Seine Anweisung zum Weiterarbeiten setzt den vorhandenen Auftrag fort. Frage nicht von dir aus nach einer Fortsetzung. Wenn ein Lauf endet, nenne das Ergebnis oder den konkreten verbleibenden Blocker.',
+  );
   if (page?.title) lines.push('', ...pagePackLines(page, { provider: provider ?? 'xai' }));
   return lines.join('\n');
 }

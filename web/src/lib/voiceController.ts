@@ -138,14 +138,14 @@ export function setVoiceOption(key: string) {
 }
 
 /** Starts the user's choice, or the first usable option when the status shows that choice is down (no detour, no toast). */
-export function startVoice() {
+export function startVoice(startupCard?: string) {
   const { run, picked } = chooseVoice(optionByKey(voiceStore.get().option), statusStore.get().providers);
-  begin(run, picked);
+  begin(run, picked, false, startupCard);
   voiceStore.set((s) => ({ ...s, notice: picked ? voiceUnavailableNotice(picked, run) : null }));
 }
 
 /** Starts a session. `viaFallback` is the option the user actually picked when this is an automatic fallback. */
-function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) {
+function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false, startupCard?: string) {
   session?.stop();
   logActivity('voice', 'Sprachsitzung startet', opt.label, 'violet');
   const s = new VoiceSession(opt, currentContext(), {
@@ -199,7 +199,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
       logActivity('voice', 'Fallback', `${opt.label} → ${next.label}: ${message}`, 'amber');
       session = null;
       dropPlaceholder(); // the new provider has not heard what the old one was listening to
-      begin(next, picked, wasMuted);
+      begin(next, picked, wasMuted, s.wasReady ? undefined : startupCard);
       voiceStore.set((s) => ({ ...s, notice: voiceUnavailableNotice(picked, next) }));
     },
     onError(message) {
@@ -210,7 +210,7 @@ function begin(opt: VoiceOption, viaFallback?: VoiceOption, startMuted = false) 
       closeTurn('user');
       closeTurn('assistant');
     },
-  }, startMuted);
+  }, startMuted, startupCard);
   session = s;
   setClientErrorSink((d) => s.eventNow('error', d));
   void s.start();

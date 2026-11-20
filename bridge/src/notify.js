@@ -93,7 +93,7 @@ async function readCapped(file, max) {
  * Returns the card's own text (headline, Why/Catch, the chosen button, "↳ Agent" lines), the text of its Details page
  * from the local page store, and the a# ids it mentions. Fixed ~/.notify/cards/<n>.json and pages/<id>.json only.
  */
-export async function cardRead({ id } = {}) {
+export async function cardRead({ id, includeState = false } = {}) {
   if (typeof id !== 'string' || !/^[1-9]\d{0,11}$/.test(id)) throw new Error('invalid card id');
   const card = JSON.parse(await readCapped(path.join(HOME, '.notify', 'cards', `${id}.json`), 65536));
   const raw = String(card.text ?? '');
@@ -115,6 +115,10 @@ export async function cardRead({ id } = {}) {
     id, ...(own ? { aid: own } : {}), source: redact(String(card.source ?? '')).slice(0, 200),
     ...(card.answered ? { answered: true } : {}), bot: card.bot === 'TG_URGENT_BOT_TOKEN' ? 'urgent' : 'main',
     text: redact(body.slice(0, READ_CAP)), ...(url ? { url: url[0] } : {}), ...(details ? { details } : {}),
+    ...(includeState ? {
+      ask: card.ask === true, status: redact(String(card.status ?? '')).slice(0, 40),
+      ...(card.settled ? { settled: redact(String(card.settled.line ?? '')).slice(0, 300) || true } : {}),
+    } : {}),
     ...(linked.length ? { linked_ids: linked.map((x) => `a#${x}`) } : {}),
   };
 }

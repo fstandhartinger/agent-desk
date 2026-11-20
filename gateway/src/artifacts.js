@@ -160,6 +160,19 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     if (sessions.get(sid) === record) sessions.set(sid, { value: mergeContext(prior, { ...value, ids: result.items.map(i => i.id) }), expires: now() + CONTEXT_TTL });
     return structuredClone(value);
   }
+  async function startupCard(ref) {
+    const match = typeof ref === 'string' && /^(?:card:([1-9]\d{0,11})|a#([0-9a-f]{6}))$/.exec(ref);
+    if (!match || !hub) return null;
+    const aid = match[2];
+    let id = match[1];
+    if (aid) {
+      const { items } = await registry(`/v1/resolve?ids=${aid}&depth=1`);
+      const item = items.find(i => i.id === aid && i.kind === 'card' && i.status !== 'retired');
+      id = item?.refs?.map(r => CARD_REF.exec(r.target)).find(Boolean)?.[1];
+      if (!id) return null;
+    }
+    return hub.call('notify.cardStartup', { id, ...(aid ? { aid } : {}) }, { timeoutMs: 2600 });
+  }
   const brief = (items) => items.map(i => ({ id: i.id, title: String(i.title ?? '').slice(0, 80) }));
   /**
    * Find artifacts for what Florian said: a direct id or card number, then the artifacts visible on his screen (tolerant of misheard words),
@@ -324,7 +337,7 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     const { text } = await readJson(req, 12_000);
     sendJson(res, 200, contextTurn(sid, text)); return true;
   }
-  return { get, resolve, search, refRead, registerVoice, route, screen, setScreen, clearScreen, visibleTitles, addHighlight, contextTurn };
+  return { startupCard, get, resolve, search, refRead, registerVoice, route, screen, setScreen, clearScreen, visibleTitles, addHighlight, contextTurn };
 }
 async function boundedText(res, max) {
   let size = 0; const chunks = [];
