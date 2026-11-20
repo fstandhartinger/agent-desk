@@ -191,7 +191,7 @@ test('missing card and ordinary browser starts remain silent', async (t) => {
 });
 
 test('scheduled voice rollover waits for an active computer run to finish', (t) => {
-  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: 1000 });
   let active = { paused: false };
   const h = harness(t, { computer: { runOf: () => active, userPartial() {}, userFinal() {}, assistantFinal() {} } });
   h.msg({ type: 'start' });
