@@ -126,6 +126,7 @@ const MAX_PAGE_BYTES = 512 * 1024;
 const CARD_DIR = path.join(HOME, '.notify', 'cards');
 const CARD_ID = /^[1-9]\d{0,11}$/;
 const summaries = new Map();
+let indexedAt = -1, warming = null;
 
 function headline(lines) {
   return lines.find((line) => /^Worum geht['’]s:/i.test(line))?.replace(/^[^:]+:\s*/, '')
@@ -152,17 +153,28 @@ async function indexedSummary(id) {
   return value;
 }
 
-export async function prefetchCardSummaries() {
+async function warmSummaries() {
+  const { mtimeMs } = await fs.stat(CARD_DIR);
+  if (indexedAt === mtimeMs) return;
   const ids = (await fs.readdir(CARD_DIR)).map((name) => name.replace(/\.json$/, '')).filter((id) => CARD_ID.test(id));
   // Message numbers increase on each send. Older files can still be read on demand.
   await Promise.allSettled(ids.sort((a, b) => Number(b) - Number(a)).slice(0, 50).map(indexedSummary));
+  indexedAt = mtimeMs;
+}
+
+export function prefetchCardSummaries() {
+  warming ??= warmSummaries().finally(() => { warming = null; });
+  return warming;
 }
 
 export async function cardVoiceSummary({ id, aid } = {}) {
   if (aid !== undefined && !/^[0-9a-f]{6}$/.test(aid)) return null;
-  if (!id && aid) id = [...summaries.values()].find(({ value }) => value?.aid === aid)?.value.id;
-  if (typeof id !== 'string' || !CARD_ID.test(id)) return null;
   try {
+    if (!id && aid) {
+      await prefetchCardSummaries();
+      id = [...summaries.values()].find(({ value }) => value?.aid === aid)?.value.id;
+    }
+    if (typeof id !== 'string' || !CARD_ID.test(id)) return null;
     const summary = await indexedSummary(id);
     return aid && summary?.aid !== aid ? null : summary;
   } catch { /* The local card may have been removed, or its cached file may be unreadable. */ return null; }

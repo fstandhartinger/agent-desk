@@ -160,17 +160,24 @@ export function createArtifactService({ fetchImpl = fetch, now = Date.now, env =
     if (sessions.get(sid) === record) sessions.set(sid, { value: mergeContext(prior, { ...value, ids: result.items.map(i => i.id) }), expires: now() + CONTEXT_TTL });
     return structuredClone(value);
   }
+  const cardSummaryInFlight = new Map();
   async function startupCard(ref, { summary = false } = {}) {
     const match = typeof ref === 'string' && /^(?:card:([1-9]\d{0,11})|a#([0-9a-f]{6}))$/.exec(ref);
     if (!match || !hub) return null;
     const aid = match[2];
     let id = match[1];
     const method = summary ? 'notify.cardVoiceSummary' : 'notify.cardStartup';
-    if (aid && summary) {
-      const cached = await hub.call(method, { aid }, { timeoutMs: 450 }).catch(() => null);
-      if (cached) return cached;
-    }
     if (aid) {
+      if (!cardSummaryInFlight.has(aid)) {
+        const lookup = hub.call('notify.cardVoiceSummary', { aid }, { timeoutMs: 450 })
+          .catch(() => null).finally(() => cardSummaryInFlight.delete(aid));
+        cardSummaryInFlight.set(aid, lookup);
+      }
+      const cached = await cardSummaryInFlight.get(aid);
+      if (cached?.aid === aid && /^[1-9]\d{0,11}$/.test(cached.id)) {
+        if (summary) return cached;
+        return hub.call(method, { id: cached.id, aid }, { timeoutMs: 2600 });
+      }
       const { items } = await registry(`/v1/resolve?ids=${aid}&depth=1`);
       const item = items.find(i => i.id === aid && i.kind === 'card' && i.status !== 'retired');
       id = item?.refs?.map(r => CARD_REF.exec(r.target)).find(Boolean)?.[1];
