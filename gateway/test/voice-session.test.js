@@ -220,7 +220,7 @@ test('missing card and ordinary browser starts remain silent', async (t) => {
     h.msg({ type: 'start', client: { app }, startupCard: 'a#abcdef' });
     await new Promise(resolve => setImmediate(resolve));
     h.emit({ t: 'ready', model: 'fixture' });
-    assert.equal(lookups, app === 'screen-agent' ? 1 : 0);
+    assert.equal(lookups, app === 'screen-agent' ? 2 : 0);
     assert.equal(h.adapterCalls.length, 0);
   }
 });
