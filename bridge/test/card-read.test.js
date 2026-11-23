@@ -70,3 +70,14 @@ it('prefetches a startup summary by artifact ID and refreshes it after a card ed
   assert.equal((await cardVoiceSummary({ id: '128' })).status, 'erledigt');
   assert.equal(await cardVoiceSummary({ id: '128', aid: 'def456' }), null);
 });
+
+it('cardSummaries lists the newest summaries for the gateway pre-render, newest first, capped', async () => {
+  const { cardSummaries } = await import('../src/notify.js');
+  await dirs();
+  await fs.writeFile(path.join(home, '.notify', 'cards', '200.json'), JSON.stringify({ text: '🧑 DU BIST DRAN\nFake newest question', voice_summary: 'Fake newest', ask: true }));
+  const { cards } = await cardSummaries({ limit: 2 });
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards[0], { id: '200', aid: '', title: 'Fake newest', status: 'offen' });
+  assert.equal(cards[1].id, '128');
+  assert.equal((await cardSummaries({ limit: 999 })).cards.length <= 50, true);
+});

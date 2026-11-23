@@ -29,3 +29,20 @@ Pricing references (15 November 2026):
 - Whisper USD 0.006 / minute: https://developers.openai.com/api/docs/pricing
 
 Reservations are conservative estimates, **not invoice totals**. Keep original provider usage receipts and record actual billed amounts when available. Generation paths have not been live exercised by this worker; vendor schema errors must be corrected within the remaining cumulative budget.
+
+## Card opening in the central voice (23 Nov 2026)
+
+A Screen Agent session started from a marked Telegram card begins with a short line ("<topic>. <status>. Was brauchst du?").
+Until 23 Nov the laptop's Windows voice (speechSynthesis) spoke it; Florian found the quality poor. Now the gateway renders that
+line ahead of time in the central narration voice (narration-voice skill: C3 Gemini 3.8 Flash TTS "Enceladus", fallback A2
+OpenAI Realtime "ash"; `DESK_OPENING_VOICES=C3,A2|off`):
+
+- `gateway/src/cardOpeningAudio.js` polls the Sandy bridge every 20 s (`notify.cardSummaries`, newest 30 card summaries),
+  renders each missing line (about 3 s per line), trims the silence, caps inner pauses at 0.3 s, applies the pronunciation
+  table, and checks the take by length and a Groq Whisper transcript. Cache: 80 lines in memory, keyed by the text.
+- `card_opening` carries `audio: {mime: 'audio/wav', data, voice}` when the line is cached. The client plays it with an
+  Audio element (must start within 200 ms), otherwise it speaks with the device voice exactly as before. A line that was not
+  cached yet is queued, so the next start of that card has it.
+- Traces: `card.startup.opening_audio {cached, voice}`, `card.startup.first_audio {source: prerendered|local|provider, ms,
+  sinceStart}`; client event `card.opening.audio {source, ms}` and `card.opening.fallback`. Logs carry no card text.
+- Live check: `node gateway/test/manual/card-opening-live.mjs` (Sandy, `bash -lc`).

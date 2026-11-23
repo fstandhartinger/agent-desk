@@ -33,6 +33,7 @@ import { handleVoiceUpgrade } from './voice/index.js';
 import { voiceCatalog } from './voice/voices.js';
 import { createResearchManager, withResearchAttach } from './research/manager.js';
 import { completeChat } from './llm.js';
+import { createCardOpeningAudio } from './cardOpeningAudio.js';
 
 const EXPLAINER_ROUTE = /^\/api\/explainer\/([^/]+)\/([^/]+|end-frames\/\d{3}\.png)$/;
 
@@ -81,6 +82,8 @@ function streamCanvas(req, res, url, bus, audience) {
 export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const hub = new BridgeHub();
   const artifacts = createArtifactService({ hub });
+  const openingAudio = createCardOpeningAudio({ hub });
+  if (process.env.NODE_ENV === 'production' || process.env.DESK_OPENING_PRERENDER === 'on') openingAudio.start();
   const traces = createTraceService(traceOptions);
   const devices = createDeviceService({ artifacts, traces, hub, ...deviceOptions });
   // background research agent (discovery job): one manager per gateway; voice sessions reach it through the computer attach (no session.js change)
@@ -223,7 +226,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       loadPage: loadPageContext,
       runTool,
       artifactInstructions: () => artifactInstructions(artifacts.get(sid)),
-      ...(session.deviceHash ? { loadStartupCard: artifacts.startupCard, mountCardMap: (spec, select) => mountCardMap(session.deviceHash, spec, select) } : {}),
+      ...(session.deviceHash ? { loadStartupCard: artifacts.startupCard, openingAudio, mountCardMap: (spec, select) => mountCardMap(session.deviceHash, spec, select) } : {}),
       vision: devices.vision,
       briefing: devices.briefing,
       computer: withResearchAttach(devices.computer, research),

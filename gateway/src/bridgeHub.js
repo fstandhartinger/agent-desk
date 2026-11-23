@@ -15,6 +15,7 @@ export const ROUTE = {
   'notify.cardRead': ['sandy'],
   'notify.cardVoiceSummary': ['sandy'],
   'notify.cardStartup': ['sandy'],
+  'notify.cardSummaries': ['sandy'],
   'notify.cardsRecent': ['sandy'],
   'board.recent': ['sandy'],
   'state.current': ['sandy'],

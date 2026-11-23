@@ -100,6 +100,7 @@ export function runVoiceSession(ws, deps, { provider, create, apiKey, now = Date
   let startupSpoken = false;
   let startupRef = null, startupSummary = null, fullCard = null;
   let startupTimer = null, localOpening = null, openingAt = null, openingAudio = false, openingToken = false;
+  let openingSentAt = null, beganAt = null;
   let localSpeaking = false, localSpeakingTimer = null;
   let cardContextSent = false, branchActive = false, removeCardMap = null;
   const cardTurn = () => speechStartSeen || turnId > 0;
@@ -130,7 +131,13 @@ ${opening}`);
     startupCard ??= card;
     attachCardContext();
     if (local && !cardTurn()) {
-      sendJson({ type: 'card_opening', text: cardOpening(card) });
+      // Pre-rendered in the central narration voice (cardOpeningAudio.js); a miss keeps today's browser voice and queues the line.
+      const text = cardOpening(card);
+      const audio = deps.openingAudio?.get(text) ?? null;
+      if (!audio) deps.openingAudio?.want(text, { front: true });
+      trace.event('card.startup.opening_audio', audio ? { cached: true, voice: audio.voice, audioMs: audio.durationMs, bytes: audio.bytes } : { cached: false, queued: !!deps.openingAudio });
+      openingSentAt = now();
+      sendJson({ type: 'card_opening', text, ...(audio ? { audio: { mime: 'audio/wav', data: audio.data, voice: audio.voice } } : {}) });
       startupTimer = setTimeout(() => { localOpening ??= false; maybeOpenCard(); }, 800);
       startupTimer.unref?.();
     } else localOpening = false;
@@ -747,7 +754,7 @@ ${opening}`);
       case 'audio':
         if (openingAt !== null && !openingAudio && !isSilent(e.pcm)) {
           openingAudio = true;
-          trace.event('card.startup.first_audio', { ms: now() - openingAt });
+          trace.event('card.startup.first_audio', { source: 'provider', ms: now() - openingAt, ...(beganAt !== null ? { sinceStart: now() - beganAt } : {}) });
         }
         audioUntil = Math.max(audioUntil, now()) + Math.round(e.pcm.length / 48);
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
@@ -863,6 +870,7 @@ ${opening}`);
   async function begin(msg) {
     if (starting) return;
     starting = true;
+    beganAt = now();
     clearTimeout(startTimer);
     const verdict = limits.check(sid, 'voice');
     if (!verdict.ok) {
@@ -1250,6 +1258,8 @@ ${opening}`);
       clearTimeout(startupTimer);
       localOpening = msg.playing === true;
       if (localOpening) {
+        const source = msg.source === 'prerendered' ? 'prerendered' : 'local';
+        trace.event('card.startup.first_audio', { source, ms: now() - openingSentAt, ...(beganAt !== null ? { sinceStart: now() - beganAt } : {}), ...(source === 'prerendered' && typeof msg.voice === 'string' ? { voice: msg.voice.slice(0, 8) } : {}) });
         localSpeaking = true;
         localSpeakingTimer = setTimeout(() => { localSpeaking = false; }, 7000);
         localSpeakingTimer.unref?.();

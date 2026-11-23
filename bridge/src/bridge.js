@@ -14,7 +14,7 @@ import * as audio from './audio.js';
 import * as ledger from './ledger.js';
 import { outline } from './outline.js';
 import { cardStartup } from './cardStartup.js';
-import { cardLink, cardRead, cardsRecent, cardVoiceSummary, prefetchCardSummaries } from './notify.js';
+import { cardLink, cardRead, cardsRecent, cardSummaries, cardVoiceSummary, prefetchCardSummaries } from './notify.js';
 import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
 import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
@@ -94,6 +94,7 @@ export function buildMethods(claude, host = 'lechonk') {
       'notify.cardRead': cardRead,
       'notify.cardVoiceSummary': cardVoiceSummary,
       'notify.cardStartup': cardStartup,
+      'notify.cardSummaries': cardSummaries, // card-opening audio pre-render in the gateway (summaries only)
       'notify.cardsRecent': cardsRecent, // start briefing (Sandy only: ~/.notify lives there)
       'board.recent': board.recent,
       'state.current': stateCurrent,
