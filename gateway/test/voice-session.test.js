@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runVoiceSession, HARD_CAP_MS, CAP_WARN_MS, USAGE_TICK_MS, voiceCapFor } from '../src/voice/session.js';
 
-function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard, mountCardMap, computer } = {}) {
+function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard, mountCardMap, computer, openingAudio } = {}) {
   const ws = new EventEmitter();
   ws.OPEN = 1; ws.CONNECTING = 0; ws.readyState = 1;
   ws.sent = [];
@@ -23,7 +23,7 @@ function harness(t, { limit = { ok: true }, runTool, costToday, loadStartupCard,
   };
   const noted = [];
   const deps = {
-    computer, loadStartupCard, mountCardMap, sid: 's1', toolDefs: [], audit: (e) => audits.push(e), makeCtx: (p) => ({ page: p }),
+    computer, loadStartupCard, mountCardMap, openingAudio, sid: 's1', toolDefs: [], audit: (e) => audits.push(e), makeCtx: (p) => ({ page: p }),
     limits: { check: () => limit, addCost: (c) => costs.push(c), ...(costToday ? { costToday } : {}) },
     createViz: () => ({ noteTurn: (t) => noted.push(t), noteEvent: (e) => noted.push(e), close() {} }),
     runTool: runTool ?? (async () => ({ summary: 's', content: 'x'.repeat(5000) })),
@@ -193,6 +193,30 @@ test('card lookup never delays the adapter; local opening and the authenticated 
   assert.match(h.results.at(-1)[2], /auf Florian warten/);
   h.msg({ type: 'stop' });
   assert.equal(removed, true);
+});
+
+test('pre-rendered opening: cached central-voice audio rides on card_opening; a miss queues the line and keeps the device voice', async (t) => {
+  const wanted = [];
+  const store = new Map([['Hosting-Budget. Erledigt. Was brauchst du?', { voice: 'C3', data: 'UklGRg==', durationMs: 2100, bytes: 6 }]]);
+  const openingAudio = { get: (text) => store.get(text) ?? null, want: (text, o) => wanted.push([text, o]) };
+  const h = harness(t, { openingAudio, loadStartupCard: async (ref, o) => (o?.summary ? { id: '12345', title: 'Hosting-Budget', status: 'erledigt' } : null) });
+  h.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:12345', localCardOpening: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const opening = h.ws.sent.find(m => m.type === 'card_opening');
+  assert.equal(opening.text, 'Hosting-Budget. Erledigt. Was brauchst du?');
+  assert.deepEqual(opening.audio, { mime: 'audio/wav', data: 'UklGRg==', voice: 'C3' });
+  assert.equal(wanted.length, 0, 'a hit renders nothing');
+  h.msg({ type: 'card_opening_result', playing: true, source: 'prerendered', voice: 'C3' });
+  h.emit({ t: 'ready', model: 'fixture' });
+  assert.equal(h.adapterCalls.length, 0, 'no provider opening over the pre-rendered one');
+
+  const miss = harness(t, { openingAudio, loadStartupCard: async (ref, o) => (o?.summary ? { id: '7', title: 'Neues Thema', status: 'offen' } : null) });
+  miss.msg({ type: 'start', client: { app: 'screen-agent' }, startupCard: 'card:7', localCardOpening: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const plain = miss.ws.sent.find(m => m.type === 'card_opening');
+  assert.equal(plain.text, 'Neues Thema. Offen. Was brauchst du?');
+  assert.equal(plain.audio, undefined);
+  assert.deepEqual(wanted, [['Neues Thema. Offen. Was brauchst du?', { front: true }]]);
 });
 
 test('card starts without local speech request exactly one short provider opening', async (t) => {

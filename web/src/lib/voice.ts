@@ -10,6 +10,7 @@ import { drainClientErrors } from './clientError';
 import { focusedCanvasId, watchFocusedCanvas } from '../canvas/bus';
 import type { ActivityEvent, ClaudeProposalEvent, HandoffEvent, MainAgentPromptEvent, PageContext, ToolEvent, VizSpec, VoiceServerMsg } from './types';
 import type { ProviderId } from './status';
+import type { OpeningAudio } from './cardOpening';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error';
 
@@ -116,7 +117,7 @@ export class VoiceSession {
     });
     if (this.startupCard) {
       this.localVoice = globalThis.speechSynthesis?.getVoices().find(voice => voice.localService && /^de(?:-|$)/i.test(voice.lang));
-      if (this.localVoice) this.openingModule = import('./cardOpening').catch(() => null);
+      this.openingModule = import('./cardOpening').catch(() => null); // pre-rendered central voice, else the device voice
       this.connect(startMessage);
     } else {
       this.startMessage = await startMessage;
@@ -191,7 +192,7 @@ export class VoiceSession {
     this.readyTimer = window.setTimeout(() => !this.ready && !this.closed && this.fail(`${this.opt.label} antwortet nicht.`), READY_TIMEOUT_MS);
     const sendStart = (message: (() => unknown) | null) => {
       if (!message || this.closed || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ ...(message() as object), ...(this.localVoice ? { localCardOpening: true } : {}), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
+      ws.send(JSON.stringify({ ...(message() as object), ...(this.startupCard && (this.localVoice || typeof Audio === 'function') ? { localCardOpening: true } : {}), ...(this.h.conversation ? { conversation: this.h.conversation() } : {}) }));
       // round 11: "zeichne das" means the canvas on the stage; the gateway learns every change of it
       this.event('ws.open', {});
       this.flushEvents();
@@ -228,35 +229,48 @@ export class VoiceSession {
     this.player?.port.postMessage(pcm, [pcm]);
   }
 
-  private async speakOpening(text: string) {
+  private async speakOpening(text: string, audio?: OpeningAudio) {
     const deadline = performance.now() + 250;
     const speech = await this.openingModule;
     if (this.closed) return;
-    if (!speech || !this.localVoice || !text || this.stopOpening || performance.now() > deadline) {
+    if (!speech || !text || this.stopOpening || performance.now() > deadline || (!audio?.data && !this.localVoice)) {
       this.sendJson({ type: 'card_opening_result', playing: false });
       return;
     }
     this.earlyMic = [];
-    this.stopOpening = speech.speakCardOpening(this.localVoice, text, () => {
-      this.sendJson({ type: 'card_opening_result', playing: true });
-      this.event('card.opening.audio', { local: true });
+    const receivedAt = performance.now();
+    let cancelled = false;
+    const started = (source: 'prerendered' | 'local') => () => {
+      this.sendJson({ type: 'card_opening_result', playing: true, source, ...(source === 'prerendered' && audio?.voice ? { voice: audio.voice } : {}) });
+      this.event('card.opening.audio', { local: true, source, ms: Math.round(performance.now() - receivedAt), ...(source === 'prerendered' && audio?.voice ? { voice: audio.voice } : {}) });
       this.set('speaking');
       this.h.onTranscript('assistant', text, true, false, false, false, { quiet: true });
-    }, (played) => {
+    };
+    const ended = (fallback?: () => void) => (played: boolean) => {
       this.stopOpening = null;
       if (this.closed) return;
-      if (!played) this.sendJson({ type: 'card_opening_result', playing: false });
-      else {
+      if (!played) {
+        if (fallback && !cancelled) return fallback();
+        this.sendJson({ type: 'card_opening_result', playing: false });
+      } else {
         this.sendJson({ type: 'card_opening_end' });
         this.set(this.ready ? 'listening' : 'connecting');
       }
-    });
+    };
+    const speakLocal = () => {
+      if (!this.localVoice) { this.sendJson({ type: 'card_opening_result', playing: false }); return; }
+      if (audio?.data) this.event('card.opening.fallback', { from: 'prerendered', ms: Math.round(performance.now() - receivedAt) });
+      this.stopOpening = speech.speakCardOpening(this.localVoice, text, started('local'), ended());
+    };
+    if (!audio?.data) return speakLocal();
+    const stop = speech.playCardOpeningAudio(audio, started('prerendered'), ended(speakLocal));
+    this.stopOpening = () => { cancelled = true; stop(); };
   }
 
   private handle(m: VoiceServerMsg) {
     switch (m.type) {
       case 'card_opening':
-        void this.speakOpening(m.text);
+        void this.speakOpening(m.text, m.audio);
         break;
       case 'ready':
         this.reachedReady = true;

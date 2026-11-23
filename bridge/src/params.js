@@ -48,6 +48,7 @@ export const METHOD_PARAMS = {
   'notify.cardRead': { id: 'string' },
   'notify.cardVoiceSummary': { id: 'string', aid: 'string' },
   'notify.cardStartup': { id: 'string', aid: 'string' },
+  'notify.cardSummaries': { limit: 'integer' },
   // start briefing (Sandy bridge only)
   'board.recent': { hours: 'integer', limit: 'integer' },
   'notify.cardsRecent': { hours: 'integer', limit: 'integer' },

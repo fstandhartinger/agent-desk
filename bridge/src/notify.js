@@ -126,7 +126,7 @@ const MAX_PAGE_BYTES = 512 * 1024;
 const CARD_DIR = path.join(HOME, '.notify', 'cards');
 const CARD_ID = /^[1-9]\d{0,11}$/;
 const summaries = new Map();
-let indexedAt = -1, warming = null;
+let indexedAt = -1, warming = null, recentIds = [];
 
 function headline(lines) {
   return lines.find((line) => /^Worum geht['’]s:/i.test(line))?.replace(/^[^:]+:\s*/, '')
@@ -158,7 +158,9 @@ async function warmSummaries() {
   if (indexedAt === mtimeMs) return;
   const ids = (await fs.readdir(CARD_DIR)).map((name) => name.replace(/\.json$/, '')).filter((id) => CARD_ID.test(id));
   // Message numbers increase on each send. Older files can still be read on demand.
-  await Promise.allSettled(ids.sort((a, b) => Number(b) - Number(a)).slice(0, 50).map(indexedSummary));
+  const newest = ids.sort((a, b) => Number(b) - Number(a)).slice(0, 50);
+  await Promise.allSettled(newest.map(indexedSummary));
+  recentIds = newest;
   indexedAt = mtimeMs;
 }
 
@@ -178,6 +180,18 @@ export async function cardVoiceSummary({ id, aid } = {}) {
     const summary = await indexedSummary(id);
     return aid && summary?.aid !== aid ? null : summary;
   } catch { /* The local card may have been removed, or its cached file may be unreadable. */ return null; }
+}
+
+/**
+ * notify.cardSummaries: the voice summaries ({id, aid, title, status}) of the newest cards from the warm cache, newest first.
+ * The gateway pre-renders the spoken card opening from them in the central voice (job desk-card-opening-tts-20261123), so the
+ * bridge stays keyless and only hands out the same short summaries cardVoiceSummary already returns.
+ */
+export async function cardSummaries({ limit = 30 } = {}) {
+  const n = Math.min(50, Math.max(1, Math.trunc(Number(limit)) || 30));
+  try { await prefetchCardSummaries(); } catch { /* card directory unreadable: nothing to pre-render */ return { cards: [] }; }
+  const found = await Promise.allSettled(recentIds.slice(0, n).map(indexedSummary));
+  return { cards: found.map((r) => (r.status === 'fulfilled' ? r.value : null)).filter(Boolean) };
 }
 
 /**
