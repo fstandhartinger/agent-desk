@@ -7,7 +7,7 @@ import { setEnv, login, listen, fakeServer } from './helpers/env.js';
 import { createApp } from '../src/server.js';
 import { deviceError, pcmToWav } from '../src/deviceMedia.js';
 
-const wav = () => pcmToWav(Buffer.alloc(32000));
+const wav = (fill = 0) => pcmToWav(Buffer.alloc(32000, fill));
 const DEVICE = '33333333-3333-4333-8333-333333333333';
 
 describe('dictation resilience (registry stalls, idempotent chunks)', () => {
@@ -40,8 +40,8 @@ describe('dictation resilience (registry stalls, idempotent chunks)', () => {
     ({ token } = await (await fetch(base + '/api/device/pair', { method: 'POST', headers: { cookie, origin: process.env.DESK_ORIGIN } })).json());
   });
   after(() => { app.server.close(); registry.close(); });
-  const form = chunk => { const f = new FormData(); f.set('audio', new Blob([wav()]), 'a.wav'); f.set('context', JSON.stringify({ process: 'p', fieldBefore: '', visibleIds: [], recentTerms: [] })); if (chunk) f.set('chunk', JSON.stringify(chunk)); return f; };
-  const dictate = (chunk, headers = {}) => fetch(base + '/api/device/dictate', { method: 'POST', headers: { authorization: `Bearer ${token}`, ...headers }, body: form(chunk) });
+  const form = (chunk, fill = 0) => { const f = new FormData(); f.set('audio', new Blob([wav(fill)]), 'a.wav'); f.set('context', JSON.stringify({ process: 'p', fieldBefore: '', visibleIds: [], recentTerms: [] })); if (chunk) f.set('chunk', JSON.stringify(chunk)); return f; };
+  const dictate = (chunk, fill = 0) => fetch(base + '/api/device/dictate', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: form(chunk, fill) });
   const tick = () => { clock += 60_001; }; // past the one-minute check and the per-minute rate buckets
 
   it('a device-bound web session survives a registry outage (/api/auth/me), minting one still needs the registry', async () => {
@@ -110,6 +110,20 @@ describe('dictation resilience (registry stalls, idempotent chunks)', () => {
     assert.equal((await dictate({ dictationId: id, index: 5, final: true })).status, 200);
     const gap = await dictate({ dictationId: id, index: 3, final: false }); // an earlier index that was never sent: accepted
     assert.equal(gap.status, 200); assert.equal((await gap.json()).replay, undefined);
+  });
+
+  it('the same index with other audio (a retry that cut the recording differently) is recognised again and replaces the stored answer', async () => {
+    tick(); mode = 'up';
+    const id = 'a-1';
+    const first = await (await dictate({ dictationId: id, index: 0, final: false })).json();
+    const before = calls.length;
+    const other = await dictate({ dictationId: id, index: 0, final: false }, 1);
+    assert.equal(other.status, 200);
+    const body = await other.json();
+    assert.equal(body.replay, undefined); assert.notEqual(body.text, first.text);
+    assert.equal(calls.length, before + 1);
+    const again = await (await dictate({ dictationId: id, index: 0, final: false }, 1)).json();
+    assert.equal(again.replay, true); assert.equal(again.text, body.text);
   });
 
   it('a failed chunk is recognised again on its retry, alone, after later chunks', async () => {

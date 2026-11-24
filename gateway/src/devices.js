@@ -116,20 +116,27 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     return e;
   }
-  /** The stored or running answer of this chunk index, or null when it has to be recognised (then the limits count it). */
-  function chunkKnown(e, index) {
-    if (e.results.has(index)) return e.results.get(index);
-    if (e.running.has(index)) return e.running.get(index);
+  /** The stored or running answer of this chunk index for exactly this audio (sha256), or null when it has to be recognised (then the limits count it).
+   *  The same index with other audio (the app cut the recording differently on a retry) is recognised again and replaces the stored answer. */
+  function chunkKnown(e, index, audio) {
+    const stored = e.results.get(index), running = e.running.get(index);
+    if (stored?.audio === audio) return stored.result;
+    if (running?.audio === audio) return running.promise;
+    if (stored) { e.results.delete(index); chunkStored--; }
     const indices = new Set([...e.results.keys(), ...e.running.keys()]).size;
     if (indices >= CHUNK_INDICES || ++e.n > CHUNK_RUNS) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation', body: { error: 'Zu viele Teile in einem Diktat.', code: 'chunk-limit' } });
     return null;
   }
-  function chunkTrack(e, index, promise) {
-    e.running.set(index, promise);
+  function chunkTrack(e, index, audio, promise) {
+    const mine = { audio, promise };
+    e.running.set(index, mine);
+    const done = () => { if (e.running.get(index) === mine) e.running.delete(index); };
     promise.then(result => {
-      e.running.delete(index);
-      if (chunkIds.get(e.key) === e && chunkStored < CHUNK_STORE_MAX && !e.results.has(index)) { e.results.set(index, result); chunkStored++; } // not for a dictation that expired meanwhile
-    }, () => { e.running.delete(index); }); // a failed chunk is recognised again on its retry
+      done();
+      if (chunkIds.get(e.key) !== e) return; // the dictation expired meanwhile
+      if (e.results.has(index)) { e.results.delete(index); chunkStored--; }
+      if (chunkStored < CHUNK_STORE_MAX) { e.results.set(index, { audio, result }); chunkStored++; }
+    }, done); // a failed chunk is recognised again on its retry
     return promise;
   }
   // events per minute a device may write to the traces, and a short memory of what it sent: a re-sent batch (lost response) is not stored twice
@@ -562,10 +569,12 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const dctx = dictateContext(raw);
       const chunk = form.has('chunk') ? chunkInfo(form.get('chunk')) : null;
       // the chunks of one long dictation come in a burst: their own, larger bucket instead of the 12/min of single clips
-      let chunkEntry = null;
+      const buffer = Buffer.from(await audio.arrayBuffer());
+      let chunkEntry = null, audioKey = null;
       if (chunk) {
         rate(`chunk:${record.deviceId}`, 120); chunkEntry = chunkGate(record.deviceId, chunk);
-        const known = chunkKnown(chunkEntry, chunk.index);
+        audioKey = crypto.createHash('sha256').update(buffer).digest('hex');
+        const known = chunkKnown(chunkEntry, chunk.index, audioKey);
         if (known) {
           const stored = await known; // a running one may still fail: then this answer fails the same way and the app sends it again
           dlog(record.deviceId, 'dictation.replay', { ...chunk, ms: Date.now() - ctx.started, chars: stored.text?.length ?? 0 });
@@ -573,7 +582,6 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
           return true;
         }
       } else rate(`media:${record.deviceId}`, 12);
-      const buffer = Buffer.from(await audio.arrayBuffer());
       wavDuration(buffer);
       // names on his screen when he started to speak (the app posted the visible text, screenText.js): hints for the recognisers and the clean-up
       const names = screenText.terms(record.deviceId, 40), onScreen = names.length ? { bildschirmNamen: names } : {};
@@ -593,7 +601,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
         // a chunk that is not the last: he is still talking, nobody waits for it, every recogniser gets its time
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })), { patient: chunk ? !chunk.final : false });
       });
-      const result = await (chunk ? chunkTrack(chunkEntry, chunk.index, recognise) : recognise).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
+      const result = await (chunk ? chunkTrack(chunkEntry, chunk.index, audioKey, recognise) : recognise).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
       dlog(record.deviceId, 'dictation.result', { screenNames: names.length, ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}), ...(textLog() && appAllows(form.get('log')) ? { text: result.text } : {}) });
       sendJson(res, 200, result);
     } else throw fail('Methode oder Route nicht erlaubt.', 405);
