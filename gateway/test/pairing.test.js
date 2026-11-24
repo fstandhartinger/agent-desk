@@ -58,7 +58,7 @@ test('two isolated stores pair by browser approval and native poll, once; bootst
   assert.equal((await fetch(base + '/api/auth/me', { headers: { cookie: embeddedCookie } })).status, 200);
   outage = true;
   assert.equal((await post('web-session', {}, { authorization: `Bearer ${credentials.token}` })).status, 503, 'outage must not erase DPAPI by pretending to be revocation');
-  assert.equal((await fetch(base + '/api/auth/me', { headers: { cookie: embeddedCookie } })).status, 503);
+  assert.equal((await fetch(base + '/api/auth/me', { headers: { cookie: embeddedCookie } })).status, 200, 'a registry outage keeps the signed-in web view (last good device check, 24 Nov 2026)');
   outage = false;
   assert.equal((await fetch(base + '/api/device/revoke/' + credentials.deviceId, { method:'DELETE', headers:{ cookie:embeddedCookie, origin:process.env.DESK_ORIGIN } })).status, 403);
   const revoked = await fetch(base + '/api/device/revoke/' + credentials.deviceId, { method: 'DELETE', headers: { cookie: browserCookie, origin: process.env.DESK_ORIGIN } });

@@ -98,20 +98,39 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     }
     if ((entry.n += cost) > max) throw Object.assign(fail('Zu viele Anfragen.', 429), { retryAfter: Math.ceil((entry.until - time) / 1000) });
   }
-  // chunks of one dictation: at most 60, the index must grow, and a device may start only a few dictations per hour (a looping app rotating ids)
-  const chunkIds = new Map();
-  function chunkGate(deviceId, { dictationId, index }) {
+  // Chunks of one long dictation (idempotent since 24 Nov 2026). A device may start only a few dictations per hour (a looping app rotating ids); a dictation has at
+  // most 60 different indices and 120 recognitions. The order is free: a chunk that failed is sent again alone after later ones (the tail chunk got a 502 on
+  // 24 Nov and every retry of the whole dictation was a 400 "chunk-order"). An index the gateway already answered gets the stored answer again (200,
+  // replay: true) without a second recognition or cost; one that is still running is awaited. Answers are kept with the dictation for an hour (memory only).
+  const chunkIds = new Map(), CHUNK_INDICES = 60, CHUNK_RUNS = 120, CHUNK_STORE_MAX = 1500;
+  let chunkStored = 0;
+  function dropChunkEntry(key) { const e = chunkIds.get(key); if (e) { chunkStored -= e.results.size; chunkIds.delete(key); } }
+  function chunkGate(deviceId, { dictationId }) {
     const time = now(), key = `${deviceId}:${dictationId}`;
-    for (const [k, v] of chunkIds) if (v.until <= time) chunkIds.delete(k);
+    for (const [k, v] of chunkIds) if (v.until <= time) dropChunkEntry(k);
     let e = chunkIds.get(key);
     if (!e) {
       const started = [...chunkIds.entries()].filter(([k]) => k.startsWith(`${deviceId}:`)).length;
       if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600, body: { error: 'Zu viele Diktate pro Stunde.', code: 'chunk-limit' } });
-      e = { n: 0, last: -1, until: time + 3600_000 }; chunkIds.set(key, e);
+      e = { n: 0, results: new Map(), running: new Map(), until: time + 3600_000 }; chunkIds.set(key, e);
     }
-    if (++e.n > 60) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation', body: { error: 'Zu viele Teile in einem Diktat.', code: 'chunk-limit' } });
-    if (index <= e.last) throw Object.assign(fail('Teil-Index muss wachsen.', 400), { code: 'chunk-order', reason: 'index-not-increasing', body: { error: 'Teil-Index muss wachsen.', code: 'chunk-order' } });
-    e.last = index;
+    return e;
+  }
+  /** The stored or running answer of this chunk index, or null when it has to be recognised (then the limits count it). */
+  function chunkKnown(e, index) {
+    if (e.results.has(index)) return e.results.get(index);
+    if (e.running.has(index)) return e.running.get(index);
+    const indices = new Set([...e.results.keys(), ...e.running.keys()]).size;
+    if (indices >= CHUNK_INDICES || ++e.n > CHUNK_RUNS) throw Object.assign(fail('Zu viele Teile in einem Diktat.', 429), { code: 'chunk-limit', reason: 'chunks-per-dictation', body: { error: 'Zu viele Teile in einem Diktat.', code: 'chunk-limit' } });
+    return null;
+  }
+  function chunkTrack(e, index, promise) {
+    e.running.set(index, promise);
+    promise.then(result => {
+      e.running.delete(index);
+      if (chunkStored < CHUNK_STORE_MAX && !e.results.has(index)) { e.results.set(index, result); chunkStored++; }
+    }, () => { e.running.delete(index); }); // a failed chunk is recognised again on its retry
+    return promise;
   }
   // events per minute a device may write to the traces, and a short memory of what it sent: a re-sent batch (lost response) is not stored twice
   const EVENTS_PER_MIN = 600, sent = new Map();
@@ -127,7 +146,47 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       return true;
     });
   }
-  const verified = new Map();
+  // Device tokens: a registry check is good for a minute; then the registry is asked again. Only when it cannot be reached (24 Nov 2026: Sandy's resolver
+  // dropped lookups, 5 s each, over the 3 s registry timeout, and every device request in that second became a 502) the last good check stands in, for at
+  // most DESK_DEVICE_AUTH_GRACE_MS (30 min), logged as device.auth.stale. A revoked, unknown or expired token is refused as soon as the registry says so.
+  const verified = new Map(), AUTH_FRESH_MS = 60_000, staleSeen = new Map();
+  const authGraceMs = () => { const v = Number(env.DESK_DEVICE_AUTH_GRACE_MS); return Number.isFinite(v) && v >= 0 ? Math.min(v, 24 * 3600_000) : 30 * 60_000; };
+  async function checkDevice(digest) {
+    let record = null;
+    try {
+      const row = await registry('/v1/devices/verify', { hash: digest });
+      record = row.revoked_at ? null : device(row);
+      if (!(record?.expiresAt > now())) record = null;
+    } catch (err) { if (err.status !== 404) throw err; }
+    if (record) {
+      if (!verified.has(digest) && verified.size >= 1000) verified.delete(verified.keys().next().value);
+      verified.set(digest, { record, checked: now() });
+    } else verified.delete(digest);
+    return record;
+  }
+  function noteStale(entry, reason) {
+    const id = entry.record.deviceId, time = now(), seen = staleSeen.get(id);
+    if (seen && seen > time) return; // one line per device and minute
+    if (staleSeen.size >= 200) staleSeen.clear();
+    staleSeen.set(id, time + 60_000);
+    const data = { ageS: Math.round((time - entry.checked) / 1000), reason };
+    audit({ action: 'device.auth.stale', detail: JSON.stringify({ deviceId: id, ...data }), actor: 'device' });
+    dlog(id, 'device.auth.stale', data);
+  }
+  /** The device record of a token hash, or null (unknown, revoked, expired). Throws only when the registry is unreachable and no good check is at hand. */
+  async function deviceRecord(digest, { fresh = false } = {}) {
+    const entry = verified.get(digest), time = now();
+    const usable = entry && entry.record.expiresAt > time;
+    if (!fresh && usable && time - entry.checked < AUTH_FRESH_MS) return entry.record;
+    const graceful = !fresh && usable && time - entry.checked < authGraceMs();
+    if (graceful && entry.failedAt > time - 10_000) return entry.record; // the registry failed a moment ago: no new 3 s wait per request during an outage
+    if (!usable) verified.delete(digest);
+    try { return await checkDevice(digest); }
+    catch (err) {
+      if (graceful) { entry.failedAt = now(); noteStale(entry, err.status === 503 ? 'registry-not-configured' : 'registry-unreachable'); return entry.record; }
+      throw err;
+    }
+  }
   // The `computer` scope (item F) is switched by the device itself from its tray (POST /api/device/computer {enabled}) and lives here, not in the registry
   // (the registry knows four scopes). A gateway restart clears it: the app switches it on again. Off by default, always.
   const computerOn = new Set();
@@ -164,10 +223,12 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     return { token, deviceId: created.id, expiresAt };
   }
   const pairing = createPairing({ now, rate, mint, origin: () => cfg.deskOrigin() });
-  async function authorizeSession(session) {
+  // a browser session bound to a device (the Screen Agent's web view): the same cached device check as the native routes (every /api/ call and every voice
+  // connect used to ask the registry; a stall made /api/auth/me a 503 several times an hour). fresh: ask the registry now (minting a web session).
+  async function authorizeSession(session, { fresh = false } = {}) {
     if (!session?.deviceHash) return !!session;
-    try { const row = await registry('/v1/devices/verify', { hash: session.deviceHash }); return !row.revoked_at && Date.parse(row.expires_at) > now(); }
-    catch (err) { if (err.status === 404) return false; throw fail('Registry ist vorübergehend nicht erreichbar.', 503); }
+    try { return !!(await deviceRecord(session.deviceHash, { fresh })); }
+    catch { throw fail('Registry ist vorübergehend nicht erreichbar.', 503); }
   }
   // Central failure log: every error of a /api/device/ route leaves device.error {path,status,code,message,ms,bytes} (stdout audit + the device log of the day).
   const errSeen = new Map();
@@ -314,22 +375,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     rate(`ip:${clientIp(req)}`, 240);
     const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization ?? '')?.[1];
     let record;
-    if (token && cfg.sessionSecret()) {
-      const digest = hash(token), cached = verified.get(digest);
-      if (cached && cached.until > now() && cached.record.expiresAt > now()) record = cached.record;
-      else {
-        verified.delete(digest);
-        try {
-          const row = await registry('/v1/devices/verify', { hash: digest });
-          record = row.revoked_at ? null : device(row);
-          if (!(record?.expiresAt > now())) record = null;
-          if (record) {
-            if (verified.size >= 1000) verified.delete(verified.keys().next().value);
-            verified.set(digest, { record, until: Math.min(now() + 60000, record.expiresAt) });
-          }
-        } catch (err) { if (err.status !== 404) throw err; }
-      }
-    }
+    if (token && cfg.sessionSecret()) record = await deviceRecord(hash(token));
     if (!record) throw fail('Gerätezugang ungültig.', 401);
     ctx.deviceId = record.deviceId;
     if (path !== '/api/device/caption' && path !== '/api/device/polish' && path !== '/api/device/revise') rate(`device:${record.deviceId}`, computerOn.has(record.deviceId) ? 480 : 120); // captions have their own bucket: 40/min of them must not starve command polls and the trace; a computer run adds a poll, a beat and a result per step
@@ -348,7 +394,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       // Recheck the registry even on a warm native cache. Bind the browser session to the device hash so
       // registry revocation also stops Desk HTTP/voice authentication after process restarts.
       const digest = hash(token);
-      if (!await authorizeSession({ deviceHash: digest })) throw fail('Gerätezugang ungültig.', 401);
+      if (!await authorizeSession({ deviceHash: digest }, { fresh: true })) throw fail('Gerätezugang ungültig.', 401);
       const cookie = issueCookie(now(), { deviceHash: digest }).split(';')[0].slice('desk_s='.length);
       sendJson(res, 200, { cookie, expiresAt: Math.min(record.expiresAt, now() + 30 * 86400000) });
       return true;
@@ -516,12 +562,22 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
       const dctx = dictateContext(raw);
       const chunk = form.has('chunk') ? chunkInfo(form.get('chunk')) : null;
       // the chunks of one long dictation come in a burst: their own, larger bucket instead of the 12/min of single clips
-      if (chunk) { rate(`chunk:${record.deviceId}`, 120); chunkGate(record.deviceId, chunk); } else rate(`media:${record.deviceId}`, 12);
+      let chunkEntry = null;
+      if (chunk) {
+        rate(`chunk:${record.deviceId}`, 120); chunkEntry = chunkGate(record.deviceId, chunk);
+        const known = chunkKnown(chunkEntry, chunk.index);
+        if (known) {
+          const stored = await known; // a running one may still fail: then this answer fails the same way and the app sends it again
+          dlog(record.deviceId, 'dictation.replay', { ...chunk, ms: Date.now() - ctx.started, chars: stored.text?.length ?? 0 });
+          sendJson(res, 200, { ...stored, replay: true });
+          return true;
+        }
+      } else rate(`media:${record.deviceId}`, 12);
       const buffer = Buffer.from(await audio.arrayBuffer());
       wavDuration(buffer);
       // names on his screen when he started to speak (the app posted the visible text, screenText.js): hints for the recognisers and the clean-up
       const names = screenText.terms(record.deviceId, 40), onScreen = names.length ? { bildschirmNamen: names } : {};
-      const result = await limited(record, chunk ? `dictate:${chunk.dictationId}` : 'dictate', async () => {
+      const recognise = limited(record, chunk ? `dictate:${chunk.dictationId}` : 'dictate', async () => {
         const context = artifacts.visibleTitles(dctx.visibleIds).then(items => {
           // Titles first (all of them that fit), then a one-line summary excerpt per artifact while the 2500-char total holds.
           const bounded = items.map(({ id, title }) => ({ id, title: title.slice(0, 60) }));
@@ -536,7 +592,8 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
         }).catch(() => ({ ...dctx, ...onScreen, visibleArtifacts: artifactData([]), titles: [] }));
         // a chunk that is not the last: he is still talking, nobody waits for it, every recogniser gets its time
         return media.dictate(buffer, context, dictionary().catch(() => ({ items: [] })), { patient: chunk ? !chunk.final : false });
-      }).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
+      });
+      const result = await (chunk ? chunkTrack(chunkEntry, chunk.index, recognise) : recognise).catch(err => { dlog(record.deviceId, 'dictation.failed', { status: err.status, code: err.code, ms: Date.now() - ctx.started, bytes: buffer.length, seconds: err.seconds, providers: err.providers, ...(chunk ?? {}) }); throw err; });
       dlog(record.deviceId, 'dictation.result', { screenNames: names.length, ms: result.ms, bytes: buffer.length, seconds: result.seconds, chars: result.text.length, providers: result.providers, degraded: result.degraded, merged: result.merged, ...(result.silent ? { silent: true } : {}), ...(chunk ?? {}), ...(textLog() && appAllows(form.get('log')) ? { text: result.text } : {}) });
       sendJson(res, 200, result);
     } else throw fail('Methode oder Route nicht erlaubt.', 405);

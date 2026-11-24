@@ -69,11 +69,13 @@ describe('device routes (fix-desk)', () => {
     assert(stats.length === 0 || stats.every(e => typeof e.data.costUsd === 'number'));
   });
 
-  it('S9: chunk index must grow, a dictation takes at most 60 chunks', async () => {
+  it('S9 (24 Nov 2026): chunks may come in any order, a known index is answered again from memory', async () => {
     mode = 'up';
     assert.equal((await post('/api/device/dictate', dictateForm({ dictationId: 'c-1', index: 3, final: false }))).status, 200);
     const back = await post('/api/device/dictate', dictateForm({ dictationId: 'c-1', index: 2, final: false }));
-    assert.equal(back.status, 400); assert.equal((await back.json()).code, 'chunk-order');
+    assert.equal(back.status, 200, 'was 400 chunk-order');
+    const again = await post('/api/device/dictate', dictateForm({ dictationId: 'c-1', index: 3, final: false }));
+    assert.equal(again.status, 200); assert.equal((await again.json()).replay, true);
   });
 
   it('S7: a re-sent batch is stored once', async () => {
