@@ -112,7 +112,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     if (!e) {
       const started = [...chunkIds.entries()].filter(([k]) => k.startsWith(`${deviceId}:`)).length;
       if (started >= 20 || chunkIds.size >= 2000) throw Object.assign(fail('Zu viele Diktate pro Stunde.', 429), { code: 'chunk-limit', reason: 'dictations-per-hour', retryAfter: 600, body: { error: 'Zu viele Diktate pro Stunde.', code: 'chunk-limit' } });
-      e = { n: 0, results: new Map(), running: new Map(), until: time + 3600_000 }; chunkIds.set(key, e);
+      e = { key, n: 0, results: new Map(), running: new Map(), until: time + 3600_000 }; chunkIds.set(key, e);
     }
     return e;
   }
@@ -128,7 +128,7 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
     e.running.set(index, promise);
     promise.then(result => {
       e.running.delete(index);
-      if (chunkStored < CHUNK_STORE_MAX && !e.results.has(index)) { e.results.set(index, result); chunkStored++; }
+      if (chunkIds.get(e.key) === e && chunkStored < CHUNK_STORE_MAX && !e.results.has(index)) { e.results.set(index, result); chunkStored++; } // not for a dictation that expired meanwhile
     }, () => { e.running.delete(index); }); // a failed chunk is recognised again on its retry
     return promise;
   }
