@@ -209,16 +209,28 @@ export function createDeviceService({ artifacts, traces, hub, env = process.env,
   }
   const device = row => ({ deviceId: row.id, scopes: row.scopes, expiresAt: Date.parse(row.expires_at), ...(row.label ? { label: row.label } : {}) });
   let dict = null;
+  // A read (GET, the device check) gets two tries of 2.5 s instead of one of 3 s: a lookup that stalls (Sandy's resolver drops a query now and then and
+  // retries only after 5 s, 24 Nov 2026) is given up early and the second try asks DNS again. Writes are tried once (no doubled effect).
   async function registry(path, body, method = body ? 'POST' : 'GET') {
     if (!env.ARTIFACTS_URL || !env.ARTIFACTS_DESK_TOKEN) throw fail('Registry ist nicht eingerichtet.', 503);
-    try {
-      const res = await fetchImpl(new URL(path, env.ARTIFACTS_URL), { method, headers: { authorization: `Bearer ${env.ARTIFACTS_DESK_TOKEN}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'error', signal: AbortSignal.timeout(3000) });
-      if (res.status === 404) throw fail('Nicht gefunden.', 404);
-      if (!res.ok) throw Error('upstream');
-      let length = 0; const chunks = [];
-      for await (const chunk of res.body) { length += chunk.length; if (length > 1000000) throw Error('size'); chunks.push(Buffer.from(chunk)); }
-      return JSON.parse(Buffer.concat(chunks).toString());
-    } catch (err) { if (err.status === 404) throw err; throw fail('Registry ist nicht erreichbar.', 502); }
+    const reads = method === 'GET' || path === '/v1/devices/verify', tries = reads ? 2 : 1;
+    for (let attempt = 1; ; attempt++) {
+      let stage = 'connect';
+      try {
+        const res = await fetchImpl(new URL(path, env.ARTIFACTS_URL), { method, headers: { authorization: `Bearer ${env.ARTIFACTS_DESK_TOKEN}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'error', signal: AbortSignal.timeout(reads ? 2500 : 3000) });
+        stage = 'answer';
+        if (res.status === 404) throw fail('Nicht gefunden.', 404);
+        if (!res.ok) throw Error('upstream');
+        let length = 0; const chunks = [];
+        for await (const chunk of res.body) { length += chunk.length; if (length > 1000000) throw Error('size'); chunks.push(Buffer.from(chunk)); }
+        if (attempt > 1) audit({ action: 'registry.retry', detail: JSON.stringify({ path: path.replace(/\/[0-9a-f-]{36}$/i, '/:id'), attempt, ok: true }), actor: 'device' });
+        return JSON.parse(Buffer.concat(chunks).toString());
+      } catch (err) {
+        if (err.status === 404) throw err;
+        if (stage === 'connect' && attempt < tries) continue; // no answer at all (DNS, connect, timeout): ask once more
+        throw fail('Registry ist nicht erreichbar.', 502);
+      }
+    }
   }
   async function dictionary() {
     if (!dict || dict.expires <= now()) dict = { value: await registry('/v1/dictionary'), expires: now() + 300000 };

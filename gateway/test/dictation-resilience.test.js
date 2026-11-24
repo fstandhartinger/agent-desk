@@ -11,14 +11,15 @@ const wav = (fill = 0) => pcmToWav(Buffer.alloc(32000, fill));
 const DEVICE = '33333333-3333-4333-8333-333333333333';
 
 describe('dictation resilience (registry stalls, idempotent chunks)', () => {
-  let registry, app, base, token, clock = Date.now(), mode = 'up', revoked = false, holds = null, failNext = 0;
+  let registry, app, base, token, loginCookie, clock = Date.now(), mode = 'up', revoked = false, holds = null, failNext = 0, hangOnce = false;
   const calls = [];
   before(async () => {
     registry = await fakeServer((req, res, body) => {
       const u = new URL(req.url, 'http://fake');
       const send = (data, status = 200) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(data));
       if (mode === 'down') return send({ error: 'unavailable' }, 503);
-      if (mode === 'hang') return; // never answers: the gateway's 3 s timeout fires, like the DNS stall
+      if (mode === 'hang') return; // never answers: the gateway's timeout fires, like the DNS stall
+      if (hangOnce && u.pathname === '/v1/devices/verify') { hangOnce = false; return; } // one dropped lookup, the next one answers
       if (u.pathname === '/v1/devices' && req.method === 'POST') return send({ id: DEVICE });
       if (u.pathname === '/v1/devices/verify') return revoked ? send({}, 404) : send({ id: DEVICE, scopes: ['dictate', 'dictionary', 'screen', 'exists'], expires_at: new Date(clock + 864e5).toISOString() });
       if (u.pathname === '/v1/dictionary') return send({ items: [] });
@@ -36,7 +37,7 @@ describe('dictation resilience (registry stalls, idempotent chunks)', () => {
     };
     app = createApp({ deviceOptions: { now: () => clock, media } });
     base = `http://127.0.0.1:${await listen(app.server)}`;
-    const { cookie } = await login(base);
+    const { cookie } = await login(base); loginCookie = cookie;
     ({ token } = await (await fetch(base + '/api/device/pair', { method: 'POST', headers: { cookie, origin: process.env.DESK_ORIGIN } })).json());
   });
   after(() => { app.server.close(); registry.close(); });
@@ -92,6 +93,18 @@ describe('dictation resilience (registry stalls, idempotent chunks)', () => {
     tick(); revoked = true;
     try { assert.equal((await dictate()).status, 401, 'a revocation in the registry holds from the first check after the minute'); }
     finally { revoked = false; }
+  });
+
+  it('a device without a good check yet survives one stalled lookup: the check is asked again after 2.5 s (cold start after a deploy)', async () => {
+    tick(); mode = 'up';
+    const fresh = (await (await fetch(base + '/api/device/pair', { method: 'POST', headers: { cookie: loginCookie, origin: process.env.DESK_ORIGIN } })).json()).token;
+    hangOnce = true;
+    const t0 = Date.now();
+    const r = await fetch(base + '/api/device/dictate', { method: 'POST', headers: { authorization: `Bearer ${fresh}` }, body: form({ dictationId: 'cold-1', index: 0, final: true }) });
+    const ms = Date.now() - t0;
+    assert.equal(r.status, 200, 'was a 502 after 3 s');
+    assert(ms >= 2400 && ms < 4500, `one 2.5 s try, then the answer: ${ms} ms`);
+    assert.equal(hangOnce, false);
   });
 
   it('a chunk sent again gets the stored answer (200, replay) without a second recognition; indices may come in any order', async () => {
