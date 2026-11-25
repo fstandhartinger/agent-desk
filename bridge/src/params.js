@@ -7,6 +7,7 @@ export const METHOD_PARAMS = {
   'ctx.core': { name: 'string', maxChars: 'integer' },
   'ctx.search': { query: 'string', scope: 'string', maxHits: 'integer', regex: 'boolean' },
   'ctx.read': { path: 'string', offset: 'integer', limit: 'integer' },
+  'ctx.grep': { path: 'string', pattern: 'string', regex: 'boolean', glob: 'string', maxHits: 'integer' },
   'ctx.list': { path: 'string', limit: 'integer' },
   'ctx.decisionsToday': { days: 'integer', maxChars: 'integer' },
   'ctx.knowledge': { topic: 'string' },

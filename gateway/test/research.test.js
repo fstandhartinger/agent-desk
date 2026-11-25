@@ -103,7 +103,7 @@ describe('runResearch', () => {
     assert.deepEqual(r.classes.sort(), ['open', 'personal']);
     assert.ok(toolCalls.every((t) => t.maxChars > 2500 && t.research?.start === undefined && t.voiceTurn === undefined), 'big caps, no recursion, no voice context');
     const toolMsgs = seen[3].messages.filter((m) => m.role === 'tool');
-    assert.ok(seen[3].messages.some((m) => m.role === 'user' && /Runde \d von 8/.test(m.content)), 'round nudge');
+    assert.ok(seen[3].messages.some((m) => m.role === 'user' && /Runde \d von 10/.test(m.content)), 'round nudge');
     assert.ok(toolMsgs.some((m) => /"workspace":"@w1"/.test(m.content)), 'long result became a handle');
     assert.ok(toolMsgs.some((m) => /Ich rechne mit 500 USD/.test(m.content)), 'ws_grep found the line');
     assert.ok(steps.some((s) => s.phase === 'start') && steps.every((s) => typeof s.label === 'string'));

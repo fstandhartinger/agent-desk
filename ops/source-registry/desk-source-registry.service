@@ -1,0 +1,7 @@
+[Unit]
+Description=Agent Desk source registry (Wissenslandkarte): live REAX docs + topic -> sources map (job agent-desk-research-upgrade-20261125)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/timeout 300 /home/flori/bin/desk-source-registry
+Nice=10

@@ -359,3 +359,47 @@ export async function decisionKey({ key } = {}) {
     return findDecisionKey(redact(buf.toString('utf8', 0, bytesRead)), key);
   } finally { await fd.close(); }
 }
+
+/**
+ * ctx.grep (job agent-desk-research-upgrade-20261125): ripgrep inside ONE allowed directory or file, for the research agent's
+ * "look it up in the validator code" path (the full-text index covers notes, not code trees). Fixed-string by default,
+ * case-insensitive, at most 80 hits, 2 hits of context are not given (read_file reads around a hit). Same allowlist as ctx.read;
+ * every hit is checked again (no symlink escape) and redacted.
+ */
+export async function grep({ path: p, pattern, regex = false, glob = '', maxHits = 40 } = {}) {
+  const q = String(pattern ?? '').trim();
+  if (!q || q.length > 200) throw new Error('pattern required (1-200 characters)');
+  assertNoSecretFragment(regex ? q.replace(/\\[dDwWsSbB]|[\\^$.*+?()[\]{}|]/g, ' ') : q);
+  const real = resolveAllowed(fromCanonical(String(p ?? '')));
+  const hits = clampInt(maxHits, 40, 1, 80);
+  const g = String(glob ?? '').trim();
+  if (g && !/^[A-Za-z0-9*?._{},/-]{1,60}$/.test(g)) throw new Error('glob: letters, digits and * ? . _ - { } , / only');
+  const args = ['--no-heading', '--with-filename', '--line-number', '--null', '--color', 'never', '--max-columns', '300', '--max-columns-preview',
+    '--max-count', '8', '--max-filesize', '2M', '--no-follow', '--ignore-case', '--max-depth', '8',
+    '-g', '!node_modules', '-g', '!.git', '-g', '!*.jsonl', '-g', '!*.safetensors', '-g', '!*.bin', '-g', '!*.parquet', '-g', '!*.bak*',
+    ...(g ? ['-g', g] : []), ...(regex ? ['-e', q] : ['-F', '-e', q]), '--', real];
+  let stdout = '';
+  let timedOut = false;
+  try {
+    ({ stdout } = await run(RG, args, { timeout: 8000, maxBuffer: 8 * 1024 * 1024 }));
+  } catch (err) {
+    if (typeof err.code !== 'number' && !err.killed && !err.stdout) throw new Error(`grep failed: ${redact(String(err.message)).slice(0, 200)}`);
+    timedOut = Boolean(err.killed);
+    stdout = err.stdout ?? '';
+  }
+  const out = [];
+  let more = 0;
+  for (const line of stdout.split('\n')) {
+    const nul = line.indexOf('\0');
+    if (nul <= 0) continue;
+    const file = line.slice(0, nul);
+    const colon = line.indexOf(':', nul);
+    const lineNo = Number(line.slice(nul + 1, colon));
+    if (colon < 0 || !Number.isInteger(lineNo)) continue;
+    let shown;
+    try { shown = toCanonical(resolveAllowed(file)); } catch { continue; /* outside the allowlist after realpath */ }
+    if (out.length >= hits) { more += 1; continue; }
+    out.push({ path: shown, line: lineNo - 1, text: redact(line.slice(colon + 1).trim()).slice(0, 300) });
+  }
+  return { root: toCanonical(real), pattern: q, hits: out, more, timedOut, note: 'line is 0-based: read_file(path, offset=line-5) reads around it' };
+}

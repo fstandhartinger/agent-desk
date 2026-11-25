@@ -63,6 +63,7 @@ export function buildMethods(claude, host = 'lechonk') {
     'ctx.decisionKey': ctx.decisionKey,
     'ctx.search': ctx.search,
     'ctx.read': ctx.read,
+    'ctx.grep': ctx.grep,
     'ctx.list': ctx.list,
     'ctx.decisionsToday': ctx.decisionsToday,
     'ctx.knowledge': knowledge,
