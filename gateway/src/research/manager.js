@@ -33,7 +33,7 @@ export function progressNote(run, ms = Date.now() - run.startedAt) {
   ].join('\n');
 }
 
-export function createResearchManager({ runTool, toolDefs, complete, model, subModel, now = Date.now, budget = BUDGET, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), research = runResearch, log = () => {}, hardExtraMs = HARD_EXTRA_MS }) {
+export function createResearchManager({ runTool, toolDefs, complete, model, subModel, finalModel = model, now = Date.now, budget = BUDGET, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), research = runResearch, log = () => {}, hardExtraMs = HARD_EXTRA_MS }) {
   const sessions = new Map(); // sid -> hooks {say, trace, activity}
   const runs = new Map(); // id -> run
   const guards = new Map(); // sid -> until (epoch ms)
@@ -131,7 +131,7 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
       }, budget.ms + hardExtraMs);
       hardTimer.unref?.();
     });
-    run.promise = Promise.race([research({ question, focus, context, ctx, model, subModel, budget, onStep }, { runTool, complete, toolDefs: typeof toolDefs === 'function' ? toolDefs() : toolDefs, now }), hardCap])
+    run.promise = Promise.race([research({ question, focus, context, ctx, model, subModel, finalModel, budget, onStep }, { runTool, complete, toolDefs: typeof toolDefs === 'function' ? toolDefs() : toolDefs, now }), hardCap])
       .then((result) => { clearTimeout(hardTimer); return result; }, (err) => { clearTimeout(hardTimer); return ({ answer: `Die Recherche ist fehlgeschlagen (${short(err?.message ?? err, 120)}).`, found: false, sources: [], unconfirmed: [], confidence: 'niedrig', classes: [], rounds: 0, steps: 0, ms: now() - run.startedAt, costUsd: 0, model, stopped: 'error' }); })
       .then((result) => {
         run.result = result;
