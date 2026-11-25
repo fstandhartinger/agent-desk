@@ -189,6 +189,8 @@ ${opening}`);
   let lastUserText = '';
   let researchTools = 0; // non-drawing tool calls of the current user turn
   let audioUntil = 0; // when the assistant audio sent so far ends playing (24 kHz PCM16 = 48,000 bytes per second)
+  let audibleUntil = 0; // like audioUntil, but only non-silent assistant audio (GPT-Live streams silent frames)
+  let lastAssistantAt = -Infinity; // last assistant transcript piece or tool call: GPT-Live keeps speaking after response.done (no turn_done follows)
   let guard = { question: '', tools: 0, answer: '', last: '', nudged: false, timer: null }; // Gemini answer guard (answerGuard.js), per question
   let factsAt = null; // researchTools when the early facts went out with a tool result (round 12)
   // Round 12 (live r12, Gemini fast: first search 0.4 s after the question, before the early facts were read): a Gemini research
@@ -399,6 +401,7 @@ ${opening}`);
   /** The assistant starts a NEW answer (nothing of an older one was running): the user's question is complete, no need to wait for more fragments. */
   function assistantStarted() {
     responding = true; // bare audio does not prove an answer is in flight (OpenAI streams audio frames while the user speaks)
+    lastAssistantAt = now();
     if (!contentOpen || interrupted) return;
     flushTranscript();
     commitUser();
@@ -757,6 +760,7 @@ ${opening}`);
           trace.event('card.startup.first_audio', { source: 'provider', ms: now() - openingAt, ...(beganAt !== null ? { sinceStart: now() - beganAt } : {}) });
         }
         audioUntil = Math.max(audioUntil, now()) + Math.round(e.pcm.length / 48);
+        if (!isSilent(e.pcm)) audibleUntil = Math.max(audibleUntil, now()) + Math.round(e.pcm.length / 48);
         if (!audioSeen) { audioSeen = true; markOk(provider); } // a session that produced speech counts as working today
         if (timing && !timing.audioAt && !isSilent(e.pcm)) { timing.audioAt = now(); trace.event('audio.first', { turn: timing.turn, msAfterQuestion: timing.audioAt - timing.at }); }
         audioRun.bytes += e.pcm.length;
@@ -956,7 +960,7 @@ ${opening}`);
       return adapter?.setBriefing?.(out) ?? 'unsupported';
     } });
     // Computer runs (item F): the manager hears his finals, partials and the assistant's finals through the hooks above and speaks through say().
-    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj), idle: () => !closed && !responding && runningTools === 0 && !pending.active && !speechOpen && now() - speechAt > 3000 });
+    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj), idle: () => !closed && !answerInFlight() && runningTools === 0 && !pending.active && !speechOpen && now() - speechAt > 3000 });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -1204,6 +1208,15 @@ ${opening}`);
    * Florian marked something on the screen (Screen Agent highlight): the description reaches the model as a marked context turn that asks for
    * an answer. It is no user transcript: the browser sees nothing of it, the trace flags it `marker`, no illustrator, no growing-fragment merge.
    */
+  /**
+   * An answer is really in flight: a backend response is open, or the assistant spoke within the last 2.5 s. `responding` alone stays
+   * true after GPT-Live's spoken tail (no turn_done follows it), which held every research result for the full 90 s (a#474b71, 25 Nov).
+   */
+  function answerInFlight() {
+    if (!responding) return false;
+    return openResponses.size > 0 || now() - lastAssistantAt < 2500 || now() < audibleUntil + 600;
+  }
+
   function deliverMarker(raw, quiet = false) {
     const text = String(raw ?? '').slice(0, 12000).trim();
     if (!text || !adapter || closed) return false;

@@ -6,12 +6,13 @@ import { activityLabel } from '../tools.js';
 import { redact, short } from '../redact.js';
 import { createWorkspace, STORE_FROM } from './workspace.js';
 import { FINAL_NUDGE, SUB_SYSTEM, systemPrompt, userPrompt } from './prompt.js';
+import { loadRegistry, mustCheck, registryHint } from './sources.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description) => ({ type: 'integer', description });
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
-export const BUDGET = Object.freeze({ rounds: 8, ms: 110_000, usd: 0.25, parallel: 4, subChunks: 12, subParallel: 4 });
+export const BUDGET = Object.freeze({ rounds: 10, ms: 95_000, usd: 0.4, parallel: 5, subChunks: 12, subParallel: 4 });
 export const WARM_CHARS = 2800;
 // Questions about the internet keep the web tools: no warm start (it reads our own data, which closes the web; taint rule).
 // Broader since the web tools exist (web-tools review): outside facts, prices, versions, news. An own-data question that matches only
@@ -35,7 +36,7 @@ export const RESULT_CHARS = 40_000; // per tool call into the workspace (the voi
 
 /** Read tools the research model may call (existing Desk tools; everything here only reads). */
 export const RESEARCH_TOOLS = [
-  'search', 'discover', 'conversation_history', 'desk_sessions',
+  'source_map', 'reax_docs', 'grep_path', 'search', 'discover', 'conversation_history', 'desk_sessions',
   'knowledge_read', 'read_core_doc', 'decisions_recent', 'read_file', 'list_jobs', 'job_status',
   'board_threads', 'board_read', 'board_entry', 'chats_search', 'chat_read', 'skills_list', 'skill_read',
   'ledger_spend', 'run_readonly', 'desk_status', 'session_trace', 'code_outline', 'artifact_search', 'artifact_resolve',
@@ -205,7 +206,7 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
     }
     steps += 1;
     (timing.toolMs[call.name] ??= []).push(now() - t0);
-    onStep({ phase: ok ? 'done' : 'fail', id: call.id, name: call.name, label, ms: now() - t0 });
+    onStep({ phase: ok ? 'done' : 'fail', id: call.id, name: call.name, label, ms: now() - t0, args: short(JSON.stringify(args ?? {}), 200) });
     return content;
   }
 
@@ -220,7 +221,19 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
     const got = await Promise.all(calls.map((c) => exec(c, { store: false })));
     warm = got.filter((g) => !g.startsWith('ERROR')).map((g, i) => `${i ? '[Laptop-Sitzungen] ' : ''}${short(g, WARM_CHARS / calls.length)}`).join('\n---\n');
   }
-  messages.push({ role: 'user', content: userPrompt(question, { focus, context, warm }) });
+  // the source registry: where the answer to this kind of question is authoritative (job agent-desk-research-upgrade-20261125)
+  let reg = null;
+  try { reg = await (deps.registry ? deps.registry() : loadRegistry(ctx.hub)); } catch { reg = null; /* the registry is a help, never a blocker */ }
+  const map = reg ? registryHint(reg, `${question} ${focus}`) : '';
+  const required = reg ? mustCheck(reg, `${question} ${focus}`) : [];
+  messages.push({ role: 'user', content: userPrompt(question, { focus, context, warm, map }) });
+  let guardUsed = false;
+  // A "not found" answer is refused once while the registry's sources for the topic were not read (CoS #85801, a#474b71).
+  const unread = () => required.filter((s) => {
+    if (s.kind === 'mcp') return !touched.some((t) => t.tool === 'reax_docs');
+    if (s.kind === 'live') return !touched.some((t) => t.tool === 'reax_docs' || t.args.includes(s.ref.split('/').pop()));
+    return !touched.some((t) => t.args.includes(s.ref.split('/').slice(-2).join('/')));
+  });
 
   try {
     for (rounds = 0; rounds < budget.rounds && !over() && !signal?.aborted;) {
@@ -228,7 +241,19 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
       const message = await ask(messages, { tools: toolsNow() });
       const calls = message.tool_calls ?? [];
       const final = calls.find((c) => c.name === 'answer');
-      if (final) { const a = parseArgs(final.args); if (a) return done(normaliseAnswer(a), 'answer'); }
+      if (final) {
+        const a = parseArgs(final.args);
+        if (a) {
+          const res = normaliseAnswer(a);
+          const missing = !res.found && !guardUsed && left() > FINAL_RESERVE_MS + 15_000 ? unread() : [];
+          if (!missing.length) return done(res, 'answer');
+          guardUsed = true;
+          messages.push({ role: 'assistant', content: message.content || null, tool_calls: [{ id: final.id, type: 'function', function: { name: 'answer', arguments: typeof final.args === 'string' ? final.args : JSON.stringify(final.args ?? {}) } }] });
+          messages.push({ role: 'tool', tool_call_id: final.id, content: `Noch nicht: "nichts gefunden" gilt erst, wenn die maßgeblichen Quellen dieses Themas gelesen sind. Lies JETZT (parallel): ${missing.map((m) => `${m.label}: ${m.ref}${m.how ? ` (${m.how})` : ''}`).join(' | ')}. Danach answer.` });
+          onStep({ phase: 'done', id: `guard-${rounds}`, name: 'guard', label: 'Prüfe die maßgeblichen Quellen', ms: 0 });
+          continue;
+        }
+      }
       if (!calls.length) return done(answerFromText(message.content), 'text');
       const run = calls.filter((c) => c.name !== 'answer').slice(0, budget.parallel);
       messages.push({ role: 'assistant', content: message.content || null, tool_calls: run.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args ?? {}) } })) });

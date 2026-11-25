@@ -17,6 +17,7 @@ import { conversationHistory, deskSessions } from './history.js';
 import { runVoiceAction } from './voiceActions.js';
 import { computerTask } from './computer/tool.js';
 import { DISCOVERY_HANDLERS, DISCOVERY_TOOL_DEFS, escalate } from './discover.js';
+import { SOURCE_HANDLERS, SOURCE_TOOL_DEFS } from './research/sources.js';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -77,6 +78,8 @@ export const TOOL_DEFS = [
     parameters: obj({ query: str('Search text'), scope: str('Where to search', { enum: ['jobs', 'docs', 'skills', 'all'] }), maxHits: int('Maximum hits') }, ['query']) },
   { name: 'read_file', description: 'Read a text file from the allowed workshop paths (job folders, skills, chat histories). offset and limit count LINES, not characters. The result states totalLines and, when more follows, nextOffset: pass it as offset to continue.',
     parameters: obj({ path: str('Absolute path. When Florian gave a path, pass exactly that path, verbatim; never guess one.'), offset: int('First line to read, 0-based LINE number (default 0). Never a character position.'), limit: int('Maximum number of LINES (default 400)') }, ['path']) },
+  { name: 'grep_path', description: 'Search ONE folder or file (a job folder, a code tree such as the validator/window kit, the source registry) for a word or phrase, like `rg -n -i`: paths with 0-based line numbers. Use the paths from source_map. Then read_file(path, offset=line-5, limit=40) around a hit.',
+    parameters: obj({ path: str('Absolute folder or file path (from source_map, a job folder, /home/flori/desk-knowledge/sources)'), pattern: str('Fixed text to find (case-insensitive), e.g. "holder" or "def podium"'), regex: { type: 'boolean', description: 'pattern is a regular expression (default false)' }, glob: str('Optional file filter, e.g. "*.py" or "*.md"'), maxHits: int('Maximum hits (default 40, max 80)') }, ['path', 'pattern']) },
   { name: 'decisions_recent', description: 'The decisions Florian recorded today and yesterday (newest first, from DECISIONS.md). Use for "what was decided today", "what did Florian decide recently".',
     parameters: obj({ days: int('How many days including today (1-7, default 2)') }) },
   { name: 'list_jobs', description: 'List agent jobs with state and last activity.',
@@ -126,6 +129,8 @@ export const TOOL_DEFS = [
   ...READ_TOOL_DEFS(),
   // --- discovery (job agent-desk-context-discovery-20261115, gateway/src/discover.js): map, full-text search, background research
   ...DISCOVERY_TOOL_DEFS(),
+  // --- source registry + public REAX docs (job agent-desk-research-upgrade-20261125, research/sources.js)
+  ...SOURCE_TOOL_DEFS(),
 ];
 
 function READ_TOOL_DEFS() {
@@ -205,6 +210,7 @@ export const BRIDGE_TOOLS = {
   knowledge_read: ['ctx.knowledge', ({ topic }) => ({ topic })],
   search_files: ['ctx.search', ({ query, scope, maxHits }) => ({ query, scope, maxHits })],
   read_file: ['ctx.read', ({ path, offset, limit }) => ({ path, offset, limit })],
+  grep_path: ['ctx.grep', ({ path, pattern, regex, glob, maxHits }) => ({ path, pattern, regex, glob, maxHits })],
   decisions_recent: ['ctx.decisionsToday', ({ days }, max) => ({ days, maxChars: Math.max(1000, Math.floor(max * 0.75)) })],
   list_jobs: ['jobs.list', ({ filter, activeOnly, limit }) => ({ filter, activeOnly, limit })],
   job_status: ['jobs.get', ({ name }) => ({ name })],
@@ -287,6 +293,9 @@ const STATUS = {
   search: () => 'Ich suche überall …',
   research: () => 'Ich lasse das recherchieren …',
   research_result: () => 'Ich schaue, was die Recherche hat …',
+  reax_docs: () => 'Ich schaue in den geltenden Regeln nach …',
+  grep_path: () => 'Ich suche im Code und in den Dateien …',
+  source_map: () => 'Ich schaue, wo das steht …',
 };
 
 /** Short German "I'm looking at …" line shown before a tool runs; null for tools that answer instantly. */
@@ -350,6 +359,9 @@ const ACTIVITY = {
   search: ({ query }) => `Suche überall: ${snip(query, 40)}`,
   research: ({ question }) => `Recherche: ${snip(question, 45)}`,
   research_result: () => 'Prüfe die Recherche',
+  reax_docs: ({ method, query }) => `REAX-Regeln live: ${snip(query || method, 40)}`,
+  source_map: () => 'Schaue in die Wissenslandkarte',
+  grep_path: ({ pattern }) => `Durchsuche Dateien: ${snip(pattern, 40)}`,
 };
 /** The live-activity label of a tool call (German, <= ~70 characters, redacted); an unknown tool is shown by its name. */
 export function activityLabel(name, args = {}) {
@@ -614,7 +626,15 @@ export async function runTool(name, args, ctx) {
         const [method, mapArgs] = BRIDGE_TOOLS[name];
         const pathHost = name === 'read_file' ? laptopMirrorReadHost(clean.path) : null;
         host = pathHost ?? ctx.hub.pick?.(method) ?? 'bridge';
-        result = await ctx.hub.call(method, mapArgs(clean, max), pathHost ? { host: pathHost } : undefined);
+        try {
+          result = await ctx.hub.call(method, mapArgs(clean, max), pathHost ? { host: pathHost } : undefined);
+        } catch (err) {
+          // a file that lives on the other machine only (LeChonk desk-knowledge topics, Sandy-only job folders): ask that host once
+          const other = (name === 'read_file' || name === 'grep_path') && !pathHost && /not allowed or not found|ENOENT|not a file/i.test(String(err?.message)) ? { sandy: 'lechonk', lechonk: 'sandy' }[host] : null;
+          if (!other || !ctx.hub.conns?.get?.(other)) throw err;
+          result = await ctx.hub.call(method, mapArgs(clean, max), { host: other });
+          host = other;
+        }
       } else if (READ_HANDLERS[name]) ({ result, host = host, empty } = await READ_HANDLERS[name](clean, ctx, max));
       else result = await gatewayTool(name, clean, ctx, max);
     } catch (err) {
@@ -769,4 +789,4 @@ async function handoffPropose({ title, task, why }, ctx) {
   return { result: { id: proposal.id, [HANDOFF_EVENT]: { type: 'handoff', id: proposal.id, title: proposal.title, task: proposal.task, why: proposal.why } }, host: 'gateway' };
 }
 
-const READ_HANDLERS = { web_read: webReadTool, web_search: webSearchTool, http_get: httpGetTool, chats_search: chatsSearch, chat_read: chatRead, discord_read: discordRead, handoff_propose: handoffPropose, claude_task: (args, ctx) => claudeTask(args, ctx).then((r) => ({ ...r, host: 'gateway' })), ...DISCOVERY_HANDLERS };
+const READ_HANDLERS = { web_read: webReadTool, web_search: webSearchTool, http_get: httpGetTool, chats_search: chatsSearch, chat_read: chatRead, discord_read: discordRead, handoff_propose: handoffPropose, claude_task: (args, ctx) => claudeTask(args, ctx).then((r) => ({ ...r, host: 'gateway' })), ...DISCOVERY_HANDLERS, ...SOURCE_HANDLERS };
