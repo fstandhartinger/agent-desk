@@ -94,7 +94,8 @@ export function createResearchManager({ runTool, toolDefs, complete, model, subM
     let idle = false;
     try { idle = typeof h?.idle === 'function' ? h.idle() : false; } catch { idle = false; }
     if (!idle) { traceTo(run, 'research.progress_skipped', { id: run.id, reason: h ? 'busy' : 'no-voice-session' }); return; }
-    const said = h?.say?.(progressNote(run, now() - run.startedAt)) ?? false;
+    const note = progressNote(run, now() - run.startedAt);
+    const said = (typeof h?.progress === 'function' ? h.progress(note) : h?.say?.(note)) ?? false;
     traceTo(run, 'research.progress', { id: run.id, said, steps: run.steps.length, ms: now() - run.startedAt });
   }
 

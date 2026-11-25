@@ -960,7 +960,7 @@ ${opening}`);
       return adapter?.setBriefing?.(out) ?? 'unsupported';
     } });
     // Computer runs (item F): the manager hears his finals, partials and the assistant's finals through the hooks above and speaks through say().
-    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj), idle: () => !closed && !answerInFlight() && runningTools === 0 && !pending.active && !speechOpen && now() - speechAt > 3000 });
+    detachComputer = deps.computer?.attach(sid, { client: msg.client ?? null, say: (text) => deliverMarker(text, true), progress: (text) => deliverMarker(text, true, { noWatch: true }), trace: (type, data) => trace.event(type, data), activity: (obj) => activity(obj), idle: () => !closed && !answerInFlight() && runningTools === 0 && !pending.active && !speechOpen && now() - speechAt > 3000 });
     unregisterText = deps.registerText?.((text, o) => readyAt !== null && (o?.marker ? deliverMarker(text) : deliverText(text)));
     // Round 10 (live r10): the first ledger read of a session is cold on the bridge (~3 s for the board pages), and money questions
     // are the common voice case; warming its 5-minute cache now takes those seconds out of the first spoken answer.
@@ -1217,7 +1217,7 @@ ${opening}`);
     return openResponses.size > 0 || now() - lastAssistantAt < 2500 || now() < audibleUntil + 600;
   }
 
-  function deliverMarker(raw, quiet = false) {
+  function deliverMarker(raw, quiet = false, { noWatch = false } = {}) {
     const text = String(raw ?? '').slice(0, 12000).trim();
     if (!text || !adapter || closed) return false;
     // a#89f540 (15 Nov): his speech pre-empted the answer to the run's end, and the model then spoke of "den laufenden Lauf"
@@ -1231,7 +1231,9 @@ ${opening}`);
     interrupted = false;
     lastFinal = spoken && !spoken.answered ? { ...spoken, turn: turnId } : null; // he often goes on talking while he draws: the sentence still grows across the marking
     lastUserText = text;
-    armNoAnswer(text);
+    // a progress note asks for one status sentence, not an answer: no no-answer watchdog (live a#3fcb86: the watchdog took
+    // "Ich schaue noch nach" for an unkept promise, recovered, and the real result then went unspoken)
+    if (noWatch) { pending.active = false; clearTimeout(pending.timer); } else armNoAnswer(text);
     trace.event('transcript.user.final', quiet ? { turn: turnId, marker: true, computer: true, chars: text.length } : { turn: turnId, text: text.replace(/\d/g, '#'), marker: true }); // what he circled is screen data: numbers stay out of the durable trace
     adapter.sendText(text);
     return true;
