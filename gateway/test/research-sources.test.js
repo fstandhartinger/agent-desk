@@ -143,3 +143,15 @@ describe('research manager: no silent stalls', () => {
     assert.ok(said.some((s) => /ist fertig/.test(s)), 'result delivered at once when idle');
   });
 });
+
+describe('forced final answer', () => {
+  it('uses finalModel when the budget runs out', async () => {
+    const models = [];
+    const complete = async (req) => { models.push(req.model); return req.tools?.length === 1 ? { message: { content: '', tool_calls: [call('answer', { antwort: 'Laut podium.py ein Platz pro Holder.', gefunden: true })] }, costUsd: 0 } : { message: { content: '', tool_calls: [call('search', { query: 'x' })] }, costUsd: 0 }; };
+    const r = await runResearch({ question: 'Code?', ctx: { sid: 's' }, model: 'fast', finalModel: 'strong', warmStart: false, budget: { rounds: 2, ms: 60_000, usd: 1, parallel: 2, subChunks: 1, subParallel: 1 } }, { runTool: async () => ({ ok: true, content: 'x' }), complete, toolDefs: TOOL_DEFS, registry: async () => null });
+    assert.equal(r.stopped, 'budget');
+    assert.deepEqual(models, ['fast', 'fast', 'strong']);
+    assert.equal(r.finalModel, 'strong');
+    assert.equal(r.found, true);
+  });
+});

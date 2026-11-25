@@ -35,6 +35,7 @@ export const cfg = {
   // background research agent (gateway/src/research): measured on the discovery test set; zero-data-retention routing is required for it
   researchModel: () => env('DESK_RESEARCH_MODEL', 'deepseek/deepseek-v4.1-flash'), // eval r5: 75 % correct with source, median 8 s, USD 0.004 (Gemini 3.8 Flash 70 %, 12 s, USD 0.023)
   researchSubModel: () => env('DESK_RESEARCH_SUB_MODEL') || cfg.researchModel(),
+  researchFinalModel: () => env('DESK_RESEARCH_FINAL_MODEL', 'openai/gpt-6.2-sol'), // writes the forced answer at the budget end (job agent-desk-research-upgrade-20261125 eval: 80-82 %, reasons better over long reads)
   research: () => env('DESK_RESEARCH', 'on') !== 'off', // kill switch: off = the research tool says it is unavailable
   // web tools of the research agent (webSearch.js, httpGet.js): the Brave key is shared with other agents (free plan: 1 request/s, 2,000/month)
   braveKey: () => env('BRAVE_API_KEY').trim(),

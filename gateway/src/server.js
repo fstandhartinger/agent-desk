@@ -87,7 +87,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   const traces = createTraceService(traceOptions);
   const devices = createDeviceService({ artifacts, traces, hub, ...deviceOptions });
   // background research agent (discovery job): one manager per gateway; voice sessions reach it through the computer attach (no session.js change)
-  const research = cfg.research() ? createResearchManager({ runTool, toolDefs: TOOL_DEFS, complete: (args) => completeChat({ ...args, zdrOnly: true }), model: cfg.researchModel(), subModel: cfg.researchSubModel(), log: (m) => console.log(`${new Date().toISOString()} ${short(m, 200)}`) }) : null;
+  const research = cfg.research() ? createResearchManager({ runTool, toolDefs: TOOL_DEFS, complete: (args) => completeChat({ ...args, zdrOnly: true }), model: cfg.researchModel(), subModel: cfg.researchSubModel(), finalModel: cfg.researchFinalModel(), log: (m) => console.log(`${new Date().toISOString()} ${short(m, 200)}`) }) : null;
   attachKnowledge(hub);
   setAuditSink((line) => hub.call('audit.append', line).catch(() => /* ignored */ {}));
   const canvasBus = createCanvasBus();

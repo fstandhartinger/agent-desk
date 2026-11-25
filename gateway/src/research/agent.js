@@ -119,7 +119,7 @@ function answerFromText(content) {
  * {message:{content, tool_calls:[{id,name,args}]}, costUsd}, toolDefs, now}. Returns
  * {answer, found, sources, unconfirmed, confidence, classes, rounds, steps, ms, costUsd, model, stopped}.
  */
-export async function runResearch({ question, focus = '', context = '', ctx = {}, model, subModel = model, budget = BUDGET, onStep = () => {}, signal, warmStart = true, reasoning }, deps) {
+export async function runResearch({ question, focus = '', context = '', ctx = {}, model, subModel = model, finalModel = model, budget = BUDGET, onStep = () => {}, signal, warmStart = true, reasoning }, deps) {
   const now = deps.now ?? Date.now;
   const started = now();
   const ws = createWorkspace();
@@ -140,11 +140,11 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
   const left = () => budget.ms - (now() - started);
   const spendOk = () => ctx.limits?.check?.(ctx.sid ?? 'desk', 'spend')?.ok !== false; // the Desk daily cap (review P2-4)
   const over = () => left() < FINAL_RESERVE_MS || cost >= budget.usd || !spendOk();
-  const done = (res, stopped) => ({ ...res, timing, classes: [...classes], outsider, touched: touched.slice(0, 30), rounds, steps, ms: now() - started, costUsd: Math.round(cost * 10000) / 10000, model, stopped });
+  const done = (res, stopped) => ({ ...res, ...(stopped === 'budget' && finalModel !== model ? { finalModel } : {}), timing, classes: [...classes], outsider, touched: touched.slice(0, 30), rounds, steps, ms: now() - started, costUsd: Math.round(cost * 10000) / 10000, model, stopped });
   const ask = async (msgs, opts = {}) => {
     const timeout = AbortSignal.timeout(Math.max(3000, Math.min(left(), 45_000)));
     const m0 = now();
-    const r = await deps.complete({ model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(reasoning ? { reasoning: { effort: reasoning } } : {}), ...opts });
+    const r = await deps.complete({ model: opts.model ?? model, messages: msgs, maxTokens: 2000, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(reasoning ? { reasoning: { effort: reasoning } } : {}), ...opts });
     timing.modelMs.push(now() - m0);
     cost += Number(r.costUsd) || 0;
     return r.message ?? { content: '', tool_calls: [] };
@@ -268,7 +268,9 @@ export async function runResearch({ question, focus = '', context = '', ctx = {}
     if (signal?.aborted) return done(normaliseAnswer({ antwort: 'Die Recherche wurde abgebrochen.', gefunden: false }), 'aborted');
     // budget or rounds used up: one last call that must answer
     messages.push({ role: 'user', content: FINAL_NUDGE });
-    const message = await ask(messages, { tools: tools.filter((t) => t.name === 'answer'), maxTokens: 900 });
+    // the forced final answer: the stronger finalModel writes it from everything read so far (live a#a7e098: the fast model read
+    // podium.py and still answered "nichts gefunden" at the budget end)
+    const message = await ask(messages, { tools: tools.filter((t) => t.name === 'answer'), maxTokens: 900, model: finalModel });
     const final = (message.tool_calls ?? []).find((c) => c.name === 'answer');
     const res = final && parseArgs(final.args) ? normaliseAnswer(parseArgs(final.args)) : answerFromText(message.content);
     return done({ ...res, confidence: res.confidence === 'hoch' ? 'mittel' : res.confidence }, 'budget');

@@ -85,7 +85,7 @@ async function one(q) {
     return res;
   };
   const t0 = Date.now();
-  const r = await research.runResearch({ question: q.q, focus: q.focus ?? '', ctx, model: cfg.researchModel(), subModel: cfg.researchSubModel(), budget: research.BUDGET },
+  const r = await research.runResearch({ question: q.q, focus: q.focus ?? '', ctx, model: cfg.researchModel(), subModel: cfg.researchSubModel(), finalModel: cfg.researchFinalModel(), budget: research.BUDGET },
     { runTool: logged, toolDefs: TOOL_DEFS, complete: (a) => completeChat({ ...a, zdrOnly: true }) });
   const rec = { id: q.id, q: q.q, model: cfg.researchModel(), ms: Date.now() - t0, answer: r.answer, found: r.found, sources: r.sources, unconfirmed: r.unconfirmed, confidence: r.confidence, stopped: r.stopped, rounds: r.rounds, steps: r.steps, costUsd: r.costUsd, calls, at: new Date().toISOString() };
   out.write(`${JSON.stringify(rec)}\n`);
