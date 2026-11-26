@@ -1,0 +1,30 @@
+#!/bin/bash
+# Sandy agent-chat mirror -> LeChonk, only through the secret gate (agent-desk PR #49). One run at a time.
+# Installed as ~/bin/desk-chats-push on Sandy (desk-chats-push.service / .timer, deputy #65807). Repo copy since #86913.
+set -euo pipefail
+umask 077
+exec 9>"$HOME/.cache/desk-chats-push.lock"
+flock -n 9 || { echo "desk-chats-push: another run holds the lock" >&2; exit 0; }
+# Deputy #65807: every run (manual or timer) needs the Sandy load guard; skip quietly otherwise.
+if ! "$HOME/bin/load-guard" check --host sandy >/dev/null 2>&1; then
+  echo "desk-chats-push: skipped, load-guard check --host sandy not GO" >&2; exit 0
+fi
+B=${DESK_BRIDGE_DIR:-$HOME/apps/agent-desk-bridge-sandy}
+OUT=$HOME/.local/share/desk-chats-mirror/sandy
+node "$B/scripts/chats/mirror.mjs" --host sandy --out "$OUT"
+# Scan exactly what leaves the host: stage the push set (the local .state.json never leaves and is
+# larger than the scanner's size limit), gate the staged copy, push that same copy.
+STAGE=$HOME/.local/share/desk-chats-mirror/.push-stage-sandy
+SCANOUT=$HOME/.local/share/desk-chats-mirror/.scan-sandy.out   # counts and relative paths only (scan.mjs prints no text)
+gate() { rsync -a --delete --exclude .state.json --exclude '*.resettle.*.tmp' "$OUT/" "$STAGE/"; local rc=0; node "$B/scripts/chats/scan.mjs" "$STAGE" >"$SCANOUT" || rc=$?; head -1 "$SCANOUT"; return $rc; }
+rc=0; gate || rc=$?
+if [ "$rc" -eq 3 ]; then
+  # #86913: the secret value set grew after these day files were rendered (mirror.mjs re-renders a file only when its transcript
+  # changes). Settle exactly the named files in the mirror, then gate the WHOLE staged copy again; the gate itself is unchanged.
+  echo "desk-chats-push: gate failed on $(grep -c '^FAIL ' "$SCANOUT" || true) files; settling them and scanning again" >&2
+  node "$B/scripts/chats/resettle.mjs" "$OUT" "$SCANOUT"
+  rc=0; gate || rc=$?
+fi
+if [ "$rc" -ne 0 ]; then awk '/^FAIL /{print; if (++n >= 200) exit}' "$SCANOUT" || true; exit "$rc"; fi
+rsync -a --delete --chmod=D700,F600 "$STAGE/" lechonk:desk-knowledge/chats-mirror/sandy/
+echo "desk-chats-push: pushed $(find "$STAGE/sessions" -type f | wc -l) day files"

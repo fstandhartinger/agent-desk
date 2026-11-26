@@ -34,6 +34,9 @@ const NOT_SECRET = [
   /^\d{4}-\d{2}-\d{2}[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?$/, // an ISO timestamp
   /^<[^>]*>$|^\[[A-Z_]+\]$/, // tokenizer specials and doc placeholders (<|endoftext|>, [PAD])
   /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/, // the NAME of a variable (OPENROUTER_API_KEY), not its value
+  // an ssh/scp target `user@IPv4[:port]` is an address like a mail address or a host name, not a secret (#86913: a server's
+  // root@<ip> in a Sandy store blocked 900+ chat-mirror files that name the same ssh target)
+  /^[a-z_][a-z0-9_.-]*@\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?$/,
 ];
 const PLAIN_WORD = /^[A-Za-z][A-Za-z._-]*$/; // shorter than 16 chars: a user name or a word, not a secret
 // Critic round 3, P1-3: names whose values are identifiers, not secrets (their values showed up in every GitHub URL).
@@ -66,8 +69,13 @@ const JSON_STORE = /(?:^|[._-])(?:auth|credentials?|tokens?|secrets?|web_session
 // every file below these is a store candidate (ssh keys without a telling name, wallet files, OAuth caches)
 const SECRET_DIR_REL = /^(?:\.ssh|\.mcp-auth|\.bittensor\/wallets|\.bonsai-autoscale|\.secrets[\w-]*|\.antseed[\w-]*|\.claude[\w-]*\/accounts|\.aws|\.kube)\/|^\.docker\/config\.json$/;
 const SECRET_DIR_NAME = /^\.?(?:private|secrets?|credentials)$/i;
-// documentation and code are never stores (a `.py` file or a systemd unit looks KEY=VALUE-shaped); public keys neither
+// documentation and code are never stores (a `.py` file or a systemd unit looks KEY=VALUE-shaped); public keys neither.
+
 const NOT_STORE = /\.(?:py|js|mjs|cjs|ts|tsx|jsx|go|rs|rb|php|java|sh|bash|zsh|ps1|md|txt\.bak|html?|css|scss|service|timer|socket|desktop|example|sample|template|tmpl|dist|lock|db|sqlite\d?|journal|log|jsonl|gz|zip|tar|tgz|png|jpe?g|gif|webp|svg|pdf|pub|csv|sock|ansi)$|-journal$|^secret-windows\.json|\.address$|^known_hosts|^authorized_keys|^coldkeypub\.txt$/i;
+// #86913: outside the secret directories, code in more languages is no store either (ScreenAgent.Core/SecretText.cs made its
+// redaction regexes "secret values"), nor a model's tokenizer files (public vocabulary named like a token store). Config-like
+// languages (.lua, .pl) stay stores, and inside ~/.ssh, ~/.secrets*, private/ ... every one of these names still is.
+const NOT_STORE_CODE = /\.(?:kt|kts|scala|swift|cs|csx|vb|fs|fsx|c|h|cc|cpp|cxx|hpp|hh|m|mm|dart|vue|svelte|groovy|xaml|csproj|vbproj|sln|psm1)$|^(?:tokenizer(?:_config)?|special_tokens_map|added_tokens|generation_config)\.json$|^(?:vocab|merges)\.(?:json|txt)$/i;
 // strict mode does not apply here: the stores of the host's own secret directories and the home root
 const CURATED_REL = /^(?:\.config|\.hermes|\.local\/share|\.ssh|\.mcp-auth|\.bittensor|\.bonsai-autoscale|\.secrets[\w-]*|\.antseed[\w-]*|\.claude[\w-]*|\.codex|\.aws|\.kube)\/|^\.docker\/config\.json$|^[^/]+$/;
 const FIXED = ['.netrc', '.git-credentials', '.config/gh/hosts.yml', '.codex/auth.json', '.hermes/auth.json'];
@@ -80,7 +88,9 @@ export function storeKind(rel) {
   const name = path.posix.basename(rel);
   if (NOT_STORE.test(name)) return null;
   const dirs = path.posix.dirname(rel).split('/');
-  if (!SECRET_DIR_REL.test(rel) && !dirs.some((d) => SECRET_DIR_NAME.test(d)) && !SECRETISH_FILE.test(name) && !JSON_STORE.test(name)) return null;
+  const secretDir = SECRET_DIR_REL.test(rel) || dirs.some((d) => SECRET_DIR_NAME.test(d));
+  if (!secretDir && NOT_STORE_CODE.test(name)) return null;
+  if (!secretDir && !SECRETISH_FILE.test(name) && !JSON_STORE.test(name)) return null;
   return CURATED_REL.test(rel) ? 'curated' : 'strict';
 }
 
