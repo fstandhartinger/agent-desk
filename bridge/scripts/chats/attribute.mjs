@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { scanSecretSources, storeEntries, isSecretEntry, WINDOW } from '../../src/secretValues.js';
 import { failedPaths } from './resettle.mjs';
+import { redact } from '../../src/redact.js';
 
 const ENV_SECRET_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|AUTH|COOKIE|FINGERPRINT|PRIVATE|SEED|MNEMONIC|DSN|WEBHOOK)/;
 const MAX_STORE_BYTES = 256 * 1024;
@@ -53,7 +54,7 @@ async function main() {
   const files = scanFile ? failedPaths(fs.readFileSync(scanFile, 'utf8')).map((r) => path.join(dir, r)) : [...walk(dir)];
   const rows = attribute(files, sourceWindows(home));
   console.log(JSON.stringify({ dir: path.resolve(dir), files: files.length, sources: rows.length }));
-  for (const [label, n] of rows) console.log(`${n}\t${label}`);
+  for (const [label, n] of rows) console.log(`${n}\t${redact(label) === label ? label : '<name hidden>'}`); // as scan.mjs
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();

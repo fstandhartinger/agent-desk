@@ -39,10 +39,12 @@ export function resettleFile(dir, rel) {
   const next = settle(base);
   if (next === text) return 'unchanged';
   const tmp = `${p}.resettle.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, next, { mode: 0o600 });
-  fs.chmodSync(tmp, 0o600);
-  fs.utimesSync(tmp, st.atime, st.mtime);
-  fs.renameSync(tmp, p);
+  try {
+    fs.writeFileSync(tmp, next, { mode: 0o600, flag: 'wx' }); // never through a planted file or symlink
+    fs.chmodSync(tmp, 0o600);
+    fs.utimesSync(tmp, st.atime, st.mtime);
+    fs.renameSync(tmp, p);
+  } catch (err) { try { fs.unlinkSync(tmp); } catch { /* not created */ } throw err; }
   return 'settled';
 }
 

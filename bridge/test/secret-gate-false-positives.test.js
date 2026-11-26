@@ -27,6 +27,9 @@ test('storeKind: code of any language and tokenizer vocabularies are no stores; 
     'wt/app/Secrets.kt', 'wt/app/KeychainSecrets.swift', 'wt/app/SecretPanel.xaml', 'wt/app/Secrets.csproj',
     'jevbench-private-counts/m/countenv/stage/hf/tokenizer.json', 'models/hf/tokenizer_config.json', 'models/hf/special_tokens_map.json',
     'models/hf/added_tokens.json']) assert.equal(storeKind(rel), null, rel);
+  // config-like languages stay stores, and inside the secret directories every name does (Claude review of PR #69)
+  assert.equal(storeKind('.config/nvim/lua/secrets.lua'), 'curated');
+  for (const rel of ['.ssh/deploy.pl', '.secrets/api.h', 'proj/private/db.m', '.ssh/Keys.cs']) assert.ok(storeKind(rel), rel);
   assert.equal(storeKind('.config/dev-secrets.env'), 'curated');
   assert.equal(storeKind('.bonsai-autoscale/config.json'), 'curated');
   for (const rel of ['wt/app/.env', 'wt/app/api.key', 'wt/app/secret-token.txt', 'wt/app/data/credentials.json', 'proj/certs/server.pem', 'proj/secrets.cfg'])
@@ -60,6 +63,7 @@ test('failedPaths: only relative mirror paths of FAIL lines; hidden names, dot f
 });
 
 test('resettle + scan: a day file rendered before a value joined the set fails the gate, is settled in place, then passes', () => {
+  write('.config/dev-secrets.env', `GITHUB_TOKEN=${TOKEN}\nRXNODE_SSH=${SSH}\n`); // self-contained (not only via the test above)
   resetSecretValues();
   const mirror = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-gate-mirror-'));
   try {
@@ -90,6 +94,8 @@ test('resettle + scan: a day file rendered before a value joined the set fails t
     assert.equal(resettleFile(mirror, 'sessions/jobs-x__ab12cd34__2026-11-01.md'), 'unchanged');
     fs.symlinkSync(day, path.join(mirror, 'sessions', 'link.md'));
     assert.equal(resettleFile(mirror, 'sessions/link.md'), 'refused', 'a symlink is never written through');
+    assert.equal(resettleFile(path.join(mirror, 'sessions'), '../sessions/jobs-x__ab12cd34__2026-11-01.md'), 'refused', 'nothing outside the dir');
+    assert.deepEqual(fs.readdirSync(path.join(mirror, 'sessions')).filter((f) => f.endsWith('.tmp')), [], 'no temp file left');
   } finally { fs.rmSync(mirror, { recursive: true, force: true }); }
 });
 
@@ -97,4 +103,5 @@ test('ops/desk-chats-push: settles once and gates the whole staged copy again; t
   const s = fs.readFileSync(path.join(CHATS, '..', '..', 'ops', 'desk-chats-push'), 'utf8');
   assert.match(s, /resettle\.mjs" "\$OUT" "\$SCANOUT"\n\s+rc=0; gate \|\| rc=\$\?/);
   assert.ok(s.indexOf('if [ "$rc" -ne 0 ]') < s.indexOf('rsync -a --delete --chmod'), 'no push before a passing gate');
+  assert.match(s, /--exclude '\*\.resettle\.\*\.tmp'/, 'a stray temp file never reaches the stage');
 });

@@ -16,15 +16,15 @@ node "$B/scripts/chats/mirror.mjs" --host sandy --out "$OUT"
 # larger than the scanner's size limit), gate the staged copy, push that same copy.
 STAGE=$HOME/.local/share/desk-chats-mirror/.push-stage-sandy
 SCANOUT=$HOME/.local/share/desk-chats-mirror/.scan-sandy.out   # counts and relative paths only (scan.mjs prints no text)
-gate() { rsync -a --delete --exclude .state.json "$OUT/" "$STAGE/"; local rc=0; node "$B/scripts/chats/scan.mjs" "$STAGE" >"$SCANOUT" || rc=$?; head -1 "$SCANOUT"; return $rc; }
+gate() { rsync -a --delete --exclude .state.json --exclude '*.resettle.*.tmp' "$OUT/" "$STAGE/"; local rc=0; node "$B/scripts/chats/scan.mjs" "$STAGE" >"$SCANOUT" || rc=$?; head -1 "$SCANOUT"; return $rc; }
 rc=0; gate || rc=$?
 if [ "$rc" -eq 3 ]; then
   # #86913: the secret value set grew after these day files were rendered (mirror.mjs re-renders a file only when its transcript
   # changes). Settle exactly the named files in the mirror, then gate the WHOLE staged copy again; the gate itself is unchanged.
-  echo "desk-chats-push: gate failed on $(grep -c '^FAIL ' "$SCANOUT") files; settling them and scanning again" >&2
+  echo "desk-chats-push: gate failed on $(grep -c '^FAIL ' "$SCANOUT" || true) files; settling them and scanning again" >&2
   node "$B/scripts/chats/resettle.mjs" "$OUT" "$SCANOUT"
   rc=0; gate || rc=$?
 fi
-if [ "$rc" -ne 0 ]; then grep '^FAIL ' "$SCANOUT" | head -200; exit "$rc"; fi
+if [ "$rc" -ne 0 ]; then awk '/^FAIL /{print; if (++n >= 200) exit}' "$SCANOUT" || true; exit "$rc"; fi
 rsync -a --delete --chmod=D700,F600 "$STAGE/" lechonk:desk-knowledge/chats-mirror/sandy/
 echo "desk-chats-push: pushed $(find "$STAGE/sessions" -type f | wc -l) day files"
