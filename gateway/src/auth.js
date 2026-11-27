@@ -211,6 +211,9 @@ export async function requestLoginLink(req, res, { hub }) {
   const next = safeNext(body.next);
   if (next === null) return sendJson(res, 400, { error: TEXT.badNext });
   if (!cfg.sessionSecret()) return sendJson(res, 503, { error: TEXT.loginNotConfigured });
+  if (hub.maintenanceFenced) {
+    return sendJson(res, 503, { error: TEXT.bridgeMaintenance }, { 'retry-after': '5' });
+  }
   const now = Date.now();
   while (linkRequests.length && now - linkRequests[0] >= LINK_REQUEST_WINDOWS.at(-1)[1]) linkRequests.shift();
   let wait = 0;

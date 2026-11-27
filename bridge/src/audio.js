@@ -17,6 +17,7 @@ const ROLES = new Set(['user', 'assistant']);
 const dir = () => process.env.DESK_AUDIO_DIR || path.join(HOME, 'desk-audio');
 const day = (ms = Date.now()) => new Date(ms).toISOString().slice(0, 10);
 const sessions = new Map(); // id -> {dir, bytes, parts: {user: [], assistant: []}}
+export const openSessionCount = () => sessions.size;
 
 function idOf(aid) {
   const id = String(aid ?? '').replace(/^a#/i, '').toLowerCase();

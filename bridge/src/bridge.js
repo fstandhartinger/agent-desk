@@ -147,6 +147,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
   };
   let request = null;
+  let requestTimer = null;
   let barrier = null;
   let drainTimer = null;
   let pending = 0;
@@ -164,18 +165,32 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     barrier = null;
   }
 
+  function clearRequest() {
+    clearTimeout(requestTimer);
+    request = null;
+    clearBarrier();
+  }
+
+  function cancelRequest(reason) {
+    send({ t: 'drain-cancel', request });
+    clearRequest();
+    log(reason);
+  }
+
+  function expireRequestAfter(ms) {
+    clearTimeout(requestTimer);
+    requestTimer = setTimeout(() => cancelRequest('maintenance request expired'), ms);
+    requestTimer.unref();
+  }
+
   function toggleDrain() {
-    if (sandy || ws?.readyState !== WebSocket.OPEN) return;
-    if (request) {
-      send({ t: 'drain-cancel', request });
-      request = null;
-      clearBarrier();
-      log('maintenance cancellation requested');
-    } else {
-      request = randomUUID();
-      send({ t: 'drain-request', request });
-      log('maintenance requested');
-    }
+    if (sandy) return;
+    if (request) return cancelRequest('maintenance cancellation requested');
+    if (ws?.readyState !== WebSocket.OPEN) return log('maintenance request skipped: gateway connection is offline');
+    request = randomUUID();
+    expireRequestAfter(120_000);
+    send({ t: 'drain-request', request });
+    log('maintenance requested');
   }
 
   function beginBarrier(id) {
@@ -211,14 +226,17 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     try { frame = JSON.parse(raw.toString()); } catch { log(`unreadable frame (${raw.length} bytes)`); return; }
     if (!frame || typeof frame !== 'object') return;
     if (frame.t === 'ping') send({ t: 'pong' });
-    else if (frame.t === 'req' && frame.id !== undefined) handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));
+    else if (frame.t === 'req' && frame.id !== undefined) {
+      if (barrier) send({ t: 'res', id: frame.id, ok: false, error: 'bridge maintenance barrier is active' });
+      else handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));
+    }
     else if (request && frame.t === 'drain-check' && frame.request === request && typeof frame.id === 'string') beginBarrier(frame.id);
-    else if (barrier && frame.t === 'drain-granted' && frame.id === barrier && Number.isSafeInteger(frame.deadline) && frame.deadline > Date.now() && frame.deadline < Date.now() + 120_000) {
+    else if (barrier && frame.t === 'drain-granted' && frame.id === barrier && Number.isSafeInteger(frame.deadline) && Number.isSafeInteger(frame.ttlMs) && frame.ttlMs > 0 && frame.ttlMs <= 60_000) {
       clearInterval(drainTimer);
-      log(`maintenance ready for managed restart (pid ${process.pid}, expires ${new Date(frame.deadline).toISOString()})`);
+      expireRequestAfter(frame.ttlMs);
+      log(`maintenance ready for managed restart (pid ${process.pid}, gateway deadline ${new Date(frame.deadline).toISOString()}, open recording buffers ${audio.openSessionCount()})`);
     } else if (request && frame.t === 'drain-cancelled' && frame.request === request) {
-      request = null;
-      clearBarrier();
+      clearRequest();
       log('maintenance cancelled or timed out');
     }
   }
@@ -259,7 +277,7 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     close() {
       closed = true;
       clearTimeout(retryTimer);
-      clearBarrier();
+      clearRequest();
       clearInterval(pingTimer);
       stopJobRefresh();
       stopNotesMirror();

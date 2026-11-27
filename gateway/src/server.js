@@ -81,7 +81,8 @@ function streamCanvas(req, res, url, bus, audience) {
 
 export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
   let activeClients = 0;
-  const hub = new BridgeHub({ clientsBusy: () => activeClients > 0 || [...(research?.runs.values() ?? [])].some((run) => run.status === 'running') });
+  const researchRunning = () => [...(research?.runs.values() ?? [])].filter((run) => run.status === 'running').length;
+  const hub = new BridgeHub({ clientsBusy: () => activeClients > 0 || researchRunning() > 0 });
 
   async function trackClientWork(work) {
     activeClients += 1;
@@ -146,7 +147,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     if (pathname === '/api/voices' && req.method === 'GET') return sendJson(res, 200, voiceCatalog());
     if (await artifacts.route(req, res, url, sid)) return;
     if (pathname === '/api/status') {
-      return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), bridgeMaintenance: hub.maintenance, bridgeMaintenanceDeadline: hub.maintenanceDeadline, providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });
+      return sendJson(res, 200, { ok: true, bridges: hub.statusAll(), bridgeMaintenance: hub.maintenance, bridgeMaintenanceDeadline: hub.maintenanceDeadline, bridgeMaintenanceBusy: { interactiveWork: activeClients, researchRuns: researchRunning() }, providers: providerSnapshot(), models: { text: cfg.textModel(), viz: cfg.vizModel() }, ...limits.snapshot() });
     }
     if (pathname === '/api/session-lookup' && req.method === 'GET') return sessionLookup(res, url, traces);
     if (pathname === '/api/canvas' && req.method === 'GET') return sendJson(res, 200, { canvases: canvasBus.latest(session.deviceHash) });
@@ -163,7 +164,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
       return sendJson(res, 200, { ok: true });
     }
     if (pathname === '/api/chat' && req.method === 'POST') {
-      if (hub.maintenance) return sendJson(res, 503, { error: TEXT.bridgeMaintenance }, { 'retry-after': '5' });
+      if (hub.maintenanceFenced) return sendJson(res, 503, { error: TEXT.bridgeMaintenance }, { 'retry-after': '5' });
       return trackClientWork(() => handleChat(req, res, { sid, ip, hub, limits, canvasBus, illustrator, artifacts, vision: devices.vision, briefing: devices.briefing, traces, research }));
     }
     if (pathname === '/api/handoff') return handleHandoff(req, res, { sid, ip, hub });
@@ -226,7 +227,7 @@ export function createApp({ deviceOptions = {}, traceOptions = {} } = {}) {
     const session = readSession(req);
     if (!session || !originOk(req) || !await devices.authorizeSession(session)) return reject(socket, 401, 'Unauthorized');
     const { sid } = session;
-    if (hub.maintenance) return reject(socket, 503, 'Service Unavailable');
+    if (hub.maintenanceFenced) return reject(socket, 503, 'Service Unavailable');
     const gate = limits.check(sid, 'voice');
     const spend = limits.check(sid, 'spend');
     if (!gate.ok || !spend.ok) return reject(socket, 429, 'Too Many Requests');

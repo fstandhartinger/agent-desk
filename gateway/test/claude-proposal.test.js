@@ -1,6 +1,8 @@
 // Critic round 1, P0-1: no model-callable tool may reach claude.start / claude.send. claude_task only proposes; Florian's
 // authenticated same-origin click (POST /api/claude/proposal {id}) starts or sends. Also P2-6: one card per title and turn.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { DESK_ORIGIN, completionStream, connectFakeBridge, fakeServer, login, readSse, setEnv, startGateway } from './helpers/env.js';
 import { Limits } from '../src/limits.js';
@@ -124,6 +126,25 @@ describe('P0-1 end to end: scripted model calls claude_task → card → click',
     assert.deepEqual(writes(), []);
     assert.equal((await click(cards[0].id)).status, 200);
     assert.deepEqual(writes().map((r) => [r.method, r.params]), [['claude.send', { sid: 'd20261028-bbbbbb', text: 'Mach weiter mit Schritt 2' }]]);
+  });
+
+  it('a Claude message blocked by maintenance can be sent once after admission resumes', async () => {
+    const { cards } = await propose({ prompt: 'Mach weiter mit Schritt 2', sessionId: 'd20261028-bbbbbb' });
+    const request = randomUUID();
+    const signal = AbortSignal.timeout(5000);
+    const frame = (data) => lechonk.ws.send(JSON.stringify(data));
+    frame({ t: 'hello', boot: randomUUID(), caps: ['claude.list', 'claude.send'] });
+    frame({ t: 'drain-request', request });
+    while (!gw.hub.maintenanceFenced) await delay(25, undefined, { signal });
+    const blocked = await click(cards[0].id);
+    assert.equal(blocked.status, 503);
+    assert.equal(blocked.headers.get('retry-after'), '5');
+    assert.deepEqual(writes(), []);
+
+    frame({ t: 'drain-cancel', request });
+    while (gw.hub.maintenance !== null) await delay(25, undefined, { signal });
+    assert.equal((await click(cards[0].id)).status, 200);
+    assert.deepEqual(writes().map((entry) => entry.method), ['claude.send']);
   });
 
   it('foreign origin, missing origin, no cookie and another session are refused; the proposal stays usable', async () => {

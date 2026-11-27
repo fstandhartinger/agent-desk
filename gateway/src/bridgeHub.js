@@ -6,6 +6,7 @@ const PING_MS = 20_000;
 const DEAD_AFTER_MS = 60_000;
 const DRAIN_WAIT_MS = 120_000;
 const RESTART_WINDOW_MS = 60_000;
+const IDLE_GRACE_MS = 1000;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const validId = (value) => typeof value === 'string' && UUID.test(value);
 
@@ -91,7 +92,8 @@ export class BridgeHub extends EventEmitter {
       conn.pending.clear();
     });
     ws.on('error', () => ws.terminate());
-    this.emit('bridge-up', host);
+    conn.deferUp = !this.#canRoute(host);
+    if (!conn.deferUp) this.emit('bridge-up', host);
   }
 
   #onMessage(conn, msg) {
@@ -100,9 +102,10 @@ export class BridgeHub extends EventEmitter {
         if (this.conns.get(conn.host) !== conn) break;
         conn.caps = Array.isArray(msg.caps) ? msg.caps : [];
         conn.boot = validId(msg.boot) ? msg.boot : null;
-        if (conn.host === 'lechonk' && this.drain?.phase === 'ready' && conn.boot && this.drain.boot !== conn.boot) this.#endDrain();
         conn.claude = msg.claude || conn.claude;
-        this.#seedSessions(conn);
+        conn.helloReceived = true;
+        if (conn.host === 'lechonk' && this.drain?.phase === 'ready' && conn.boot && this.drain.boot !== conn.boot) this.#endDrain();
+        this.#finishHello(conn);
         break;
       case 'drain-request':
         if (conn.host === 'lechonk' && conn.boot && validId(msg.request) && this.conns.get(conn.host) === conn) this.#beginDrain(conn, msg.request);
@@ -113,7 +116,7 @@ export class BridgeHub extends EventEmitter {
             msg.id !== drain.id || conn.pending.size || Date.now() >= drain.deadline) break;
         drain.phase = 'ready';
         drain.deadline = Date.now() + RESTART_WINDOW_MS;
-        send(conn.ws, { t: 'drain-granted', id: msg.id, deadline: drain.deadline });
+        send(conn.ws, { t: 'drain-granted', id: msg.id, deadline: drain.deadline, ttlMs: RESTART_WINDOW_MS });
         break;
       }
       case 'drain-cancel':
@@ -144,6 +147,10 @@ export class BridgeHub extends EventEmitter {
     return this.drain?.phase ?? null;
   }
 
+  get maintenanceFenced() {
+    return this.drain?.phase === 'frozen' || this.drain?.phase === 'ready';
+  }
+
   get maintenanceDeadline() {
     return this.drain?.deadline ?? null;
   }
@@ -153,6 +160,15 @@ export class BridgeHub extends EventEmitter {
     this.drain = null;
     clearInterval(timer);
     send(conn.ws, { t: 'drain-cancelled', request });
+    const current = this.conns.get('lechonk');
+    if (current) this.#finishHello(current);
+  }
+
+  #finishHello(conn) {
+    if (!conn.helloReceived || conn.initialized || !this.#canRoute(conn.host)) return;
+    conn.initialized = true;
+    this.#seedSessions(conn);
+    if (conn.deferUp) this.emit('bridge-up', conn.host);
   }
 
   #beginDrain(conn, request) {
@@ -163,16 +179,21 @@ export class BridgeHub extends EventEmitter {
     this.drain = drain;
     drain.timer = setInterval(() => {
       if (Date.now() >= drain.deadline || (drain.phase !== 'ready' && this.conns.get('lechonk') !== conn)) return this.#endDrain();
-      if (drain.phase === 'waiting' && !this.clientsBusy()) {
-        drain.phase = 'frozen';
-        send(conn.ws, { t: 'drain-check', id: drain.id, request });
+      if (drain.phase !== 'waiting') return;
+      if (this.clientsBusy() || conn.claude.running) {
+        drain.idleSince = null;
+        return;
       }
+      drain.idleSince ??= Date.now();
+      if (Date.now() - drain.idleSince < IDLE_GRACE_MS) return;
+      drain.phase = 'frozen';
+      send(conn.ws, { t: 'drain-check', id: drain.id, request });
     }, 250);
     drain.timer.unref();
   }
 
   #canRoute(host) {
-    return this.isConnected(host) && (host !== 'lechonk' || !this.drain || this.drain.phase === 'waiting');
+    return this.isConnected(host) && (host !== 'lechonk' || !this.maintenanceFenced);
   }
 
   /** The hello only carries a count; the session list tells which sessions that count is made of. */
@@ -186,7 +207,7 @@ export class BridgeHub extends EventEmitter {
   pick(method) {
     const hosts = routeOf(method);
     const live = hosts.filter((h) => this.#canRoute(h));
-    if (hosts[0] === 'lechonk' && this.drain && this.drain.phase !== 'waiting') {
+    if (hosts[0] === 'lechonk' && this.maintenanceFenced) {
       // Maintenance may route to an existing alternative only if it explicitly serves this method.
       return live.find((host) => this.conns.get(host).caps.includes(method)) ?? 'lechonk';
     }
@@ -211,7 +232,9 @@ export class BridgeHub extends EventEmitter {
   call(method, params = {}, { host, timeoutMs = methodTimeout(method) } = {}) {
     host ??= this.pick(method);
     const conn = this.conns.get(host);
-    if (host === 'lechonk' && this.drain && this.drain.phase !== 'waiting') return Promise.reject(new Error(TEXT.bridgeMaintenance));
+    if (host === 'lechonk' && this.maintenanceFenced) {
+      return Promise.reject(Object.assign(new Error(TEXT.bridgeMaintenance), { code: 'BRIDGE_MAINTENANCE', status: 503, retryAfter: 5 }));
+    }
     if (!conn || conn.ws.readyState !== 1) return Promise.reject(new Error(TEXT.bridgeOffline(host)));
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
@@ -239,7 +262,7 @@ export class BridgeHub extends EventEmitter {
   }
 
   status() {
-    return [...this.conns.values()].map(({ host, since, caps, claude, boot }) => ({ host, connected: true, since, caps, claude, ...(host === 'lechonk' && boot ? { maintenanceSupported: true } : {}) }));
+    return [...this.conns.values()].map(({ host, since, caps, claude, boot }) => ({ host, connected: true, since, caps, claude, ...(host === 'lechonk' && boot ? { maintenanceSupported: true, instance: boot.slice(0, 13) } : {}) }));
   }
 
   /** status() plus an offline row for every known bridge host that is not connected (/api/status shows both). */
