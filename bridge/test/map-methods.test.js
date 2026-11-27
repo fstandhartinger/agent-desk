@@ -248,3 +248,29 @@ test('map.* is registered on the LeChonk bridge only, and declared in METHOD_PAR
   }
   assert.deepEqual(Object.keys(METHOD_PARAMS['map.search']).sort(), ['limit', 'offset', 'path', 'query', 'since', 'source']);
 });
+
+test('map closes an old generation without another request and reopens the replacement', {
+  skip: skip || process.platform !== 'linux',
+}, async (t) => {
+  map.setMapDirForTests(fx.mapDir);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const file = path.join(fx.mapDir, 'index.sqlite');
+  const replacement = `${file}.next`;
+  const isOpen = (target) => fs.readdirSync('/proc/self/fd').some((fd) => {
+    try { return fs.readlinkSync(`/proc/self/fd/${fd}`) === target; } catch { return false; }
+  });
+
+  try {
+    assert.ok((await map.discover()).total > 0);
+    fs.copyFileSync(file, replacement);
+    fs.renameSync(replacement, file);
+    assert.equal(isOpen(`${file} (deleted)`), true);
+
+    t.mock.timers.tick(30_000);
+    assert.equal(isOpen(`${file} (deleted)`), false);
+    assert.ok((await map.discover()).total > 0);
+    assert.equal(isOpen(file), true);
+  } finally {
+    map.setMapDirForTests(fx.mapDir);
+  }
+});
