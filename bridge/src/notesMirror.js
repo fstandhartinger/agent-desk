@@ -115,8 +115,10 @@ export function syncNotes({ root = jobsRoot() } = {}) {
 }
 
 /** Starts the periodic refresh (the bridge calls this once); returns a stop function. */
-export function startNotesMirror({ log = () => {} } = {}) {
-  const tick = () => syncNotes().then((r) => log(`notes mirror: ${r.files} files, ${r.copied} copied, ${r.removed} removed in ${r.ms} ms`))
+export const notesSyncInProgress = () => Boolean(syncing);
+
+export function startNotesMirror({ log = () => {}, paused = () => false } = {}) {
+  const tick = () => !paused() && syncNotes().then((r) => log(`notes mirror: ${r.files} files, ${r.copied} copied, ${r.removed} removed in ${r.ms} ms`))
     .catch((err) => log(`notes mirror failed: ${err.message}`));
   const first = setTimeout(tick, 2000);
   const timer = setInterval(tick, REFRESH_MS);

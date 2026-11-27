@@ -113,7 +113,7 @@ export async function handleClaudeProposal(req, res, { sid, ip, hub, limits, sto
     if (!err.mayHaveRun) store.restore(p);
     audit({ action: 'claude.proposal.failed', ip, detail: `${p.id} ${short(err.message, 120)}` });
     const status = err.status === 429 ? 429 : bridgeError(err).status ?? 502;
-    return sendJson(res, status, { error: err.status === 429 ? err.message : TEXT.failed }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : undefined);
+    return sendJson(res, status, { error: err.status === 429 || err.code === 'BRIDGE_MAINTENANCE' ? err.message : TEXT.failed }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : undefined);
   }
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 import * as ctx from './ctx.js';
@@ -17,12 +18,12 @@ import { cardStartup } from './cardStartup.js';
 import { cardLink, cardRead, cardsRecent, cardSummaries, cardVoiceSummary, prefetchCardSummaries } from './notify.js';
 import { current as stateCurrent } from './state.js';
 import { jobStart } from './jobStart.js';
-import { queueLoginLink, resumeLoginQueue } from './loginQueue.js';
+import { loginDeliveryInProgress, queueLoginLink, resumeLoginQueue } from './loginQueue.js';
 import { knowledge } from './knowledge.js';
 import * as map from './map.js';
 import * as sandbox from './sandbox.js';
 import { recent as laptopRecent } from './laptopRecent.js';
-import { startNotesMirror } from './notesMirror.js';
+import { notesSyncInProgress, startNotesMirror } from './notesMirror.js';
 import { createClaude } from './claude.js';
 import { redact, redactDeep, redactDeepAsync } from './redact.js';
 import { secretValueCount, secretWindowCount, scanSecretSources, startSecretSourceScan } from './secretValues.js';
@@ -130,7 +131,11 @@ function withTimeout(promise, ms) {
 
 /** Dials the gateway, serves requests, reconnects forever. Returns {close()}. */
 export function startBridge({ url, token, host = 'lechonk' }) {
-  if (host === 'lechonk') void resumeLoginQueue().catch((err) => log(`login queue resume failed: ${err?.message ?? err}`));
+  const sandy = host === 'sandy';
+  const boot = randomUUID();
+  let recoveringLoginQueue = !sandy;
+  if (!sandy) void resumeLoginQueue().catch((err) => log(`login queue resume failed: ${err?.message ?? err}`))
+    .finally(() => { recoveringLoginQueue = false; });
   let ws = null;
   let closed = false;
   let attempt = 0;
@@ -141,24 +146,77 @@ export function startBridge({ url, token, host = 'lechonk' }) {
   const send = (frame) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
   };
-  const sandy = host === 'sandy';
+  let request = null;
+  let requestTimer = null;
+  let barrier = null;
+  let drainTimer = null;
+  let pending = 0;
+  const paused = () => Boolean(barrier);
   // Claude session events leave the bridge too: same redactDeep as every method result.
   const claude = sandy ? NO_CLAUDE : createClaude({ emit: (topic, data) => send({ t: 'evt', topic, data: redactDeep(data) }) });
   claude.restore();
   const stopJobRefresh = jobs.startJobIndexRefresh();
-  const stopNotesMirror = sandy ? () => {} : startNotesMirror({ log });
-  const stopAudioSweep = sandy ? () => {} : audio.startAudioSweep(log);
+  const stopNotesMirror = sandy ? () => {} : startNotesMirror({ log, paused });
+  const stopAudioSweep = sandy ? () => {} : audio.startAudioSweep(log, paused);
   const methods = buildMethods(claude, host);
+
+  function clearBarrier() {
+    clearInterval(drainTimer);
+    barrier = null;
+  }
+
+  function clearRequest() {
+    clearTimeout(requestTimer);
+    request = null;
+    clearBarrier();
+  }
+
+  function cancelRequest(reason) {
+    send({ t: 'drain-cancel', request });
+    clearRequest();
+    log(reason);
+  }
+
+  function expireRequestAfter(ms) {
+    clearTimeout(requestTimer);
+    requestTimer = setTimeout(() => cancelRequest('maintenance request expired'), ms);
+    requestTimer.unref();
+  }
+
+  function toggleDrain() {
+    if (sandy) return;
+    if (request) return cancelRequest('maintenance cancellation requested');
+    if (ws?.readyState !== WebSocket.OPEN) return log('maintenance request skipped: gateway connection is offline');
+    request = randomUUID();
+    expireRequestAfter(120_000);
+    send({ t: 'drain-request', request });
+    log('maintenance requested');
+  }
+
+  function beginBarrier(id) {
+    clearBarrier();
+    barrier = id;
+    drainTimer = setInterval(() => {
+      if (pending || claude.running() || recoveringLoginQueue || loginDeliveryInProgress() || notesSyncInProgress() || stopAudioSweep.busy()) return;
+      send({ t: 'drain-ready', id });
+    }, 250);
+  }
 
   async function handleReq(frame) {
     const { id, method, params } = frame;
     const fn = methods[method];
     if (!fn) return send({ t: 'res', id, ok: false, error: `unknown method ${String(method).slice(0, 60)}` });
+    pending += 1;
+    const operation = Promise.resolve().then(() => fn(params ?? {}));
     try {
-      const result = await withTimeout(Promise.resolve(fn(params ?? {})), METHOD_TIMEOUT_MS[method] ?? REQ_TIMEOUT_MS);
+      const result = await withTimeout(operation, METHOD_TIMEOUT_MS[method] ?? REQ_TIMEOUT_MS);
       send({ t: 'res', id, ok: true, result: await redactDeepAsync(result) });
     } catch (err) {
       send({ t: 'res', id, ok: false, error: redact(String(err?.message ?? err)).slice(0, 400) });
+    } finally {
+      // The answer can time out before the operation stops. Keep counting the actual work.
+      await Promise.allSettled([operation]);
+      pending -= 1;
     }
   }
 
@@ -168,7 +226,19 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     try { frame = JSON.parse(raw.toString()); } catch { log(`unreadable frame (${raw.length} bytes)`); return; }
     if (!frame || typeof frame !== 'object') return;
     if (frame.t === 'ping') send({ t: 'pong' });
-    else if (frame.t === 'req' && frame.id !== undefined) handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));
+    else if (frame.t === 'req' && frame.id !== undefined) {
+      if (barrier) send({ t: 'res', id: frame.id, ok: false, error: 'bridge maintenance barrier is active' });
+      else handleReq(frame).catch((err) => log(`req handler failed: ${err.message}`));
+    }
+    else if (request && frame.t === 'drain-check' && frame.request === request && typeof frame.id === 'string') beginBarrier(frame.id);
+    else if (barrier && frame.t === 'drain-granted' && frame.id === barrier && Number.isSafeInteger(frame.deadline) && Number.isSafeInteger(frame.ttlMs) && frame.ttlMs > 0 && frame.ttlMs <= 60_000) {
+      clearInterval(drainTimer);
+      expireRequestAfter(frame.ttlMs);
+      log(`maintenance ready for managed restart (pid ${process.pid}, gateway deadline ${new Date(frame.deadline).toISOString()}, open recording buffers ${audio.openSessionCount()})`);
+    } else if (request && frame.t === 'drain-cancelled' && frame.request === request) {
+      clearRequest();
+      log('maintenance cancelled or timed out');
+    }
   }
 
   function connect() {
@@ -180,7 +250,8 @@ export function startBridge({ url, token, host = 'lechonk' }) {
       attempt = 0;
       lastSeen = Date.now();
       log(`connected to ${target.origin} (${secretValueCount()} secret values, ${secretWindowCount()} window hashes guarded)`);
-      send({ t: 'hello', host, version: VERSION, caps: Object.keys(methods), claude: { running: claude.running(), max: claude.max } });
+      send({ t: 'hello', host, version: VERSION, boot, caps: Object.keys(methods), claude: { running: claude.running(), max: claude.max } });
+      if (request) send({ t: 'drain-request', request });
       pingTimer = setInterval(() => {
         if (Date.now() - lastSeen > DEAD_AFTER_MS) return ws.terminate();
         send({ t: 'ping' });
@@ -190,6 +261,8 @@ export function startBridge({ url, token, host = 'lechonk' }) {
     ws.on('error', (err) => log(`socket error: ${err.message}`));
     ws.on('close', () => {
       clearInterval(pingTimer);
+      if (barrier) log('maintenance readiness invalidated by disconnect');
+      clearBarrier();
       if (closed) return;
       const base = Math.min(30_000, 1000 * 2 ** attempt++);
       const delay = Math.round(base * (0.75 + Math.random() * 0.5));
@@ -200,9 +273,11 @@ export function startBridge({ url, token, host = 'lechonk' }) {
 
   connect();
   return {
+    toggleDrain,
     close() {
       closed = true;
       clearTimeout(retryTimer);
+      clearRequest();
       clearInterval(pingTimer);
       stopJobRefresh();
       stopNotesMirror();
@@ -241,6 +316,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     setInterval(warn, 6 * 3600_000).unref();
   }
   const bridge = startBridge({ url: DESK_URL, token: BRIDGE_TOKEN, host });
+  if (host === 'lechonk') process.on('SIGUSR2', bridge.toggleDrain);
   if (host === 'sandy') {
     const prefetch = () => { void prefetchCardSummaries().catch(() => { /* optional prefetch: missing cards are still read on demand */ }); };
     prefetch();

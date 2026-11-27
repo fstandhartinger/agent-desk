@@ -34,8 +34,8 @@ export function formatChatContext(input) {
   return lines.join('\n') || undefined;
 }
 
-/** The hub refused before anything left the gateway (no bridge connection): the call cannot have run. */
-export const notSent = (err, host) => err?.message === TEXT.bridgeOffline(host);
+/** The hub refused before anything left the gateway: the call cannot have run. */
+export const notSent = (err, host) => err?.code === 'BRIDGE_MAINTENANCE' || err?.message === TEXT.bridgeOffline(host);
 
 function refuse(message, retryAfter) {
   return Object.assign(new Error(message), { status: 429, retryAfter });

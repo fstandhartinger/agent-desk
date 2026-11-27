@@ -8,6 +8,7 @@ import { loginLink } from './notify.js';
 
 const directory = () => process.env.BRIDGE_LOGIN_QUEUE_DIR || path.join(os.homedir(), '.local', 'state', 'agent-desk', 'login-links');
 const running = new Set();
+export const loginDeliveryInProgress = () => running.size > 0;
 async function deliver(file) {
   if (running.has(file)) return;
   running.add(file);
@@ -45,6 +46,6 @@ export async function queueLoginLink({ url } = {}) {
   // Exclusive create coalesces a repeat even across bridge/gateway reconnects.
   try { await fs.writeFile(file, JSON.stringify(item), { mode: 0o600, flag: 'wx' }); }
   catch (err) { if (err.code !== 'EEXIST') throw new Error('login queue unavailable'); }
-  setImmediate(() => void deliver(file));
+  void deliver(file);
   return { queued: true };
 }

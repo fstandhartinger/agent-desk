@@ -1150,7 +1150,10 @@ ${opening}`);
       audit({ action: 'voice.stop', detail: `${provider} ${reason} ${billedSeconds}s`, cost_usd: estimateCost(provider, billedSeconds) });
     }
     const rec = recorder?.stop();
-    if (rec?.started) trace.event('audio.recording', rec);
+    if (rec?.started) {
+      deps.waitForRecording?.(recorder.settled());
+      trace.event('audio.recording', rec);
+    }
     trace.event('session.stop', { reason, seconds: billedSeconds, costUsd: estimateCost(provider, billedSeconds), mutedSeconds: Math.round(mutedMs / 1000), framesWhileMuted });
     trace.close();
     unregisterText?.();
