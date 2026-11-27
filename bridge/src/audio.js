@@ -123,12 +123,18 @@ export async function sweep(now = Date.now()) {
 }
 
 /** Hourly retention sweep; returns stop(). */
-export function startAudioSweep(log = () => {}) {
-  const tick = () => sweep().then((n) => n && log(`desk-audio: ${n} day folder(s) older than ${RETAIN_DAYS} days deleted`), () => {});
+export function startAudioSweep(log = () => {}, paused = () => false) {
+  let sweeping = false;
+  const tick = () => {
+    if (paused() || sweeping) return;
+    sweeping = true;
+    void sweep().then((n) => n && log(`desk-audio: ${n} day folder(s) older than ${RETAIN_DAYS} days deleted`), () => {})
+      .finally(() => { sweeping = false; });
+  };
   tick();
   const t = setInterval(tick, 3600_000);
   t.unref?.();
-  return () => clearInterval(t);
+  return Object.assign(() => clearInterval(t), { busy: () => sweeping });
 }
 
 /** Tests only. */

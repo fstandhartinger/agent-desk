@@ -38,6 +38,7 @@ export const TEXT = {
   transcribeShort: 'Die Aufnahme ist zu kurz',
   transcribeNoCredit: 'Der Diktat-Anbieter hat kein Guthaben mehr',
   transcribeFailed: 'Das Diktat hat nicht geklappt',
+  bridgeMaintenance: 'Die LeChonk-Verbindung wird kurz gewartet. Bitte versuche es gleich erneut.',
   bridgeOffline: (host) => `Die Werkstatt-Verbindung (${host}) ist offline`,
   bridgeLost: (host) => `Die Werkstatt-Verbindung (${host}) wurde getrennt`,
   bridgeSlow: 'Die Werkstatt hat nicht rechtzeitig geantwortet',
