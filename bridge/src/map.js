@@ -19,6 +19,7 @@ const MAX_QUERY_CHARS = 300;
 const SNIPPET_CHARS = 300;
 const HEADING_WEIGHT = 3.0;
 const BM25 = `bm25(chunks, 0, 0, ${HEADING_WEIGHT.toFixed(1)}, 1.0)`; // columns: doc_id, line, heading, body (the first two are unindexed)
+const HANDLE_LIFETIME_MS = 30_000;
 const PER_DOC = 2; // chunks of one document shown at most
 
 let mapDir = null;
@@ -28,10 +29,12 @@ const dirNow = () => mapDir ?? process.env.BRIDGE_MAP_DIR ?? MAP_DIR;
 
 // ---- database handle ---------------------------------------------------------------------------------------------------------
 let sqlite = null;
-let handle = null; // {file, mtimeMs, ino, db, stmts}
+let handle = null;
 
 function closeHandle() {
-  try { handle?.db.close(); } catch { /* close failed: the handle is gone (no handle to keep) */ }
+  if (!handle) return;
+  clearTimeout(handle.expiry);
+  handle.db.close();
   handle = null;
 }
 
@@ -47,9 +50,17 @@ async function database() {
   if (handle && handle.file === file && handle.mtimeMs === st.mtimeMs && handle.ino === st.ino) return handle;
   closeHandle();
   const db = new sqlite.DatabaseSync(file, { readOnly: true });
-  const version = Number(db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()?.value);
-  if (version !== SCHEMA_VERSION) { db.close(); throw new Error(`map schema version ${version} != ${SCHEMA_VERSION}; the next build rebuilds it`); }
-  handle = { file, mtimeMs: st.mtimeMs, ino: st.ino, db, stmts: new Map(), df: new Map() };
+  try {
+    const version = Number(db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()?.value);
+    if (version !== SCHEMA_VERSION) throw new Error(`map schema version ${version} != ${SCHEMA_VERSION}; the next build rebuilds it`);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
+  // Map methods finish their SQLite work synchronously after acquiring the handle. Bound its lifetime
+  // even when no later request arrives to notice that the builder replaced the file.
+  const expiry = setTimeout(closeHandle, HANDLE_LIFETIME_MS).unref();
+  handle = { file, mtimeMs: st.mtimeMs, ino: st.ino, db, stmts: new Map(), df: new Map(), expiry };
   return handle;
 }
 
